@@ -43,7 +43,7 @@ export class Connection {
     private receive: (view: RoomView) => void,
     private status: (status: string, latency?: number) => void,
     private error: (message: string) => void,
-    private acknowledged: () => void,
+    private acknowledged: (result?: CommandResult) => void,
   ) {}
   async connect(credentials: Credentials, resume = false) {
     clearTimeout(this.reconnectTimer);
@@ -87,7 +87,7 @@ export class Connection {
         if (!current()) return;
         if (this.pending?.id === result.id) {
           this.pending = undefined;
-          this.acknowledged();
+          this.acknowledged(result);
           if (!result.ok) this.error(result.error ?? '操作失败');
         }
       });

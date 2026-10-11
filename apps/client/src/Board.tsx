@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { countryFlag } from '../../../packages/content/src/index.ts';
 import type { GameView, MapDefinition } from '../../../packages/shared/src/index.ts';
 import { playerColor } from './game-ui.ts';
+import './board.css';
 const groupColors = ['#d5b67e', '#83a9b9', '#94b08b', '#af9abd'];
 const symbols = {
   start: '↗',
@@ -189,13 +190,15 @@ export function Board({
               title={`${t.name}${t.kind === 'property' ? ` · 地价 ${t.price}${owner ? ` · ${owner.name}所有 · ${property?.level}级` : ' · 待售'}` : ''}`}
             >
               <span className="tile-number">{String(t.index).padStart(2, '0')}</span>
-              <span className="tile-flag" aria-hidden="true">
-                {countryFlag(t.countryCode) || symbols[t.kind]}
+              <span className="tile-country-head">
+                <span className="tile-flag" aria-hidden="true">
+                  {countryFlag(t.countryCode) || symbols[t.kind]}
+                </span>
+                <b className="tile-name">{t.name}</b>
               </span>
-              <b className="tile-name">{t.name}</b>
               <span className="tile-price">
                 {t.kind === 'property'
-                  ? `¤ ${t.price}`
+                  ? `地价 ${t.price}`
                   : t.kind === 'start'
                     ? '+300'
                     : t.kind === 'transit'
@@ -225,7 +228,12 @@ export function Board({
               )}
               {occupants.length > 0 && (
                 <span className="pawn-stack">
-                  {occupants.map((p) => (
+                  {(occupants.length > 3
+                    ? [...occupants]
+                        .sort((a, b) => Number(b.id === active?.id) - Number(a.id === active?.id))
+                        .slice(0, 2)
+                    : occupants
+                  ).map((p) => (
                     <span
                       key={p.id}
                       className={`flat-pawn ${active?.id === p.id ? 'active' : ''}`}
@@ -238,6 +246,15 @@ export function Board({
                       {game!.players.findIndex((x) => x.id === p.id) + 1}
                     </span>
                   ))}
+                  {occupants.length > 3 && (
+                    <span
+                      className="pawn-more"
+                      title={occupants.map((p) => p.name).join('、')}
+                      aria-label={`共 ${occupants.length} 位玩家在${t.name}：${occupants.map((p) => p.name).join('、')}`}
+                    >
+                      +{occupants.length - 2}
+                    </span>
+                  )}
                 </span>
               )}
             </button>

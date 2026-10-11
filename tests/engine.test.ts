@@ -144,6 +144,9 @@ test('public asset breakdown and payable rents match authority calculations with
   assert.equal(v.properties.find((x) => x.tile === 2)!.rent, 0);
   assert.equal(p.cards, undefined);
   assert.equal(p.nextDice, undefined);
+  g.players[3].shield = 1;
+  assert.equal(viewFor(g, 'p3').properties.find((x) => x.tile === 1)!.payableRent, 0);
+  g.players[3].shield = 0;
   g.settings.mode = 'team';
   assert.equal(viewFor(g, 'p3').properties.find((x) => x.tile === 1)!.payableRent, 0);
 });

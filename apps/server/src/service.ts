@@ -278,6 +278,7 @@ export class GameService {
       locked: !!r.passwordHash,
       serverNow: this.now(),
       takeoverAfterMs: this.options.takeoverMs,
+      decisionTimeoutMs: this.options.decisionTimeoutMs,
     };
   }
   lobby(code: string, id: string, input: unknown) {

@@ -1,3 +1,4 @@
+import './style.css';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
@@ -8,6 +9,7 @@ import {
   mapById,
   characterById,
   cardById,
+  countryFlag,
 } from '../../../packages/content/src/index.ts';
 import {
   DEFAULT_SETTINGS,
@@ -20,9 +22,9 @@ import {
 } from '../../../packages/shared/src/index.ts';
 import { Board } from './Board.tsx';
 import { Assets } from './Assets.tsx';
+import { PlayerRoster, PlayerDetails } from './Players.tsx';
+import { money, cardTargetReason, validMoney } from './game-ui.ts';
 import { api, Connection, type Credentials } from './network.ts';
-import './style.css';
-const money = (n: number) => new Intl.NumberFormat('zh-CN').format(n);
 const phaseNames = {
   roll: '掷骰出发',
   manage: '经营时间',
@@ -46,10 +48,12 @@ function Modal({
   title,
   children,
   close,
+  closeLabel = '关闭',
 }: {
   title: string;
   children: ReactNode;
   close: () => void;
+  closeLabel?: string;
 }) {
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -58,13 +62,17 @@ function Modal({
     const listener = (e: KeyboardEvent) => {
       if (e.key === 'Escape') close();
       if (e.key === 'Tab') {
-        const items = root.current?.querySelectorAll<HTMLElement>(
-          'button,input,select,[tabindex="0"]',
-        );
+        const items = [
+          ...(root.current?.querySelectorAll<HTMLElement>('button,input,select,[tabindex="0"]') ??
+            []),
+        ].filter((item) => !item.hasAttribute('disabled') && item.getClientRects().length > 0);
         if (!items?.length) return;
         const first = items[0],
           last = items[items.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
+        if (
+          e.shiftKey &&
+          (document.activeElement === first || document.activeElement === root.current)
+        ) {
           e.preventDefault();
           last.focus();
         } else if (!e.shiftKey && document.activeElement === last) {
@@ -76,7 +84,7 @@ function Modal({
     document.addEventListener('keydown', listener);
     return () => {
       document.removeEventListener('keydown', listener);
-      previous?.focus();
+      if (previous?.isConnected) previous.focus();
     };
   }, []);
   return (
@@ -96,7 +104,7 @@ function Modal({
       >
         <header>
           <h2>{title}</h2>
-          <button className="icon-button" aria-label="关闭" onClick={close}>
+          <button className="icon-button" aria-label={closeLabel} onClick={close}>
             ×
           </button>
         </header>
@@ -130,6 +138,9 @@ function App() {
     [chat, setChat] = useState(''),
     [panel, setPanel] = useState('操作'),
     [sheetOpen, setSheetOpen] = useState(false);
+  const [inspectedPlayer, setInspectedPlayer] = useState<string | null>(null);
+  const automaticSheet = useRef(false),
+    pendingAction = useRef<GameAction | null>(null);
   const [follow, setFollow] = useState(localStorage.getItem('mp-follow') !== 'false'),
     [reduced, setReduced] = useState(localStorage.getItem('mp-reduced') === 'true'),
     [hints, setHints] = useState(localStorage.getItem('mp-hints') !== 'false'),
@@ -163,7 +174,13 @@ function App() {
         if (l !== undefined) setLatency(l);
       },
       notify,
-      () => setPending(false),
+      (result) => {
+        setPending(false);
+        if (result?.ok && ['playCard', 'tradeOffer'].includes(pendingAction.current?.type ?? '')) {
+          setDialog(null);
+        }
+        pendingAction.current = null;
+      },
     );
   useEffect(() => {
     const raw = localStorage.getItem('mp-seat');
@@ -194,6 +211,22 @@ function App() {
   useEffect(() => {
     if (room?.game?.auction) setBid(room.game.auction.highBid + 10);
   }, [room?.game?.auction?.highBid]);
+  useEffect(() => {
+    const game = room?.game;
+    if (!game || !window.matchMedia('(max-width: 800px)').matches) return;
+    if (
+      game.trade?.to === room.viewerId ||
+      (game.activeId === room.viewerId &&
+        ['purchase', 'path', 'auction', 'debt'].includes(game.phase))
+    ) {
+      setPanel('操作');
+      setSheetOpen(true);
+      automaticSheet.current = true;
+    } else if (automaticSheet.current) {
+      setSheetOpen(false);
+      automaticSheet.current = false;
+    }
+  }, [room?.game?.phase, room?.game?.activeId, room?.game?.trade?.id, room?.viewerId]);
   async function refresh() {
     try {
       setList(await api<RoomListing[]>('/api/rooms'));
@@ -242,6 +275,7 @@ function App() {
     const g = roomRef.current?.game;
     if (!g || pending || status !== '已同步') return;
     setPending(true);
+    pendingAction.current = action;
     connection.current!.command({ id: crypto.randomUUID(), revision: g.revision, action });
   }
   async function leave() {
@@ -283,7 +317,7 @@ function App() {
     setCardTarget('');
     setDialog('card');
   };
-  const cardTargets =
+  const cardCandidates =
     selectedCard?.target === 'player'
       ? g?.players
           .filter(
@@ -307,6 +341,47 @@ function App() {
             id: String(p.tile),
             name: `${map.tiles[p.tile].name} · ${p.level} 级${p.protectedUntil >= g.round ? ' · 保护中' : ''}`,
           }));
+  const cardTargets = (cardCandidates ?? []).map((target) => ({
+    ...target,
+    reason:
+      selectedCard && g
+        ? cardTargetReason(selectedCard, g, me, target.id) ||
+          (selectedCard.effect === 'remoteBuy' &&
+          (me?.cash ?? 0) < map.tiles[Number(target.id)]?.price
+            ? '现金不足'
+            : '')
+        : '',
+  }));
+  const chosenCardReason = cardTargets.find((t) => t.id === cardTarget)?.reason ?? '';
+  const bidReason = !validMoney(bid)
+    ? '请输入整数竞价金额'
+    : bid < (g?.auction?.highBid ?? 0) + 10
+      ? `至少出价 ${money((g?.auction?.highBid ?? 0) + 10)}`
+      : bid > (me?.cash ?? 0)
+        ? '竞价不能超过可用现金'
+        : '';
+  const tradeTarget = g?.players.find((p) => p.id === tradeTo);
+  const tradeReason =
+    !validMoney(giveCash) || !validMoney(wantCash)
+      ? '现金必须是非负整数'
+      : giveCash > (me?.cash ?? 0)
+        ? '给出的现金超过你的余额'
+        : wantCash > (tradeTarget?.cash ?? 0)
+          ? '希望获得的现金超过对方余额'
+          : '';
+  const inspected = g?.players.find((p) => p.id === inspectedPlayer);
+  const lobbyPlayers = room?.seats.filter((s) => !s.spectator) ?? [];
+  const startReason =
+    lobbyPlayers.length < 2
+      ? '需要至少两个席位'
+      : !lobbyPlayers.every((s) => s.ready && (s.connected || s.bot))
+        ? '请等待所有真人连接并准备'
+        : room?.settings.mode === 'team' &&
+            (![4, 6].includes(lobbyPlayers.length) ||
+              lobbyPlayers.filter((s) => s.team === 0).length !== lobbyPlayers.length / 2)
+          ? '团队需均分为 2v2 或 3v3，请补齐人数并调整队伍'
+          : '';
+  const quickAction = g?.actions.find((a) => a.primary);
   const invite = () => {
     const url = `${location.origin}/?room=${room!.code}`;
     void navigator.clipboard
@@ -636,19 +711,14 @@ function App() {
                     {room.isHost && (
                       <button
                         className="primary"
-                        disabled={
-                          disabled ||
-                          room.seats.filter((s) => !s.spectator).length < 2 ||
-                          !room.seats
-                            .filter((s) => !s.spectator)
-                            .every((s) => s.ready && (s.connected || s.bot))
-                        }
-                        title="需要至少两个席位，所有真人连接并准备"
+                        disabled={disabled || !!startReason}
+                        title={startReason || '所有席位已准备，可以出发'}
                         onClick={() => lobby('start')}
                       >
                         开始旅程 →
                       </button>
                     )}
+                    {room.isHost && startReason && <p className="hint">{startReason}</p>}
                   </div>
                 </section>
                 <aside className="paper room-settings">
@@ -732,7 +802,7 @@ function App() {
                       ? '团队需均分为两队，同队地产免租。'
                       : '到时按现金、存款和地产回收价值，扣除待付债务排名。'}
                     <br />
-                    断线 15 秒后机器人临时托管，回来即可接手。
+                    断线 {Math.ceil(room.takeoverAfterMs / 1000)} 秒后机器人临时托管，回来即可接手。
                   </div>
                   <Chat
                     room={room}
@@ -748,6 +818,14 @@ function App() {
               </div>
             ) : (
               <>
+                <PlayerRoster
+                  room={room}
+                  now={serverNow}
+                  inspect={(id) => {
+                    setSelectedTile(null);
+                    setInspectedPlayer(id);
+                  }}
+                />
                 <div className="game-layout">
                   <section className="board-wrap">
                     <div className="board-meta" data-revision={g.revision}>
@@ -768,9 +846,9 @@ function App() {
                         dialog === 'card' && selectedCard
                           ? selectedCard.target === 'player'
                             ? g.players
-                                .filter((p) => cardTargets?.some((t) => t.id === p.id))
+                                .filter((p) => cardTargets.some((t) => t.id === p.id && !t.reason))
                                 .map((p) => p.position)
-                            : (cardTargets ?? []).map((t) => Number(t.id))
+                            : cardTargets.filter((t) => !t.reason).map((t) => Number(t.id))
                           : (g.pendingPath?.choices ??
                             (selectedTile === null ? [] : [selectedTile]))
                       }
@@ -804,58 +882,14 @@ function App() {
                     </div>
                   </section>
                   <aside className="game-sidebar">
-                    <section className="paper player-panel">
-                      <div className="section-heading">
-                        <h2>旅行伙伴</h2>
-                        <small>净资产</small>
-                      </div>
-                      {g.players.map((p) => {
-                        const c = characterById(p.characterId),
-                          s = room.seats.find((s) => s.id === p.id);
-                        return (
-                          <div
-                            className={`player-row ${g.activeId === p.id ? 'active' : ''} ${p.bankrupt ? 'bankrupt' : ''}`}
-                            key={p.id}
-                          >
-                            <span className="avatar" style={{ background: c.color }}>
-                              {c.icon}
-                            </span>
-                            <div>
-                              <b>
-                                {p.name}
-                                {p.id === room.viewerId ? ' · 我' : ''}
-                              </b>
-                              <small>
-                                {p.bankrupt
-                                  ? '已破产 · 观战'
-                                  : s?.bot
-                                    ? '机器人'
-                                    : s?.connected
-                                      ? '在线'
-                                      : s &&
-                                          (s.takeover ||
-                                            (s.disconnectedAt !== null &&
-                                              serverNow - s.disconnectedAt >= room.takeoverAfterMs))
-                                        ? '断线 · 机器人托管'
-                                        : '断线 · 等待恢复'}
-                                {g.settings.mode === 'team'
-                                  ? ` · ${p.team === 0 ? '青' : '橙'}队`
-                                  : ''}
-                              </small>
-                            </div>
-                            <strong>
-                              {money(p.assets)}
-                              <small>{p.cardCount} 张牌</small>
-                            </strong>
-                          </div>
-                        );
-                      })}
-                    </section>
                     <section className={`paper action-panel ${sheetOpen ? 'sheet-open' : ''}`}>
                       <button
                         className="drawer-close icon-button"
                         aria-label="关闭详情抽屉"
-                        onClick={() => setSheetOpen(false)}
+                        onClick={() => {
+                          setSheetOpen(false);
+                          automaticSheet.current = false;
+                        }}
                       >
                         ×
                       </button>
@@ -897,9 +931,23 @@ function App() {
                                   : g.pendingPath
                                     ? '点选道路后继续走完剩余步数。'
                                     : myTurn
-                                      ? '操作由服务端确认，费用和结果会同步给所有玩家。'
+                                      ? g.phase === 'purchase'
+                                        ? `抵达${map.tiles[me!.position].name}，地价 ${money(map.tiles[me!.position].price)}。可直接购买或公开拍卖。`
+                                        : '先安排资产与卡牌，再完成本回合操作。'
                                       : '你可以浏览地产、手牌、图鉴，或与朋友聊天。'}
                             </p>
+                            {g.phase !== 'finished' && !g.trade && (
+                              <span className="decision-timer">
+                                本次决定还剩{' '}
+                                {Math.max(
+                                  0,
+                                  Math.ceil(
+                                    (room.decisionTimeoutMs - (serverNow - g.decisionAt)) / 1000,
+                                  ),
+                                )}{' '}
+                                秒 · 超时由系统继续推进
+                              </span>
+                            )}
                           </div>
                           {g.trade && (
                             <div className="tip-box">
@@ -928,7 +976,15 @@ function App() {
                                 <div key={i}>
                                   <button
                                     className={a.primary ? 'primary' : 'secondary'}
-                                    disabled={disabled}
+                                    disabled={
+                                      disabled ||
+                                      !!a.disabled ||
+                                      (a.action.type === 'bid' && !!bidReason)
+                                    }
+                                    title={
+                                      a.disabled ??
+                                      (a.action.type === 'bid' ? bidReason || a.hint : a.hint)
+                                    }
                                     onClick={() =>
                                       command(
                                         a.action.type === 'bid'
@@ -953,8 +1009,10 @@ function App() {
                                 max={me?.cash}
                                 step={10}
                                 value={bid}
+                                inputMode="numeric"
                                 onChange={(e) => setBid(Number(e.target.value))}
                               />
+                              {bidReason && <span className="field-error">{bidReason}</span>}
                             </label>
                           )}
                           {me && (
@@ -1003,6 +1061,15 @@ function App() {
                             <>
                               <div className="inline-actions">
                                 <button
+                                  onClick={() => {
+                                    setPanel('资产');
+                                    if (window.matchMedia('(max-width: 800px)').matches)
+                                      setSheetOpen(true);
+                                  }}
+                                >
+                                  ▤ 管理资产
+                                </button>
+                                <button
                                   disabled={!canManage || disabled}
                                   title={
                                     canManage
@@ -1014,6 +1081,10 @@ function App() {
                                       g.players.find((p) => p.id !== me.id && !p.bankrupt)?.id ??
                                         '',
                                     );
+                                    setGiveCash(0);
+                                    setWantCash(0);
+                                    setGiveTile('');
+                                    setWantTile('');
                                     setDialog('trade');
                                   }}
                                 >
@@ -1048,7 +1119,6 @@ function App() {
                                     <button
                                       key={`${id}-${i}`}
                                       className={`card-mini ${c.category}`}
-                                      disabled={!canManage || disabled}
                                       onClick={() => openCard(id)}
                                       title={`${c.description}；${!canManage ? '等待自己的掷骰或经营阶段' : '点击查看目标与效果'}`}
                                     >
@@ -1154,71 +1224,186 @@ function App() {
               <>
                 <div
                   className={`drawer-backdrop ${sheetOpen ? 'open' : ''}`}
-                  onClick={() => setSheetOpen(false)}
+                  onClick={() => {
+                    setSheetOpen(false);
+                    automaticSheet.current = false;
+                  }}
                 />
                 <nav className="mobile-nav" aria-label="对局快捷面板">
-                  {['操作', '资产', '动态'].map((p) => (
+                  <div className="mobile-primary-row">
+                    <span>
+                      {myTurn
+                        ? `轮到你 · ${phaseNames[g.phase]}`
+                        : g.trade?.to === me?.id
+                          ? '收到交易提案'
+                          : g.phase === 'finished'
+                            ? '对局已结算'
+                            : `等待${active?.name ?? '伙伴'}的回合`}
+                      <small>
+                        {me
+                          ? `现金 ${money(me.cash)} · 净资产 ${money(me.assets)}`
+                          : '观战中 · 查看公开资产'}
+                      </small>
+                    </span>
                     <button
-                      key={p}
+                      className="primary"
+                      disabled={disabled}
+                      aria-label={`快捷${quickAction && ['roll', 'buy', 'end'].includes(quickAction.action.type) ? quickAction.label : '查看操作'}`}
                       onClick={() => {
-                        setPanel(p);
-                        setSheetOpen(true);
+                        if (quickAction && ['roll', 'buy', 'end'].includes(quickAction.action.type))
+                          command(quickAction.action);
+                        else {
+                          setPanel('操作');
+                          setSheetOpen(true);
+                          automaticSheet.current = false;
+                        }
                       }}
                     >
-                      打开{p}
+                      {quickAction && ['roll', 'buy', 'end'].includes(quickAction.action.type)
+                        ? quickAction.label
+                        : '查看操作'}
                     </button>
-                  ))}
+                  </div>
+                  <div className="mobile-panel-links">
+                    {['操作', '资产', '动态'].map((p) => (
+                      <button
+                        key={p}
+                        aria-expanded={sheetOpen && panel === p}
+                        onClick={() => {
+                          setPanel(p);
+                          setSheetOpen(true);
+                          automaticSheet.current = false;
+                        }}
+                      >
+                        打开{p}
+                      </button>
+                    ))}
+                  </div>
                 </nav>
               </>
             )}
           </main>
         )}
       </div>
+      {inspected && g && (
+        <Modal
+          title={`${inspected.name}的资产`}
+          closeLabel="关闭玩家资料"
+          close={() => setInspectedPlayer(null)}
+        >
+          <PlayerDetails
+            player={inspected}
+            game={g}
+            map={map}
+            select={(index) => {
+              setInspectedPlayer(null);
+              setSelectedTile(index);
+            }}
+          />
+          {inspected.id === me?.id && (
+            <button
+              className="secondary full"
+              onClick={() => {
+                setInspectedPlayer(null);
+                setPanel('资产');
+                if (window.matchMedia('(max-width: 800px)').matches) setSheetOpen(true);
+              }}
+            >
+              管理我的资产
+            </button>
+          )}
+          {inspected.id !== me?.id && canManage && !inspected.bankrupt && (
+            <button
+              className="primary full"
+              onClick={() => {
+                setInspectedPlayer(null);
+                setTradeTo(inspected.id);
+                setGiveCash(0);
+                setWantCash(0);
+                setGiveTile('');
+                setWantTile('');
+                setDialog('trade');
+              }}
+            >
+              与这位玩家交易
+            </button>
+          )}
+        </Modal>
+      )}
       {selected && (
-        <div className="tile-detail paper" role="dialog" aria-label="地点详情">
-          <button
-            className="icon-button"
-            aria-label="关闭地点详情"
-            onClick={() => setSelectedTile(null)}
-          >
-            ×
-          </button>
-          <div className="eyebrow">
-            地点 {selected.index} / {kindNames[selected.kind]}
+        <Modal title="地点详情" closeLabel="关闭地点详情" close={() => setSelectedTile(null)}>
+          <div className="country-detail-heading">
+            <span>{countryFlag(selected.countryCode) || '✦'}</span>
+            <div>
+              <small>
+                路线 {String(selected.index).padStart(2, '0')} · {kindNames[selected.kind]}
+              </small>
+              <h3>{selected.name}</h3>
+            </div>
           </div>
-          <h2>{selected.name}</h2>
           {selected.kind === 'property' ? (
             <>
-              <div className="detail-stats">
-                <span>
-                  购买<b>{selected.price}</b>
-                </span>
-                <span>
-                  基础租金<b>{selected.rent}</b>
-                </span>
-                <span>
-                  建设<b>{selected.buildCost}</b>
-                </span>
+              <div className="finance-summary">
+                <div>
+                  <span>购买价格</span>
+                  <strong>{money(selected.price)}</strong>
+                </div>
+                <div>
+                  <span>{owner ? '当前租金' : '基础租金'}</span>
+                  <strong>{money(property?.rent ?? selected.rent)}</strong>
+                </div>
+                <div>
+                  <span>建设费用</span>
+                  <strong>{money(property?.upgradeCost ?? selected.buildCost)}</strong>
+                </div>
+                <div>
+                  <span>抵押可得</span>
+                  <strong>{money(Math.floor(selected.price / 2))}</strong>
+                </div>
               </div>
-              <p>
+              <p className="country-owner-description">
                 {owner
-                  ? `${owner.name}所有 · ${property?.level} 级${property?.mortgaged ? ' · 已抵押，不收租' : ''}`
-                  : '待售地产 · 落在这里可以购买或拍卖'}
+                  ? `${owner.name}所有 · ${property?.level} 级建筑${property?.mortgaged ? ' · 已抵押，不收租' : ''}`
+                  : '待售国家地产 · 抵达后可以购买或参与公开拍卖'}
               </p>
-              <small>
-                建筑租金倍率：1 / 2.5 / 5 / 9；同街区全占 +30%。角色、卡牌和护盾也会影响实际租金。
-              </small>
+              {owner && me && (
+                <p className="hint">
+                  按当前状态，抵达时预计支付租金 {money(property?.payableRent ?? 0)}
+                  。同队、自己的地产与租金护盾可免租；途中资产与卡牌变化会影响结算。
+                </p>
+              )}
+              <p className="hint">
+                同色国家组成地产组，独占一组租金 +30%。建筑 0–3 级的租金倍率为 1 / 2.5 / 5 /
+                9；地产及建筑按回收价值计入净资产。
+              </p>
+              {owner?.id === me?.id && (
+                <button
+                  className="secondary full"
+                  onClick={() => {
+                    setSelectedTile(null);
+                    setPanel('资产');
+                    if (window.matchMedia('(max-width: 800px)').matches) setSheetOpen(true);
+                  }}
+                >
+                  管理这处地产
+                </button>
+              )}
             </>
           ) : (
             <p>{kindNames[selected.kind]}</p>
           )}
-          {map.id === 'ancient' && [9, 23].includes(selected.index) && (
-            <p>偶数轮机关开启，可以跨洲；奇数轮沿环线道路前进。</p>
+          {map.mechanic === 'gates' && [9, 23].includes(selected.index) && (
+            <p className="tip-box">
+              商路在偶数轮开放。当前
+              {(g?.round ?? 1) % 2 === 0 ? '开放，可选跨洲快线' : '关闭，沿环线前进'}。
+            </p>
           )}
           {selected.exits.length > 1 && (
-            <p>岔路：{selected.exits.map((i) => map.tiles[i].name).join(' / ')}</p>
+            <p className="tip-box">
+              抵达岔路时选择：{selected.exits.map((i) => map.tiles[i].name).join(' / ')}。
+            </p>
           )}
-        </div>
+        </Modal>
       )}
       {dialog && (dialog === 'create' || dialog === 'join') && (
         <Modal
@@ -1331,8 +1516,9 @@ function App() {
               <select value={cardTarget} onChange={(e) => setCardTarget(e.target.value)}>
                 <option value="">请选择高亮范围内的目标</option>
                 {cardTargets?.map((t) => (
-                  <option value={t.id} key={t.id}>
+                  <option value={t.id} key={t.id} disabled={!!t.reason}>
                     {t.name}
+                    {t.reason ? ` · ${t.reason}` : ''}
                   </option>
                 ))}
               </select>
@@ -1353,11 +1539,25 @@ function App() {
               ? '远程购买会额外扣除目标地产的完整地价。'
               : selectedCard.effect === 'move'
                 ? '移动后正常处理落点，可能触发租金、税费或岔路。'
-                : '服务端会再次检查目标、资金和卡牌时机。'}
+                : '请选择有效目标；使用后消耗这张卡牌。'}
           </p>
+          {(!canManage ||
+            chosenCardReason ||
+            (selectedCard.target !== 'self' && !cardTargets.some((t) => !t.reason))) && (
+            <p className="field-error">
+              {!canManage
+                ? '等待自己的掷骰或经营阶段使用；现在可以查看卡牌效果。'
+                : chosenCardReason || '当前没有可用目标，请保留到合适的时机。'}
+            </p>
+          )}
           <button
             className="primary full"
-            disabled={disabled || !canManage || (selectedCard.target !== 'self' && !cardTarget)}
+            disabled={
+              disabled ||
+              !canManage ||
+              !!chosenCardReason ||
+              (selectedCard.target !== 'self' && !cardTarget)
+            }
             onClick={() => {
               command({
                 type: 'playCard',
@@ -1369,9 +1569,6 @@ function App() {
                     : { tile: Number(cardTarget) }),
                 ...(selectedCard.effect === 'dice' ? { value: diceValue } : {}),
               });
-              if (cardTarget && selectedCard.target !== 'player')
-                setSelectedTile(Number(cardTarget));
-              setDialog(null);
             }}
           >
             确认使用
@@ -1405,6 +1602,8 @@ function App() {
                 现金
                 <input
                   type="number"
+                  inputMode="numeric"
+                  step={1}
                   min={0}
                   max={me.cash}
                   value={giveCash}
@@ -1431,6 +1630,8 @@ function App() {
                 现金
                 <input
                   type="number"
+                  inputMode="numeric"
+                  step={1}
                   min={0}
                   value={wantCash}
                   onChange={(e) => setWantCash(Number(e.target.value))}
@@ -1460,9 +1661,11 @@ function App() {
             disabled={
               disabled ||
               !canManage ||
+              !!tradeReason ||
               !tradeTo ||
               (giveCash + wantCash === 0 && !giveTile && !wantTile)
             }
+            title={tradeReason || '双方确认后同时交换'}
             onClick={() => {
               command({
                 type: 'tradeOffer',
@@ -1472,11 +1675,11 @@ function App() {
                 giveTile: giveTile === '' ? null : Number(giveTile),
                 wantTile: wantTile === '' ? null : Number(wantTile),
               });
-              setDialog(null);
             }}
           >
             发出提案
           </button>
+          {tradeReason && <p className="field-error">{tradeReason}</p>}
         </Modal>
       )}
       {dialog === 'shop' && (
@@ -1524,7 +1727,7 @@ function App() {
               <h3>01 / 出发与经营</h3>
               <p>
                 每回合先用卡牌或天赋，再掷两颗骰子。处理落点后，可以升级、抵押、交易，再结束回合。岔路由当前玩家选择。超过
-                45 秒未决定，会执行默认操作。
+                {Math.ceil((room?.decisionTimeoutMs ?? 45000) / 1000)} 秒未决定，会执行默认操作。
               </p>
               <h3>02 / 国家地产与经济</h3>
               <p>

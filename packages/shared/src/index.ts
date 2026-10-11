@@ -242,6 +242,7 @@ export interface RoomView {
   locked: boolean;
   serverNow: number;
   takeoverAfterMs: number;
+  decisionTimeoutMs: number;
 }
 export interface RoomListing {
   code: string;

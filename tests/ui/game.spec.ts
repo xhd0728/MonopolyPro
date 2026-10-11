@@ -6,11 +6,11 @@ async function accepted(page: Page, button: Locator) {
   await button.click();
   await expect(board).not.toHaveAttribute('data-revision', revision!);
 }
-async function create(page: Page, name: string) {
+async function create(page: Page, name: string, seats = 2) {
   await page.goto('/');
   await page.getByRole('button', { name: '创建朋友房间' }).click();
   await page.getByLabel('游客昵称').fill(name);
-  await page.getByLabel('席位上限').selectOption('2');
+  await page.getByLabel('席位上限').selectOption(String(seats));
   await page.getByRole('button', { name: '创建并进入' }).click();
   await expect(page.getByRole('heading', { name: '准备出发' })).toBeVisible();
   return new URL(page.url()).searchParams.get('room')!;
@@ -82,12 +82,27 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
       ? host
       : guest,
     other = current === host ? guest : host;
+  await current.locator('.player-card[data-self="true"]').click();
+  const financials = await current.getByLabel('资产明细').locator('strong').allTextContents();
+  const [net, cash, savings, property, debt] = financials.map((v) => Number(v.replaceAll(',', '')));
+  expect(net).toBe(cash + savings + property - debt);
+  expect(await current.locator('.public-property-list button').count()).toBeGreaterThan(0);
+  await current.screenshot({ path: 'artifacts/ui/player-assets.png', fullPage: true });
+  await current.getByRole('button', { name: '关闭玩家资料' }).click();
   await current.getByRole('button', { name: '发起交易' }).click();
   await current
     .getByRole('dialog', { name: '提出一笔交易' })
     .getByLabel('现金', { exact: true })
     .first()
     .fill('50');
+  const cashInput = current
+    .getByRole('dialog', { name: '提出一笔交易' })
+    .getByLabel('现金', { exact: true })
+    .first();
+  await cashInput.fill('-1');
+  await expect(current.getByRole('button', { name: '发出提案' })).toBeDisabled();
+  await expect(current.getByText('现金必须是非负整数', { exact: true })).toBeVisible();
+  await cashInput.fill('50');
   await current.getByRole('button', { name: '发出提案' }).click();
   await expect(other.getByRole('button', { name: '接受交易' })).toBeVisible();
   await other.getByRole('button', { name: '接受交易' }).click();
@@ -97,13 +112,17 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
   await host.getByRole('button', { name: '操作', exact: true }).click();
   await host.reload();
   await expect(host.locator('.connection')).toContainText('已同步');
-  await expect(host.locator('.player-panel')).toContainText('小筑 · 我');
+  await expect(host.getByRole('button', { name: /查看1号玩家小筑的资产/ })).toContainText('我');
   await b.setOffline(true);
   await expect(guest.locator('.connection')).toContainText(/重连|恢复/, { timeout: 15000 });
   await expect(host.locator('.player-panel')).toContainText('机器人托管', { timeout: 15000 });
+  await guest.getByRole('button', { name: '离开房间', exact: true }).click();
+  await expect(guest.getByRole('button', { name: '确认退出经营' })).toBeDisabled();
+  expect(await guest.evaluate(() => !!localStorage.getItem('mp-seat'))).toBe(true);
+  await guest.getByRole('button', { name: '继续旅程', exact: true }).click();
   await b.setOffline(false);
   await expect(guest.locator('.connection')).toContainText('已同步', { timeout: 20000 });
-  await expect(guest.locator('.player-panel')).toContainText('飞飞 · 我');
+  await expect(guest.getByRole('button', { name: /查看2号玩家飞飞的资产/ })).toContainText('我');
   await guest.getByRole('button', { name: '打开资产', exact: true }).click();
   await expect(guest.locator('.sheet-open')).toBeVisible();
   await guest.getByRole('button', { name: '关闭详情抽屉' }).click();
@@ -177,6 +196,9 @@ test('mobile country express map: real fork selection and auction input advance 
       if (!auction) {
         await accepted(page, page.getByRole('button', { name: /^进入拍卖/ }));
         await expect(page.getByLabel('竞价金额')).toBeVisible();
+        await page.getByLabel('竞价金额').fill('999999');
+        await expect(page.getByRole('button', { name: /^出价/ })).toBeDisabled();
+        await expect(page.getByText('竞价不能超过可用现金')).toBeVisible();
         await page.getByLabel('竞价金额').fill('100');
         await accepted(page, page.getByRole('button', { name: /^出价/ }));
         await expect(page.getByRole('button', { name: /^退出竞拍/ })).toBeEnabled();
@@ -192,5 +214,64 @@ test('mobile country express map: real fork selection and auction input advance 
   }
   expect(fork).toBe(true);
   expect(auction).toBe(true);
-  await page.screenshot({ path: 'artifacts/ui/mobile-neon.png', fullPage: true });
+  await page.screenshot({ path: 'artifacts/ui/mobile-express.png', fullPage: true });
+});
+test('six player finances remain readable on desktop and mobile; a second window cannot control the old seat', async ({
+  page,
+  context,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const code = await create(page, '资产玩家', 6);
+  for (let i = 0; i < 5; i++) {
+    await page.getByRole('button', { name: '添加机器人' }).first().click();
+    await expect(page.locator('.seat')).toHaveCount(i + 2);
+  }
+  await page.getByRole('button', { name: '我准备好了' }).click();
+  await page.getByRole('button', { name: '开始旅程' }).click();
+  await expect(page.locator('.player-card')).toHaveCount(6);
+  await expect(page.locator('.country-tile.property').first()).toBeVisible();
+  await page.screenshot({ path: 'artifacts/ui/desktop-six-players.png', fullPage: true });
+  const clipped = await page
+    .locator('.country-tile')
+    .evaluateAll((tiles) =>
+      tiles
+        .filter((t) => t.scrollHeight > t.clientHeight + 1)
+        .map((t) => t.getAttribute('aria-label')),
+    );
+  expect(clipped).toEqual([]);
+  for (const width of [390, 360]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(page.getByRole('button', { name: '快捷掷骰出发' })).toBeVisible();
+    await page.getByRole('button', { name: /查看6号玩家/ }).click();
+    await expect(page.getByRole('dialog', { name: 'AI · 6的资产' })).toContainText('地产回收价值');
+    await expect(page.getByLabel('资产明细').locator('strong').first()).toHaveText('3,000');
+    await page.keyboard.press('Escape');
+    const layout = await page.evaluate(() => ({
+      body: document.documentElement.scrollWidth,
+      width: innerWidth,
+      baseFont: parseFloat(getComputedStyle(document.documentElement).fontSize),
+    }));
+    expect(layout.body).toBeLessThanOrEqual(layout.width + 1);
+    expect(layout.baseFont).toBeGreaterThanOrEqual(15);
+  }
+  await page.getByRole('button', { name: /查看1号玩家资产玩家的资产/ }).click();
+  await page.getByRole('button', { name: '管理我的资产' }).click();
+  await expect(page.getByLabel('存取金额')).toBeVisible();
+  await page.getByLabel('存取金额').fill('-1');
+  await expect(page.getByRole('button', { name: '存入银行', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '取出存款', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: '关闭详情抽屉' }).click();
+  await page.screenshot({ path: 'artifacts/ui/mobile-six-players.png', fullPage: true });
+  const replacement = await context.newPage();
+  await replacement.goto(`/?room=${code}`);
+  await expect(replacement.locator('.connection')).toContainText('已同步');
+  await expect(page.locator('.connection')).toContainText('席位已在其他窗口恢复');
+  await expect(page.getByRole('button', { name: '快捷掷骰出发' })).toBeDisabled();
+  await replacement.getByRole('button', { name: '掷骰出发', exact: true }).click();
+  await expect(replacement.locator('.board-meta')).not.toHaveAttribute('data-revision', '0');
+  await expect(page.locator('.connection')).toContainText('席位已在其他窗口恢复');
+  expect(errors).toEqual([]);
+  await replacement.close();
 });

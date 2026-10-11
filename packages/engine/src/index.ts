@@ -1076,10 +1076,15 @@ export function viewFor(g: GameState, viewerId: string | null): GameView {
         payableRent:
           owner &&
           viewer &&
-          (owner.id === viewer.id || (g.settings.mode === 'team' && owner.team === viewer.team))
+          (owner.id === viewer.id ||
+            (g.settings.mode === 'team' && owner.team === viewer.team) ||
+            viewer.shield > 0)
             ? 0
             : rentOf(g, property, viewer),
-        upgradeCost: owner ? buildCost(g, owner, property) : tileAt(g, property.tile).buildCost,
+        upgradeCost:
+          owner || viewer
+            ? buildCost(g, owner ?? viewer!, property)
+            : tileAt(g, property.tile).buildCost,
       };
     }),
     players: players.map((p) => {
