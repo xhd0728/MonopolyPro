@@ -45,6 +45,8 @@ export function Board({
     camera.position.set(12, 15, 12);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableRotate = false;
+    controls.touches.ONE = T.TOUCH.PAN;
+    controls.touches.TWO = T.TOUCH.DOLLY_PAN;
     controls.enableDamping = true;
     controls.maxZoom = 2.3;
     controls.minZoom = 0.6;
@@ -257,10 +259,12 @@ export function Board({
         h = el.clientHeight;
       renderer.setSize(w, h);
       const aspect = w / h;
-      camera.left = -6.9 * aspect;
-      camera.right = 6.9 * aspect;
-      camera.top = 6.9;
-      camera.bottom = -6.9;
+      const halfWidth = Math.max(7.6, 6.9 * aspect),
+        halfHeight = halfWidth / aspect;
+      camera.left = -halfWidth;
+      camera.right = halfWidth;
+      camera.top = halfHeight;
+      camera.bottom = -halfHeight;
       camera.updateProjectionMatrix();
     };
     const observer = new ResizeObserver(resize);
@@ -325,6 +329,7 @@ export function Board({
             );
           pawn.position.lerp(dest, reduced ? 1 : Math.min(1, dt * 5));
         }
+        if (!follow) oldActive = '';
         const marker = `${g.activeId}:${g.players.find((p) => p.id === g.activeId)?.position}`;
         if (follow && marker !== oldActive) {
           const p = g.players.find((p) => p.id === g.activeId);
@@ -336,9 +341,10 @@ export function Board({
         }
         for (const prop of g.properties) {
           const sig = `${prop.owner}-${prop.level}-${prop.mortgaged}`;
+          const b = buildings[prop.tile];
+          b.scale.y = reduced ? 1 : T.MathUtils.lerp(b.scale.y, 1, Math.min(1, dt * 8));
           if (signatures.get(prop.tile) === sig) continue;
           signatures.set(prop.tile, sig);
-          const b = buildings[prop.tile];
           for (const child of [...b.children]) {
             b.remove(child);
             if (child instanceof T.Mesh) {
@@ -353,6 +359,7 @@ export function Board({
             box(0, 0.2 + h / 2, 0, 0.48, h, 0.43, prop.mortgaged ? '#a5aaa6' : c, b);
             box(0, 0.23 + h, 0, 0.56, 0.09, 0.5, '#f9e4bd', b);
             if (prop.level > 1) box(0, 0.33 + h, 0, 0.25, 0.18, 0.24, c, b);
+            b.scale.y = reduced ? 1 : 0.15;
           }
         }
       }
