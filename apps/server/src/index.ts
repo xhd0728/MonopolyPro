@@ -269,6 +269,8 @@ async function shutdown() {
 process.on('SIGTERM', () => void shutdown());
 process.on('SIGINT', () => void shutdown());
 await gameServer.listen(port, host);
+for (const record of store.all())
+  if (record.game && record.game.phase !== 'finished') await ensureRoom(record.code);
 console.log(
   JSON.stringify({
     level: 'info',

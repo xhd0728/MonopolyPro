@@ -120,3 +120,20 @@ test('restart restores trade, auction and path decisions with resume credentials
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('full spectator gallery does not block remaining player seats', () => {
+  const store = new Store(':memory:');
+  try {
+    const service = new GameService(store),
+      c = service.create({ name: '甲' });
+    for (let i = 0; i < 20; i++) service.join(c.code, { name: `观众${i}`, spectator: true });
+    assert.throws(() => service.join(c.code, { name: '观众21', spectator: true }));
+    const human = service.join(c.code, { name: '乙' });
+    assert.equal(
+      service.view(c.code, human.seatId).seats.find((s) => s.id === human.seatId)?.spectator,
+      false,
+    );
+  } finally {
+    store.close();
+  }
+});

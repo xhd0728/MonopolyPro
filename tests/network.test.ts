@@ -169,6 +169,25 @@ test('real sockets: 2/4/6 seats, spectator privacy, concurrency, duplicate, stal
         await until(() => ack.length > 0);
         assert.deepEqual(ack[0], acks[0]);
         assert.equal(resumed.view.game!.revision, revision);
+        await f.stop(true);
+        await f.start();
+        await sleep(600);
+        const unattended = await f.connect(
+          await f.api(`/api/rooms/${c.code}/resume`, { token: c.token }),
+        );
+        assert.ok(
+          unattended.view.game!.revision > revision,
+          'restored rooms should progress before any human reconnects',
+        );
+      }
+      if (count === 4) {
+        await first.room.leave();
+        await until(() => players[1].view.isHost);
+        const restored = await f.connect(
+          await f.api(`/api/rooms/${c.code}/resume`, { token: c.token }),
+        );
+        assert.equal(restored.view.viewerId, c.seatId);
+        assert.equal(restored.view.isHost, false);
       }
       for (const p of players) void p.room.leave();
       void observer.room.leave();

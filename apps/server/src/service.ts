@@ -175,9 +175,9 @@ export class GameService {
     const record = this.record(code);
     this.checkPassword(record, data.password);
     const players = record.seats.filter((s) => !s.spectator);
-    ensure(record.seats.filter((s) => s.spectator).length < 20, '观战席已满');
     const spectator =
       data.spectator || !!record.game || players.length >= record.settings.maxPlayers;
+    ensure(!spectator || record.seats.filter((s) => s.spectator).length < 20, '观战席已满');
     const { seat, token } = this.newSeat(data, players.length, spectator);
     record.seats.push(seat);
     this.save(record);
