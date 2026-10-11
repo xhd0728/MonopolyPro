@@ -8,7 +8,6 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes('/three/')) return 'scene';
           if (id.includes('/react-dom/') || id.includes('/react/')) return 'react';
           if (id.includes('/zod/')) return 'validation';
           if (id.includes('/@colyseus/')) return 'network';
