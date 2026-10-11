@@ -231,6 +231,9 @@ test('six player finances remain readable on desktop and mobile; a second window
   await page.getByRole('button', { name: '我准备好了' }).click();
   await page.getByRole('button', { name: '开始旅程' }).click();
   await expect(page.locator('.player-card')).toHaveCount(6);
+  await expect(page.locator('.board-meta')).toContainText('30 分钟剩余');
+  const countdown = (await page.locator('.decision-timer').innerText()).match(/还剩\s*(\d+)/);
+  expect(Number(countdown?.[1])).toBeLessThanOrEqual(45);
   await expect(page.locator('.country-tile.property').first()).toBeVisible();
   await page.screenshot({ path: 'artifacts/ui/desktop-six-players.png', fullPage: true });
   const clipped = await page

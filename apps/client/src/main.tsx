@@ -166,7 +166,9 @@ function App() {
   if (!connection.current)
     connection.current = new Connection(
       (v) => {
-        offset.current = v.serverNow - Date.now();
+        const receivedAt = Date.now();
+        offset.current = v.serverNow - receivedAt;
+        setNow(receivedAt);
         setRoom(v);
       },
       (s, l) => {
@@ -833,7 +835,11 @@ function App() {
                         第 <b>{g.round}</b> 轮 <i>·</i> {phaseNames[g.phase]}
                       </span>
                       <span>
-                        {Math.max(0, Math.ceil((g.endsAt - serverNow) / 60000))} 分钟剩余{' '}
+                        {Math.max(
+                          0,
+                          Math.min(g.settings.minutes, Math.ceil((g.endsAt - serverNow) / 60000)),
+                        )}{' '}
+                        分钟剩余{' '}
                         <button className="text-button" onClick={() => setFollow(!follow)}>
                           {follow ? '◎ 跟随回合' : '○ 自由视角'}
                         </button>
@@ -941,8 +947,11 @@ function App() {
                                 本次决定还剩{' '}
                                 {Math.max(
                                   0,
-                                  Math.ceil(
-                                    (room.decisionTimeoutMs - (serverNow - g.decisionAt)) / 1000,
+                                  Math.min(
+                                    Math.ceil(room.decisionTimeoutMs / 1000),
+                                    Math.ceil(
+                                      (room.decisionTimeoutMs - (serverNow - g.decisionAt)) / 1000,
+                                    ),
                                   ),
                                 )}{' '}
                                 秒 · 超时由系统继续推进
