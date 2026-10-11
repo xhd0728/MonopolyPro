@@ -1,0 +1,11 @@
+# Replace the hostname and set PUBLIC_ORIGIN to the exact same HTTPS origin.
+monopoly.example.com {
+  encode zstd gzip
+  header {
+    Strict-Transport-Security "max-age=31536000"
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "same-origin"
+    Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' wss://monopoly.example.com; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+  }
+  reverse_proxy 127.0.0.1:8788
+}

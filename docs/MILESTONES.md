@@ -10,7 +10,7 @@ Each completed milestone is committed locally with Conventional Commits. A commi
 | P3 | Idempotence, disconnect takeover, refresh and process restart recovery | Complete |
 | P4 | Four maps, six characters, 30 cards, team mode, simulations | Complete |
 | P5 | Responsive game UI, tutorial, atlas, feedback, connection states | Complete |
-| P6 | Deployment package, systemd/Caddy, backup/rollback, 30-minute load run | Pending |
+| P6 | Deployment package, systemd/Caddy, backup/rollback, 30-minute load run | Complete; owner's public deployment pending |
 
 Verification: engine rules and invariants; 2/4/6-seat network flows; privacy; duplicate/unauthorized commands; recovery at purchase, auction, path and trade decisions; browser walkthroughs at desktop/mobile sizes; 20 rooms/120 seats for 30 minutes with environment/results recorded.
 
@@ -24,3 +24,5 @@ P3: transactional snapshot/event/command storage, one-use connection grants, per
 P4: catalog identity, map connectivity and coordinate uniqueness checks passed. Four distinct route mechanics, six character passives/abilities, all 30 effects and balanced 2v2/3v3 settlement are covered by the complete-match simulation suite.
 
 P5: Chromium desktop 1440x1000 and mobile 390x844 flows passed: two independent browser contexts, readiness, card target dialog, purchase/build, trade, refresh, offline takeover/recovery, atlas, mobile drawer and settlement. Teaching can be skipped/restarted. No page errors or mobile horizontal overflow. Original Three.js scenes are lazy loaded with theme-specific landmarks. Screenshots are in ignored artifacts/ui/.
+
+P6: 16 automated tests and all three browser flows passed; mobile neon forks, auction bidding and plain-text chat rendering are also verified. The 20-room/120-seat run lasted 1,801.61 seconds, with 138,496 accepted actions, no disconnections/crashes and six audited stale-version refusals. A final-server 120-second supplement passed with 9,439 actions and no refusals/disconnections. Independent production-only release installation, startup and online backup restoration passed. See VALIDATION.md for environment and limits. Linux systemd/Caddy startup, domain TLS and two-network public acceptance remain for the owner.
