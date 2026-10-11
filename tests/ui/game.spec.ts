@@ -1,5 +1,11 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Locator } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
+async function accepted(page: Page, button: Locator) {
+  const board = page.locator('.board-meta'),
+    revision = await board.getAttribute('data-revision');
+  await button.click();
+  await expect(board).not.toHaveAttribute('data-revision', revision!);
+}
 async function create(page: Page, name: string) {
   await page.goto('/');
   await page.getByRole('button', { name: '创建朋友房间' }).click();
@@ -26,6 +32,10 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
   await guest.getByLabel('游客昵称').fill('飞飞');
   await guest.getByRole('button', { name: '加入房间', exact: true }).last().click();
   await expect(guest.getByRole('heading', { name: '准备出发' })).toBeVisible();
+  await host.getByLabel('聊天内容').fill('<b>一起出发</b>');
+  await host.getByRole('button', { name: '发送聊天' }).click();
+  await expect(guest.locator('.chat-feed')).toContainText('<b>一起出发</b>');
+  await expect(guest.locator('.chat-feed b')).toHaveCount(1);
   await host.getByRole('button', { name: '我准备好了' }).click();
   await guest.getByRole('button', { name: '我准备好了' }).click();
   await expect(host.getByRole('button', { name: '开始旅程' })).toBeEnabled();
@@ -140,4 +150,47 @@ test('interactive tutorial can be skipped and restarted, settings and map previe
   await page.getByRole('button', { name: '规则图鉴' }).click();
   await page.getByRole('button', { name: '重新开始互动教学' }).click();
   await expect(page.getByRole('region', { name: '互动教学' })).toBeVisible();
+});
+test('mobile neon map: real fork selection and auction input advance the match', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await create(page, '路线玩家');
+  await page.getByLabel('地图').selectOption('neon');
+  await page.getByRole('button', { name: '添加机器人' }).click();
+  await page.getByRole('button', { name: '我准备好了' }).click();
+  await page.getByRole('button', { name: '开始旅程' }).click();
+  let fork = false,
+    auction = false;
+  for (let turn = 0; turn < 12 && (!fork || !auction); turn++) {
+    await expect(page.getByRole('button', { name: '掷骰出发', exact: true })).toBeEnabled({
+      timeout: 12000,
+    });
+    await accepted(page, page.getByRole('button', { name: '掷骰出发', exact: true }));
+    await expect(page.locator('.turn-prompt h2')).not.toHaveText('掷骰出发');
+    while (await page.getByRole('button', { name: /^前往/ }).count()) {
+      fork = true;
+      await accepted(page, page.getByRole('button', { name: /^前往/ }).last());
+      await expect(page.locator('.actions button').first()).toBeEnabled();
+    }
+    if (await page.getByRole('button', { name: /^进入拍卖/ }).isVisible()) {
+      if (!auction) {
+        await accepted(page, page.getByRole('button', { name: /^进入拍卖/ }));
+        await expect(page.getByLabel('竞价金额')).toBeVisible();
+        await page.getByLabel('竞价金额').fill('100');
+        await accepted(page, page.getByRole('button', { name: /^出价/ }));
+        await expect(page.getByRole('button', { name: /^退出竞拍/ })).toBeEnabled();
+        await accepted(page, page.getByRole('button', { name: /^退出竞拍/ }));
+        await expect(page.getByRole('button', { name: '结束回合', exact: true })).toBeVisible();
+        auction = true;
+      } else {
+        await accepted(page, page.getByRole('button', { name: /^购买 ·/ }));
+        await expect(page.getByRole('button', { name: '结束回合', exact: true })).toBeVisible();
+      }
+    }
+    await accepted(page, page.getByRole('button', { name: '结束回合', exact: true }));
+  }
+  expect(fork).toBe(true);
+  expect(auction).toBe(true);
+  await page.screenshot({ path: 'artifacts/ui/mobile-neon.png', fullPage: true });
 });

@@ -739,7 +739,7 @@ function App() {
               <>
                 <div className="game-layout">
                   <section className="board-wrap">
-                    <div className="board-meta">
+                    <div className="board-meta" data-revision={g.revision}>
                       <span>
                         第 <b>{g.round}</b> 轮 <i>·</i> {phaseNames[g.phase]}
                       </span>

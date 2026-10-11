@@ -21,7 +21,7 @@ export default defineConfig({
     env: {
       PORT: '8792',
       HOST: '127.0.0.1',
-      DATA_DIR: 'artifacts/ui-server',
+      DATA_DIR: `artifacts/ui-server-${Date.now()}`,
       NODE_ENV: 'test',
       BOT_STEP_MS: '250',
       DISCONNECT_TAKEOVER_MS: '1500',
