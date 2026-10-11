@@ -104,19 +104,14 @@ export function Board({
       island ? '#78b4c1' : neon ? '#72799a' : ancient ? '#aea685' : '#b2c5ae',
     );
     box(0, -0.78, 0, 9.65, 0.28, 9.65, '#f1e0c3');
-    box(
-      0,
-      -0.03,
-      0,
-      5.5,
-      0.18,
-      5.5,
-      island ? '#dbd0a6' : neon ? '#939caf' : ancient ? '#d3bf9e' : '#d6d5b8',
-    );
+    if (island) {
+      box(-1.05, 0.02, 0.65, 3.6, 0.22, 3.2, '#dbd0a6');
+      box(1.55, 0.07, -1.45, 2.1, 0.32, 2.6, '#dfd4a8');
+    } else box(0, -0.03, 0, 5.5, 0.18, 5.5, neon ? '#939caf' : ancient ? '#d3bf9e' : '#d6d5b8');
     for (let i = 0; i < 10; i++) {
       const a = (i * Math.PI) / 5,
-        x = Math.cos(a) * 2.05,
-        z = Math.sin(a) * 2.05;
+        x = island ? (i < 5 ? -1.05 : 1.55) + Math.cos(a) * 0.75 : Math.cos(a) * 2.05,
+        z = island ? (i < 5 ? 0.65 : -1.45) + Math.sin(a) * 0.75 : Math.sin(a) * 2.05;
       cyl(x, 0.35, z, 0.07, 0.7, '#99705b');
       const crown = new T.Mesh(new T.IcosahedronGeometry(0.36, 1), mat('#8da17a'));
       crown.position.set(x, 0.95, z);
@@ -209,6 +204,8 @@ export function Board({
       group.add(b);
       buildings.push(b);
     }
+    const routes = new T.Group();
+    scene.add(routes);
     if (neon || ancient) {
       for (const [a, b] of neon
         ? [
@@ -229,7 +226,7 @@ export function Board({
           new T.LineDashedMaterial({ color: '#cfbadb', dashSize: 0.22, gapSize: 0.15 }),
         );
         line.computeLineDistances();
-        scene.add(line);
+        routes.add(line);
       }
     }
     const pawns = new Map<string, T.Group>(),
@@ -279,6 +276,7 @@ export function Board({
         material.emissive.set(highlight.includes(base.userData.tile) ? '#baa052' : '#000000');
         material.emissiveIntensity = 0.38;
       }
+      routes.visible = !ancient || (!!g && g.round % 2 === 0);
       if (g) {
         for (const p of g.players) {
           let pawn = pawns.get(p.id);
@@ -294,6 +292,23 @@ export function Board({
             ring.rotation.x = Math.PI / 2;
             ring.position.y = 0.19;
             pawn.add(ring);
+            const labelCanvas = document.createElement('canvas');
+            labelCanvas.width = 256;
+            labelCanvas.height = 64;
+            const labelContext = labelCanvas.getContext('2d')!;
+            labelContext.fillStyle = '#fffbed';
+            labelContext.roundRect(6, 5, 244, 49, 12);
+            labelContext.fill();
+            labelContext.font = 'bold 24px sans-serif';
+            labelContext.textAlign = 'center';
+            labelContext.fillStyle = '#4e6255';
+            labelContext.fillText(`${g.players.indexOf(p) + 1} ${p.name.slice(0, 5)}`, 128, 38);
+            const nameTag = new T.Sprite(
+              new T.SpriteMaterial({ map: new T.CanvasTexture(labelCanvas), depthTest: false }),
+            );
+            nameTag.position.y = 1.0;
+            nameTag.scale.set(1.05, 0.27, 1);
+            pawn.add(nameTag);
             scene.add(pawn);
             pawns.set(p.id, pawn);
             const tile = map.tiles[p.position];
@@ -310,13 +325,14 @@ export function Board({
             );
           pawn.position.lerp(dest, reduced ? 1 : Math.min(1, dt * 5));
         }
-        if (follow && g.activeId !== oldActive) {
+        const marker = `${g.activeId}:${g.players.find((p) => p.id === g.activeId)?.position}`;
+        if (follow && marker !== oldActive) {
           const p = g.players.find((p) => p.id === g.activeId);
           if (p) {
             const tile = map.tiles[p.position];
             controls.target.set((tile.x - 3.5) * 0.25, 0, (tile.z - 3.5) * 0.25);
           }
-          oldActive = g.activeId ?? '';
+          oldActive = marker;
         }
         for (const prop of g.properties) {
           const sig = `${prop.owner}-${prop.level}-${prop.mortgaged}`;
