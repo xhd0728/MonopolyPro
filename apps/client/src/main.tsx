@@ -18,7 +18,7 @@ import {
   type GameView,
   type CardDefinition,
 } from '../../../packages/shared/src/index.ts';
-import { Board } from './Scene.tsx';
+import { Board } from './Board.tsx';
 import { Assets } from './Assets.tsx';
 import { api, Connection, type Credentials } from './network.ts';
 import './style.css';
@@ -37,7 +37,7 @@ const kindNames = {
   property: '可购买的地产',
   bank: '银行 · 每轮利息 3%',
   shop: '卡牌商店 · 最多 8 张',
-  event: '城市奇遇',
+  event: '旅途机遇',
   tax: '公共税费',
   hospital: '休息 · 领取 80',
   transit: '轮渡 · 船票 80',
@@ -343,16 +343,16 @@ function App() {
         {!room ? (
           <main className="home">
             <section className="hero-copy">
-              <div className="eyebrow">一座小城 · 无限可能</div>
+              <div className="eyebrow">一场环球之旅 · 和朋友一起经营</div>
               <h1>
                 下一站，
                 <br />
                 成为大富翁<span>。</span>
               </h1>
               <p>
-                买下一条街，打出一张好牌。
+                游历真实国家，打出一张好牌。
                 <br />
-                把城市变成你的主场，和朋友一起出发。
+                经营地产、规划路线，和朋友一起出发。
               </p>
               <div className="hero-actions">
                 <button className="primary" onClick={() => setDialog('create')}>
@@ -384,15 +384,15 @@ function App() {
               </div>
               <Board map={map} onTile={setSelectedTile} follow={false} reduced={reduced} />
               <div className="scene-caption">
-                <span>原创城市微缩景观</span>
-                <span>拖动探索 ↔</span>
+                <span>2D 国家路线棋盘</span>
+                <span>点击国家查看详情</span>
               </div>
             </section>
             <section className="map-section">
               <div className="section-heading">
                 <div>
                   <div className="eyebrow">选择你的旅程</div>
-                  <h2>每一座城，都有新玩法</h2>
+                  <h2>四条路线，四种策略</h2>
                 </div>
                 <span>四种地图机制 · 随时换个主场</span>
               </div>
@@ -464,14 +464,14 @@ function App() {
               )}
             </section>
             <footer>
-              MONOPOLY PRO <span>在小小城市里，创造大大的故事。</span>
+              MONOPOLY PRO <span>沿世界的路线，创造自己的故事。</span>
             </footer>
           </main>
         ) : (
           <main className="room-page">
             <div className="room-heading">
               <div>
-                <div className="eyebrow">{g ? '城市正在发生故事' : '好友专属的起点'}</div>
+                <div className="eyebrow">{g ? '环球旅程 · 资产与路线同步' : '好友专属的起点'}</div>
                 <h1>
                   {g ? map.name : '准备出发'}{' '}
                   <span className="badge">
@@ -791,24 +791,11 @@ function App() {
                         {active ? `${active.name}的${phaseNames[g.phase]}` : '旅程结束'}
                       </small>
                     </div>
-                    <div className="tile-strip" aria-label="地图地点">
-                      {map.tiles.map((t) => (
-                        <button
-                          key={t.index}
-                          className={selectedTile === t.index ? 'selected' : ''}
-                          onClick={() => setSelectedTile(t.index)}
-                          aria-label={`查看${t.name}`}
-                        >
-                          {t.index}
-                          <span>{t.name}</span>
-                        </button>
-                      ))}
-                    </div>
                   </section>
                   <aside className="game-sidebar">
                     <section className="paper player-panel">
                       <div className="section-heading">
-                        <h2>城市伙伴</h2>
+                        <h2>旅行伙伴</h2>
                         <small>净资产</small>
                       </div>
                       {g.players.map((p) => {
@@ -1215,7 +1202,7 @@ function App() {
             <p>{kindNames[selected.kind]}</p>
           )}
           {map.id === 'ancient' && [9, 23].includes(selected.index) && (
-            <p>偶数轮机关开启，可以跨城；奇数轮沿环城道路前进。</p>
+            <p>偶数轮机关开启，可以跨洲；奇数轮沿环线道路前进。</p>
           )}
           {selected.exits.length > 1 && (
             <p>岔路：{selected.exits.map((i) => map.tiles[i].name).join(' / ')}</p>
@@ -1482,7 +1469,7 @@ function App() {
         </Modal>
       )}
       {dialog === 'shop' && (
-        <Modal title="城市卡牌商店" close={() => setDialog(null)}>
+        <Modal title="旅途卡牌市场" close={() => setDialog(null)}>
           <p className="hint">购买指定卡牌，每人最多 8 张。当前现金 {me?.cash}。</p>
           <div className="catalog-grid">
             {CARDS.map((c) => (
@@ -1528,7 +1515,7 @@ function App() {
                 每回合先用卡牌或天赋，再掷两颗骰子。处理落点后，可以升级、抵押、交易，再结束回合。岔路由当前玩家选择。超过
                 45 秒未决定，会执行默认操作。
               </p>
-              <h3>02 / 城市经济</h3>
+              <h3>02 / 国家地产与经济</h3>
               <p>
                 空地可直接购买，放弃则全员轮流竞拍。至少加价 10，退出后不能再出价。地产可升 3
                 级，租金倍率为 1、2.5、5、9；独占街区额外 +30%。抵押获得半价，赎回支付地价的

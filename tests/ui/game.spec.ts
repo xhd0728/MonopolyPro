@@ -111,7 +111,7 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
   await guest.getByRole('button', { name: '卡牌', exact: true }).click();
   await expect(guest.locator('.catalog-grid article')).toHaveCount(30);
   await guest.getByRole('button', { name: '关闭', exact: true }).click();
-  await guest.getByRole('button', { name: '查看梧桐公寓', exact: true }).click();
+  await guest.getByRole('button', { name: '查看中国', exact: true }).click();
   await expect(guest.getByRole('dialog', { name: '地点详情' })).toBeVisible();
   await guest.getByRole('button', { name: '关闭地点详情' }).click();
   await host.screenshot({ path: 'artifacts/ui/desktop-match.png', fullPage: true });
@@ -134,8 +134,8 @@ test('interactive tutorial can be skipped and restarted, settings and map previe
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
   await page.screenshot({ path: 'artifacts/ui/mobile-home.png', fullPage: true });
-  await page.getByRole('button', { name: /滨海群岛/ }).click();
-  await expect(page.getByRole('img', { name: /滨海群岛立体棋盘/ })).toBeVisible();
+  await page.getByRole('button', { name: /海洋航线/ }).click();
+  await expect(page.getByRole('group', { name: /海洋航线二维国家棋盘/ })).toBeVisible();
   await page.getByRole('button', { name: '开始互动教学' }).click();
   await expect(page.getByRole('region', { name: '互动教学' })).toBeVisible();
   await page.getByRole('button', { name: '添加机器人' }).click();
@@ -151,7 +151,7 @@ test('interactive tutorial can be skipped and restarted, settings and map previe
   await page.getByRole('button', { name: '重新开始互动教学' }).click();
   await expect(page.getByRole('region', { name: '互动教学' })).toBeVisible();
 });
-test('mobile neon map: real fork selection and auction input advance the match', async ({
+test('mobile country express map: real fork selection and auction input advance the match', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });

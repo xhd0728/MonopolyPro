@@ -66,36 +66,157 @@ for (let x = 0; x < 8; x++) coords.push([x, 0]);
 for (let z = 1; z < 7; z++) coords.push([7, z]);
 for (let x = 7; x >= 0; x--) coords.push([x, 7]);
 for (let z = 6; z > 0; z--) coords.push([0, z]);
-const names = [
-  '晨光起点',
-  '梧桐公寓',
-  '花间书店',
-  '城市快讯',
-  '松果小巷',
-  '城市税务',
-  '橘子街',
-  '储蓄银行',
-  '青禾市集',
-  '云边旅社',
-  '奇遇广场',
-  '风铃车站',
-  '枫叶大道',
-  '百货公馆',
-  '卡牌商店',
-  '海棠里',
-  '白露茶馆',
-  '好运公园',
-  '湖畔新城',
-  '公共基金',
-  '星光会馆',
-  '安心医院',
-  '青石别院',
-  '银河商厦',
-  '街头新闻',
-  '时光车站',
-  '翡翠公寓',
-  '月光剧院',
-];
+const COUNTRIES: Record<string, string> = {
+  CN: '中国',
+  JP: '日本',
+  KR: '韩国',
+  SG: '新加坡',
+  TH: '泰国',
+  VN: '越南',
+  IN: '印度',
+  MY: '马来西亚',
+  ID: '印度尼西亚',
+  PH: '菲律宾',
+  LK: '斯里兰卡',
+  GB: '英国',
+  FR: '法国',
+  DE: '德国',
+  IT: '意大利',
+  ES: '西班牙',
+  PT: '葡萄牙',
+  GR: '希腊',
+  NO: '挪威',
+  SE: '瑞典',
+  FI: '芬兰',
+  DK: '丹麦',
+  IS: '冰岛',
+  NL: '荷兰',
+  CH: '瑞士',
+  AT: '奥地利',
+  PL: '波兰',
+  CZ: '捷克',
+  HU: '匈牙利',
+  TR: '土耳其',
+  GE: '格鲁吉亚',
+  KZ: '哈萨克斯坦',
+  UZ: '乌兹别克斯坦',
+  AE: '阿联酋',
+  OM: '阿曼',
+  SA: '沙特阿拉伯',
+  JO: '约旦',
+  IR: '伊朗',
+  MN: '蒙古',
+  US: '美国',
+  CA: '加拿大',
+  MX: '墨西哥',
+  BR: '巴西',
+  AR: '阿根廷',
+  CL: '智利',
+  PE: '秘鲁',
+  CO: '哥伦比亚',
+  CU: '古巴',
+  JM: '牙买加',
+  AU: '澳大利亚',
+  NZ: '新西兰',
+  FJ: '斐济',
+  EG: '埃及',
+  MA: '摩洛哥',
+  ZA: '南非',
+  KE: '肯尼亚',
+  TZ: '坦桑尼亚',
+  MG: '马达加斯加',
+};
+export const countryFlag = (code?: string) =>
+  code ? [...code].map((c) => String.fromCodePoint(127397 + c.charCodeAt(0))).join('') : '';
+const countryRoutes: Record<string, string[]> = {
+  town: [
+    'CN',
+    'JP',
+    'KR',
+    'SG',
+    'GB',
+    'FR',
+    'DE',
+    'IT',
+    'ES',
+    'US',
+    'CA',
+    'MX',
+    'BR',
+    'EG',
+    'MA',
+    'ZA',
+    'AU',
+    'NZ',
+  ],
+  islands: [
+    'JP',
+    'PH',
+    'ID',
+    'SG',
+    'GB',
+    'IS',
+    'NO',
+    'PT',
+    'CU',
+    'JM',
+    'CA',
+    'CL',
+    'AU',
+    'NZ',
+    'FJ',
+    'MG',
+  ],
+  neon: [
+    'CN',
+    'JP',
+    'KR',
+    'TH',
+    'DE',
+    'FR',
+    'NL',
+    'CH',
+    'AT',
+    'IT',
+    'ES',
+    'GR',
+    'TR',
+    'PL',
+    'CZ',
+    'HU',
+    'SE',
+    'FI',
+  ],
+  ancient: [
+    'CN',
+    'MN',
+    'KZ',
+    'UZ',
+    'IN',
+    'LK',
+    'IR',
+    'OM',
+    'AE',
+    'TR',
+    'GE',
+    'JO',
+    'SA',
+    'EG',
+    'MA',
+    'KE',
+    'TZ',
+    'ZA',
+  ],
+};
+const specialNames: Partial<Record<TileDefinition['kind'], string>> = {
+  start: '环球起点',
+  bank: '国际银行',
+  shop: '卡牌市场',
+  hospital: '旅行驿站',
+  tax: '公共税务',
+  event: '旅途机遇',
+  transit: '跨洋港口',
+};
 function makeMap(
   id: string,
   name: string,
@@ -106,6 +227,7 @@ function makeMap(
   recommended: string,
   mechanic: MapDefinition['mechanic'],
 ): MapDefinition {
+  let countryIndex = 0;
   const tiles: TileDefinition[] = coords.map(([x, z], index) => {
     const kind =
       index === 0
@@ -125,11 +247,13 @@ function makeMap(
                     : 'property';
     const group = Math.floor(index / 7),
       price = 220 + group * 80 + (index % 3) * 35;
+    const countryCode = kind === 'property' ? countryRoutes[id][countryIndex++] : undefined;
     return {
       id: `${id}-${index}`,
       index,
-      name: names[index],
+      name: countryCode ? COUNTRIES[countryCode] : specialNames[kind]!,
       kind,
+      ...(countryCode ? { countryCode } : {}),
       x,
       z,
       group,
@@ -142,25 +266,19 @@ function makeMap(
   if (mechanic === 'metro') {
     tiles[9].exits = [10, 18];
     tiles[23].exits = [24, 4];
-    tiles[9].name = '中央地铁';
-    tiles[23].name = '城市环线';
-  }
-  if (mechanic === 'gates') {
-    tiles[9].name = '青龙机关';
-    tiles[23].name = '朱雀机关';
   }
   if (mechanic === 'ferry') {
-    tiles[11].name = '海湾码头';
-    tiles[25].name = '灯塔码头';
+    tiles[11].name = '东洋港口';
+    tiles[25].name = '西洋港口';
   }
   return { id, name, subtitle, description, theme, color, recommended, mechanic, tiles };
 }
 export const MAPS: MapDefinition[] = [
   makeMap(
     'town',
-    '晨光小镇',
-    '从第一块地，开始你的故事',
-    '明亮的小镇与完整环路，适合学习买地、升级、卡牌和现金管理。',
+    '世界环游',
+    '从亚洲出发，经营全球旅程',
+    '沿环线游历 18 个国家，学习买地、建设和现金管理。完整环路，适合第一场对局。',
     'town',
     '#78a985',
     '2–6 人 · 入门',
@@ -168,9 +286,9 @@ export const MAPS: MapDefinition[] = [
   ),
   makeMap(
     'islands',
-    '滨海群岛',
-    '乘着海风，驶向下一笔财富',
-    '两座码头提供可选轮渡捷径；支付 80 乘船，跨越半张棋盘。',
+    '海洋航线',
+    '连接海岸与岛屿的财富航线',
+    '在 16 个海洋与海岸国家之间经营。两座港口提供轮渡捷径，船票 80，跨越半张棋盘。',
     'islands',
     '#76b6c2',
     '2–6 人 · 路线策略',
@@ -178,9 +296,9 @@ export const MAPS: MapDefinition[] = [
   ),
   makeMap(
     'neon',
-    '霓虹都市',
-    '每个路口，都有新的机会',
-    '地铁连接两处内环捷径，岔路可以主动选择；交通不只由骰子决定。',
+    '欧亚快线',
+    '穿行欧亚，选择自己的路线',
+    '18 个欧亚国家与两条国际快线。抵达岔路时主动选路，路线和剩余步数清晰可见。',
     'neon',
     '#9690c2',
     '3–6 人 · 岔路博弈',
@@ -188,9 +306,9 @@ export const MAPS: MapDefinition[] = [
   ),
   makeMap(
     'ancient',
-    '机关古城',
-    '城门开合，局势瞬息万变',
-    '机关每轮轮换：偶数轮开启跨城道路，奇数轮关闭，路线提前可见。',
+    '丝路商旅',
+    '沿商路跨洲，抓住通行窗口',
+    '连接 18 个亚洲与非洲国家。商路偶数轮开放、奇数轮关闭，提前规划每次跨洲通行。',
     'ancient',
     '#c5a271',
     '3–6 人 · 动态机关',
@@ -223,7 +341,7 @@ export const CARDS: CardDefinition[] = [
   card('step', '轻巧一步', 'move', 'move', 1, 'self', '立即前进 1 格，并结算落点。', '👟'),
   card('sprint', '城市快跑', 'move', 'move', 3, 'self', '立即前进 3 格，并结算落点。', '🛵'),
   card('express', '快线通行', 'move', 'move', 6, 'self', '立即前进 6 格，并结算落点。', '🚆'),
-  card('home', '回到晨光', 'move', 'teleport', 0, 'self', '回到起点并领取 300 薪水。', '🏠'),
+  card('home', '回到起点', 'move', 'teleport', 0, 'self', '回到起点并领取 300 薪水。', '🏠'),
   card(
     'remote',
     '遥控骰子',

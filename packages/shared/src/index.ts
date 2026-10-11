@@ -15,6 +15,7 @@ export interface TileDefinition {
   index: number;
   name: string;
   kind: TileKind;
+  countryCode?: string;
   x: number;
   z: number;
   group: number;
