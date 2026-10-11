@@ -59,7 +59,7 @@ export const CARDS: CardDefinition[] = [
   card('rentCut','临时优惠','disrupt','rentCut',2,'enemyProperty','对手一处地产租金减少 50%，持续 2 轮。','✂'),
   card('shield','安心护盾','defense','shield',1,'self','免除下一次对手租金。','🛡'),
   card('doubleShield','双重保障','defense','shield',2,'self','免除接下来两次对手租金。','☂'),
-  card('cleanse','清风拂面','defense','cleanse',0,'self','解除停留、移除自己所在地产的租金减益。','🍃'),
+  card('cleanse','清风拂面','defense','cleanse',0,'self','解除停留、移除自己所有地产的租金减益。','🍃'),
   card('rescue','自由通行','defense','rescue',0,'self','解除停留并获得 100 现金。','🔑'),
   card('insure','应急保险','defense','insure',150,'self','获得 150 现金和 1 次租金护盾。','🧰'),
   card('taxfree','税务减免','defense','taxShield',1,'self','免除下一次公共税费。','📋')

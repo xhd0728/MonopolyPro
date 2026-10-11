@@ -201,6 +201,7 @@ function bankrupt(g: GameState, p: PlayerState, env: EngineEnvironment) {
     property.mortgaged = false; property.level = 0; property.boostUntil = 0; property.cutUntil = 0; property.protectedUntil = 0;
   }
   p.cash = 0; p.deposit = 0; p.cards = []; p.bankrupt = true;
+  for (const [tile,trap] of Object.entries(g.traps)) if (trap.owner === p.id) delete g.traps[Number(tile)];
   if (g.trade && [g.trade.from, g.trade.to].includes(p.id)) g.trade = null;
   log(g, env, 'bankrupt', `${p.name}结束经营，可继续观战`, p.id);
   if (g.debt?.playerId === p.id) g.debt = null;
@@ -241,7 +242,7 @@ function cardAction(g: GameState, p: PlayerState, action: Extract<GameAction, {t
   switch (card.effect) {
     case 'move': move(g, card.amount, env); break;
     case 'teleport': p.position = 0; reward(g, p, 300, env, '回到起点'); break;
-    case 'dice': requireRule(action.value !== undefined, '请选择骰子点数'); p.nextDice = action.value; break;
+    case 'dice': requireRule(action.value !== undefined && Number.isInteger(action.value) && action.value >= 1 && action.value <= 6, '请选择骰子点数'); p.nextDice = action.value; break;
     case 'swap': { const old = p.position; p.position = target.position; target.position = old; break; }
     case 'money': reward(g, p, card.amount, env, card.name); break;
     case 'steal': { const amount = Math.min(target.cash, card.amount); target.cash -= amount; p.cash += amount; break; }
@@ -389,7 +390,8 @@ export function actingPlayerId(g: GameState): string | null {
 export function assertInvariants(g: GameState) {
   requireRule(g.players.every(p => Number.isSafeInteger(p.cash) && p.cash >= 0 && Number.isSafeInteger(p.deposit) && p.deposit >= 0 && p.position >= 0 && p.position < 28 && p.cards.length <= 8), '资产或玩家状态不满足约束');
   requireRule(new Set(g.players.map(p => p.id)).size === g.players.length, '玩家 ID 必须唯一');
-  requireRule(g.properties.every(p => p.level >= 0 && p.level <= 3 && (!p.owner || g.players.some(x => x.id === p.owner && !x.bankrupt)) && (!p.mortgaged || p.level === 0)), '地产状态不满足约束');
+  requireRule(new Set(g.properties.map(p=>p.tile)).size === g.properties.length, '地产必须唯一');
+  requireRule(g.properties.every(p => Number.isInteger(p.level) && p.level >= 0 && p.level <= 3 && (!p.owner || g.players.some(x => x.id === p.owner && !x.bankrupt)) && (!p.mortgaged || p.level === 0)), '地产状态不满足约束');
   requireRule(g.phase !== 'path' || !!g.pendingPath, '岔路决策缺失');
   requireRule(g.phase !== 'auction' || !!g.auction, '拍卖决策缺失');
   requireRule(g.phase !== 'debt' || !!g.debt, '偿债决策缺失');

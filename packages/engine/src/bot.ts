@@ -18,7 +18,7 @@ export function botAction(g: GameState, id: string): GameAction | null {
     return options.find(x => x.action.type === 'bank')?.action ?? options.find(x => x.action.type === 'downgrade')?.action ?? options.find(x => x.action.type === 'mortgage')?.action ?? { type: 'surrender' };
   }
   if (g.phase === 'purchase') return p.cash > 600 && options.some(x => x.action.type === 'buy') ? { type: 'buy' } : { type: 'pass' };
-  if (g.phase === 'path') return options[0]?.action ?? null;
+  if (g.phase === 'path') return [...options].sort((a,b)=>{const value=(x:typeof a)=>{const tile='tile' in x.action ? x.action.tile ?? 0 : 0;const prop=propertyAt(g,tile);return prop?.owner===id?-100:prop?.owner?prop.level*100:0;};return value(a)-value(b);})[0]?.action ?? null;
   const ability = options.find(x => x.action.type === 'ability');
   if (ability) return ability.action;
   for (const id of p.cards) {
