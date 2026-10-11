@@ -1,6 +1,12 @@
 {
-  "name": "monopolypro", "version": "0.1.0", "private": true, "type": "module",
-  "packageManager": "pnpm@11.25.0", "engines": { "node": ">=24 <25" },
+  "name": "monopolypro",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "dev": "tsx watch apps/server/src/index.ts",
     "dev:client": "vite --config apps/client/vite.config.ts",
@@ -10,14 +16,31 @@
     "test": "tsx --test tests/*.test.ts",
     "test:ui": "playwright test",
     "test:load": "tsx scripts/load.ts",
-    "release": "node scripts/release.mjs"
+    "release": "node scripts/release.mjs",
+    "format": "prettier --write apps packages tests scripts *.ts *.json *.yaml",
+    "format:check": "prettier --check apps packages tests scripts *.ts *.json *.yaml"
   },
   "dependencies": {
-    "@colyseus/core": "0.18.18", "@colyseus/ws-transport": "0.18.4", "@colyseus/sdk": "0.18.5",
-    "express": "^5.1.0", "react": "^19.2.0", "react-dom": "^19.2.0", "three": "^0.180.0", "zod": "^4.1.0"
+    "@colyseus/core": "0.18.18",
+    "@colyseus/sdk": "0.18.5",
+    "@colyseus/ws-transport": "0.18.4",
+    "express": "5.3.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "three": "0.180.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0", "@types/express": "^5.0.0", "@types/react": "^19.2.0", "@types/react-dom": "^19.2.0", "@types/three": "^0.180.0",
-    "typescript": "^5.9.0", "vite": "^7.1.0", "tsx": "^4.20.0", "esbuild": "^0.25.0", "@playwright/test": "^1.55.0"
+    "@playwright/test": "1.64.0",
+    "@types/express": "5.0.6",
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/three": "0.180.0",
+    "esbuild": "0.25.12",
+    "prettier": "3.9.10",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vite": "7.3.7"
   }
 }
