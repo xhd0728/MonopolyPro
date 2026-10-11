@@ -8,7 +8,7 @@ Each completed milestone is committed locally with Conventional Commits. A commi
 | P1 | Workspace, typed contracts, create/join/ready lobby | Complete |
 | P2 | Complete authoritative match, economy, bots, bankruptcy, settlement | Complete |
 | P3 | Idempotence, disconnect takeover, refresh and process restart recovery | Complete |
-| P4 | Four maps, six characters, 30 cards, team mode, simulations | Pending |
+| P4 | Four maps, six characters, 30 cards, team mode, simulations | Complete |
 | P5 | Responsive game UI, tutorial, atlas, feedback, connection states | Pending |
 | P6 | Deployment package, systemd/Caddy, backup/rollback, 30-minute load run | Pending |
 
@@ -20,3 +20,5 @@ P1: Node 24.21.0 / pnpm 11.25.0; typecheck, production build and real 2/4/6-seat
 P2: purchase/build/rent, mortgage/redemption, auction, atomic trades, debt/bankruptcy and timed/team settlement verified. All 30 card definitions executed with valid targets. 48 seeded complete bot matches (46,243 accepted engine actions) passed invariants; build/typecheck passed.
 
 P3: transactional snapshot/event/command storage, one-use connection grants, persistent seat credentials and duplicate-runtime rejection verified. Service tests restore trade/auction/path snapshots; socket test SIGKILLs and restarts the server, resumes the exact seat and replays the old command without a second mutation. 15-second handover boundary verified with controlled time.
+
+P4: catalog identity, map connectivity and coordinate uniqueness checks passed. Four distinct route mechanics, six character passives/abilities, all 30 effects and balanced 2v2/3v3 settlement are covered by the complete-match simulation suite.
