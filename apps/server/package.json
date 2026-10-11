@@ -1,1 +1,6 @@
-{"name":"@monopoly/server","version":"0.1.0","private":true,"type":"module"}
+{
+  "name": "@monopoly/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module"
+}
