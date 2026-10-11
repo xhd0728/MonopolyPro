@@ -1,53 +1,1739 @@
-import {useEffect,useRef,useState,type ReactNode} from 'react';
-import {createRoot} from 'react-dom/client';
-import {MAPS,CHARACTERS,CARDS,CATEGORY_NAMES,mapById,characterById,cardById} from '../../../packages/content/src/index.ts';
-import {DEFAULT_SETTINGS,type RoomSettings,type RoomListing,type RoomView,type GameAction,type GameView,type CardDefinition} from '../../../packages/shared/src/index.ts';
-import {Board} from './Board.tsx';
-import {api,Connection,type Credentials} from './network.ts';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createRoot } from 'react-dom/client';
+import {
+  MAPS,
+  CHARACTERS,
+  CARDS,
+  CATEGORY_NAMES,
+  mapById,
+  characterById,
+  cardById,
+} from '../../../packages/content/src/index.ts';
+import {
+  DEFAULT_SETTINGS,
+  type RoomSettings,
+  type RoomListing,
+  type RoomView,
+  type GameAction,
+  type GameView,
+  type CardDefinition,
+} from '../../../packages/shared/src/index.ts';
+import { Board } from './Scene.tsx';
+import { Assets } from './Assets.tsx';
+import { api, Connection, type Credentials } from './network.ts';
 import './style.css';
-const money=(n:number)=>new Intl.NumberFormat('zh-CN').format(n);
-const phaseNames={roll:'掷骰出发',manage:'经营时间',purchase:'购买地产',auction:'公开拍卖',path:'选择道路',debt:'筹集资金',finished:'旅程结算'};
-const kindNames={start:'起点 · 经过领取 300',property:'可购买的地产',bank:'银行 · 每轮利息 3%',shop:'卡牌商店 · 最多 8 张',event:'城市奇遇',tax:'公共税费',hospital:'休息 · 领取 80',transit:'轮渡 · 船票 80'};
-function Modal({title,children,close}:{title:string;children:ReactNode;close:()=>void}){const root=useRef<HTMLDivElement>(null);useEffect(()=>{const previous=document.activeElement as HTMLElement;root.current?.focus();const listener=(e:KeyboardEvent)=>{if(e.key==='Escape')close();if(e.key==='Tab'){const items=root.current?.querySelectorAll<HTMLElement>('button,input,select,[tabindex="0"]');if(!items?.length)return;const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}};document.addEventListener('keydown',listener);return()=>{document.removeEventListener('keydown',listener);previous?.focus();};},[]);return <div className="overlay" onMouseDown={e=>{if(e.target===e.currentTarget)close();}}><div className="modal" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={root}><header><h2>{title}</h2><button className="icon-button" aria-label="关闭" onClick={close}>×</button></header>{children}</div></div>;}
-function App(){
- const [room,setRoom]=useState<RoomView|null>(null),[status,setStatus]=useState('尚未连接'),[latency,setLatency]=useState<number>(),[toast,setToast]=useState(''),[busy,setBusy]=useState(false),[pending,setPending]=useState(false),[list,setList]=useState<RoomListing[]>([]);
- const [name,setName]=useState(localStorage.getItem('mp-name')??'旅行家'),[code,setCode]=useState(new URLSearchParams(location.search).get('room')??''),[password,setPassword]=useState(''),[settings,setSettings]=useState<RoomSettings>(DEFAULT_SETTINGS),[role,setRole]=useState('builder');
- const [dialog,setDialog]=useState<'create'|'join'|'rules'|'settings'|'trade'|'card'|'shop'|'exit'|null>(null),[rulesTab,setRulesTab]=useState('规则'),[selectedTile,setSelectedTile]=useState<number|null>(null),[selectedCard,setSelectedCard]=useState<CardDefinition|null>(null),[cardTarget,setCardTarget]=useState(''),[diceValue,setDiceValue]=useState(3),[bid,setBid]=useState(10),[chat,setChat]=useState(''),[panel,setPanel]=useState('操作');
- const [follow,setFollow]=useState(localStorage.getItem('mp-follow')!=='false'),[reduced,setReduced]=useState(localStorage.getItem('mp-reduced')==='true'),[hints,setHints]=useState(localStorage.getItem('mp-hints')!=='false'),[now,setNow]=useState(Date.now()),[tutorial,setTutorial]=useState<number|null>(null),[tutorialGame,setTutorialGame]=useState(false);
- const [tradeTo,setTradeTo]=useState(''),[giveCash,setGiveCash]=useState(0),[wantCash,setWantCash]=useState(0),[giveTile,setGiveTile]=useState(''),[wantTile,setWantTile]=useState('');
- const offset=useRef(0); const serverNow=now+offset.current;
- const roomRef=useRef(room);roomRef.current=room;const toastTimer=useRef<ReturnType<typeof setTimeout>>(undefined),connection=useRef<Connection|null>(null);
- const notify=(message:string)=>{setToast(message);clearTimeout(toastTimer.current);toastTimer.current=setTimeout(()=>setToast(''),6500);};
- if(!connection.current)connection.current=new Connection(v=>{offset.current=v.serverNow-Date.now();setRoom(v);},(s,l)=>{setStatus(s);if(l!==undefined)setLatency(l);},notify,()=>setPending(false));
- useEffect(()=>{const raw=localStorage.getItem('mp-seat');if(raw){try{const c=JSON.parse(raw) as Credentials;void connection.current!.connect(c,true);}catch{localStorage.removeItem('mp-seat');}}void refresh();const tick=setInterval(()=>setNow(Date.now()),1000);return()=>{clearInterval(tick);connection.current?.stop();};},[]);
- useEffect(()=>{if(!room?.game)return;const g=room.game;if(tutorialGame&&tutorial===0)setTutorial(1);if(tutorialGame&&tutorial===1&&g.phase==='purchase'&&g.activeId===room.viewerId)setTutorial(2);if(tutorialGame&&tutorial===2&&g.phase==='manage')setTutorial(3);if(tutorialGame&&tutorial===3&&g.turn>0)setTutorial(4);},[room?.game?.revision]);
- useEffect(()=>{if(room?.game?.auction)setBid(room.game.auction.highBid+10);},[room?.game?.auction?.highBid]);
- async function refresh(){try{setList(await api<RoomListing[]>('/api/rooms'));}catch{notify('暂时无法读取大厅，请确认服务已启动');}}
- async function enter(create:boolean,spectator=false,teaching=false){if(busy)return;setBusy(true);try{localStorage.setItem('mp-name',name);const chosen=teaching?{...DEFAULT_SETTINGS,maxPlayers:2,minutes:10}:settings;const c=await api<Credentials>(create?'/api/rooms':`/api/rooms/${code.trim().toUpperCase()}/join`,create?{name,characterId:role,password,settings:chosen}:{name,password,characterId:role,spectator});localStorage.setItem('mp-seat',JSON.stringify({code:c.code,seatId:c.seatId,token:c.token}));await connection.current!.connect(c);setDialog(null);history.replaceState({},'',`?room=${c.code}`);setSelectedTile(null);if(teaching){setTutorialGame(true);setTutorial(0);}}catch(error){notify((error as Error).message);}finally{setBusy(false);}}
- function lobby(type:string,extras={}){if(status!=='已同步'){notify('请等待连接恢复后操作');return;}connection.current!.send('lobby',{type,...extras});}
- function command(action:GameAction){const g=roomRef.current?.game;if(!g||pending||status!=='已同步')return;setPending(true);connection.current!.command({id:crypto.randomUUID(),revision:g.revision,action});}
- function leave(){lobby('leave');setTimeout(()=>connection.current!.stop(),100);localStorage.removeItem('mp-seat');setRoom(null);setDialog(null);setStatus('尚未连接');history.replaceState({},'','/');setTutorial(null);setTutorialGame(false);void refresh();}
- const g=room?.game,me=g?.players.find(p=>p.id===room!.viewerId),map=mapById(room?.settings.mapId??settings.mapId),active=g?.players.find(p=>p.id===g.activeId),myTurn=!!g&&g.activeId===room?.viewerId&&!me?.bankrupt,canManage=myTurn&&['roll','manage'].includes(g!.phase)&&!g!.trade;
- const connected=status==='已同步',disabled=pending||!connected;
- const selected=selectedTile===null?null:map.tiles[selectedTile],property=g?.properties.find(p=>p.tile===selectedTile),owner=g?.players.find(p=>p.id===property?.owner);
- const openCard=(id:string)=>{setSelectedCard(cardById(id)!);setCardTarget('');setDialog('card');};
- const cardTargets=selectedCard?.target==='player'?g?.players.filter(p=>p.id!==me?.id&&!p.bankrupt&&(g.settings.mode!=='team'||p.team!==me?.team)).map(p=>({id:p.id,name:p.name})):g?.properties.filter(p=>selectedCard?.target==='tile'||selectedCard?.target==='ownProperty'&&p.owner===me?.id||selectedCard?.target==='emptyProperty'&&!p.owner||selectedCard?.target==='enemyProperty'&&p.owner&&p.owner!==me?.id&&(g.settings.mode!=='team'||g.players.find(x=>x.id===p.owner)?.team!==me?.team)).map(p=>({id:String(p.tile),name:`${map.tiles[p.tile].name} · ${p.level} 级${p.protectedUntil>=g.round?' · 保护中':''}`}));
- const invite=()=>{const url=`${location.origin}/?room=${room!.code}`;void navigator.clipboard.writeText(url).then(()=>notify('邀请链接已复制，房间密码需单独告知好友')).catch(()=>notify(`邀请链接：${url}`));};
- return <><div className="app-shell"><header className="topbar"><a className="brand" href="/" onClick={e=>{if(room){e.preventDefault();setDialog('exit');}}}><span className="brand-mark">M</span><span>富翁之旅<small>MONOPOLY PRO</small></span></a><nav><button onClick={()=>{setRulesTab('规则');setDialog('rules');}}>规则图鉴</button><button onClick={()=>setDialog('settings')}>设置</button>{room&&<button onClick={()=>setDialog('exit')}>离开房间</button>}</nav><div className={`connection ${connected?'online':''}`} aria-live="polite"><i/>{room?status:'朋友的下一场聚会'}{connected&&latency!==undefined&&<small>{latency} ms</small>}</div></header>
- {!room?<main className="home"><section className="hero-copy"><div className="eyebrow">一座小城 · 无限可能</div><h1>下一站，<br/>成为大富翁<span>。</span></h1><p>买下一条街，打出一张好牌。<br/>把城市变成你的主场，和朋友一起出发。</p><div className="hero-actions"><button className="primary" onClick={()=>setDialog('create')}>创建朋友房间 <span>↗</span></button><button className="secondary" onClick={()=>setDialog('join')}>加入房间</button></div><button className="text-button" onClick={()=>void enter(true,false,true)}>✦ 第一次玩？开始互动教学</button><div className="facts"><span><b>2–6</b> 真人 / 机器人</span><span><b>4</b> 主题地图</span><span><b>30</b> 策略卡牌</span></div></section><section className="hero-scene"><div className="scene-tag">{map.name}<small>{map.subtitle}</small></div><Board map={map} onTile={setSelectedTile} follow={false} reduced={reduced}/><div className="scene-caption"><span>原创城市微缩景观</span><span>拖动探索 ↔</span></div></section><section className="map-section"><div className="section-heading"><div><div className="eyebrow">选择你的旅程</div><h2>每一座城，都有新玩法</h2></div><span>四种地图机制 · 随时换个主场</span></div><div className="map-grid">{MAPS.map((m,i)=><button className={`map-card ${settings.mapId===m.id?'selected':''}`} style={{'--map-color':m.color} as React.CSSProperties} key={m.id} onClick={()=>setSettings({...settings,mapId:m.id})}><div className="map-art"><span>{['☀','≈','✧','⌘'][i]}</span><i/><i/><i/></div><small>0{i+1} / {m.recommended}</small><h3>{m.name}</h3><p>{m.description}</p><span className="map-meta">{m.subtitle} <b>↗</b></span></button>)}</div></section><section className="lobby-section"><div className="section-heading"><div><div className="eyebrow">一起玩更有趣</div><h2>朋友们正在这里</h2></div><button className="secondary" onClick={()=>void refresh()}>刷新大厅</button></div>{list.length?<div className="room-list">{list.map(r=><button key={r.code} onClick={()=>{setCode(r.code);setDialog('join');}}><span className="room-code">{r.locked?'▣':'◇'} {r.code}</span><span>{mapById(r.mapId).name}</span><span>{r.status==='waiting'?'等待组局':r.status==='finished'?'已结算':'对局中 · 可观战'}</span><b>{r.players}/{r.maxPlayers} →</b></button>)}</div>:<div className="empty-state">还没有房间。邀请朋友，开启今天的第一场旅程。</div>}</section><footer>MONOPOLY PRO <span>在小小城市里，创造大大的故事。</span></footer></main>:<main className="room-page"><div className="room-heading"><div><div className="eyebrow">{g?'城市正在发生故事':'好友专属的起点'}</div><h1>{g?map.name:'准备出发'} <span className="badge">{room.settings.mode==='team'?'团队战':room.settings.mode==='quick'?'快速战':'自由战'}</span></h1></div><div className="invite"><span>房间 <b>{room.code}</b>{room.locked?' · 密码房':''}</span><button className="secondary" onClick={invite}>复制邀请</button></div></div>
- {!g?<div className="waiting-layout"><section className="paper"><div className="section-heading"><h2>旅行伙伴</h2><span>{room.seats.filter(s=>!s.spectator).length}/{room.settings.maxPlayers} 席位</span></div><div className="seat-grid">{room.seats.filter(s=>!s.spectator).map(s=>{const c=characterById(s.characterId);return <article className={`seat ${s.id===room.viewerId?'self':''}`} key={s.id}><div className="avatar" style={{background:c.color}}>{c.icon}</div><div><h3>{s.name} {s.id===room.hostId&&<small>房主</small>}</h3><p>{c.name} · {c.title}</p><span className={`seat-status ${s.ready?'ready':''}`}>{s.bot?'机器人 · 已准备':!s.connected?'连接已断开':s.ready?'已准备':'选择角色中'}{room.settings.mode==='team'?` · ${s.team===0?'青':'橙'}队`:''}</span></div>{s.bot&&room.isHost&&<button className="icon-button" aria-label={`移除${s.name}`} onClick={()=>lobby('removeBot',{seatId:s.id})}>×</button>}</article>;})}{Array.from({length:Math.max(0,room.settings.maxPlayers-room.seats.filter(s=>!s.spectator).length)}).map((_,i)=><button className="empty-seat" key={i} disabled={!room.isHost||disabled} title={!room.isHost?'由房主添加机器人':'添加一个准备好的机器人席位'} onClick={()=>lobby('addBot')}>＋<span>{room.isHost?'添加机器人':'等待朋友加入'}</span></button>)}</div><div className="section-heading"><h2>选择你的角色</h2><span>天赋每 3 轮可使用一次</span></div><div className="character-grid">{CHARACTERS.map(c=><button key={c.id} className={`character ${room.seats.find(s=>s.id===room.viewerId)?.characterId===c.id?'selected':''}`} disabled={disabled||room.seats.find(s=>s.id===room.viewerId)?.spectator} onClick={()=>lobby('character',{characterId:c.id})}><span className="avatar" style={{background:c.color}}>{c.icon}</span><b>{c.name}</b><small>{c.title}</small><p>{c.description}</p><em>{c.ability}</em></button>)}</div>{room.settings.mode==='team'&&<div className="team-picker"><span>我的队伍</span>{[0,1].map(team=><button key={team} disabled={disabled} onClick={()=>lobby('team',{team})}>{team===0?'青队':'橙队'}</button>)}</div>}<div className="start-bar"><p>所有真人准备后，由房主开始。<br/><small>观战席：{room.seats.filter(s=>s.spectator&&s.connected).length}</small></p>{!room.seats.find(s=>s.id===room.viewerId)?.spectator&&<button className="secondary" disabled={disabled} onClick={()=>lobby('ready')}>{room.seats.find(s=>s.id===room.viewerId)?.ready?'取消准备':'我准备好了'}</button>}{room.isHost&&<button className="primary" disabled={disabled||room.seats.filter(s=>!s.spectator).length<2||!room.seats.filter(s=>!s.spectator).every(s=>s.ready&&(s.connected||s.bot))} title="需要至少两个席位，所有真人连接并准备" onClick={()=>lobby('start')}>开始旅程 →</button>}</div></section><aside className="paper room-settings"><h2>旅程设置</h2><label>地图<select value={room.settings.mapId} disabled={!room.isHost||disabled} onChange={e=>lobby('settings',{settings:{...room.settings,mapId:e.target.value}})}>{MAPS.map(m=><option value={m.id} key={m.id}>{m.name}</option>)}</select></label><p className="hint">{map.description}</p><label>模式<select value={room.settings.mode} disabled={!room.isHost||disabled} onChange={e=>lobby('settings',{settings:{...room.settings,mode:e.target.value,minutes:e.target.value==='quick'?10:30}})}><option value="free">自由对战</option><option value="quick">快速对战</option><option value="team">团队战 2v2 / 3v3</option></select></label><label>时间限制<select value={room.settings.minutes} disabled={!room.isHost||disabled} onChange={e=>lobby('settings',{settings:{...room.settings,minutes:Number(e.target.value)}})}>{[5,10,15,30,45,60].map(v=><option key={v} value={v}>{v} 分钟</option>)}</select></label><label>起始现金<select value={room.settings.initialCash} disabled={!room.isHost||disabled} onChange={e=>lobby('settings',{settings:{...room.settings,initialCash:Number(e.target.value)}})}>{[1000,2000,3000,5000,10000].map(v=><option key={v} value={v}>{money(v)}</option>)}</select></label><div className="tip-box">✦ {room.settings.mode==='team'?'团队需均分为两队，同队地产免租。':'到时按现金、存款和地产回收价值，扣除待付债务排名。'}<br/>断线 15 秒后机器人临时托管，回来即可接手。</div><Chat room={room} chat={chat} setChat={setChat} send={()=>{connection.current!.send('chat',chat);setChat('');}} disabled={disabled}/></aside></div>:<><div className="game-layout"><section className="board-wrap"><div className="board-meta"><span>第 <b>{g.round}</b> 轮 <i>·</i> {phaseNames[g.phase]}</span><span>{Math.max(0,Math.ceil((g.endsAt-(serverNow))/60000))} 分钟剩余 <button className="text-button" onClick={()=>setFollow(!follow)}>{follow?'◎ 跟随回合':'○ 自由视角'}</button></span></div><Board map={map} game={g} onTile={setSelectedTile} follow={follow} reduced={reduced}/><div className="dice-display">{g.lastDice.length?g.lastDice.map((d,i)=><span key={i}>{['','⚀','⚁','⚂','⚃','⚄','⚅'][d]}</span>):<span>⚄</span>}<small>{active?`${active.name}的${phaseNames[g.phase]}`:'旅程结束'}</small></div><div className="tile-strip" aria-label="地图地点">{map.tiles.map(t=><button key={t.index} className={selectedTile===t.index?'selected':''} onClick={()=>setSelectedTile(t.index)} aria-label={`查看${t.name}`}>{t.index}<span>{t.name}</span></button>)}</div></section><aside className="game-sidebar"><section className="paper player-panel"><div className="section-heading"><h2>城市伙伴</h2><small>净资产</small></div>{g.players.map(p=>{const c=characterById(p.characterId),s=room.seats.find(s=>s.id===p.id);return <div className={`player-row ${g.activeId===p.id?'active':''} ${p.bankrupt?'bankrupt':''}`} key={p.id}><span className="avatar" style={{background:c.color}}>{c.icon}</span><div><b>{p.name}{p.id===room.viewerId?' · 我':''}</b><small>{p.bankrupt?'已破产 · 观战':s?.bot?'机器人':s?.connected?'在线':s?.disconnectedAt&&serverNow-s.disconnectedAt>=15000?'断线 · 机器人托管':'断线 · 等待恢复'}{g.settings.mode==='team'?` · ${p.team===0?'青':'橙'}队`:''}</small></div><strong>{money(p.assets)}<small>{p.cardCount} 张牌</small></strong></div>;})}</section><section className="paper action-panel"><div className="panel-tabs">{['操作','资产','动态'].map(p=><button className={panel===p?'selected':''} key={p} onClick={()=>setPanel(p)}>{p}</button>)}</div>{panel==='操作'?<><div className="turn-prompt"><span className="eyebrow">{myTurn?'轮到你了':me?.bankrupt?'继续观战':'等待时也能查看地图'}</span><h2>{g.phase==='finished'?'这段旅程，圆满落幕':g.trade?'交易提案待处理':myTurn?phaseNames[g.phase]:`${active?.name??'伙伴'}正在操作`}</h2><p>{g.debt?`${g.players.find(p=>p.id===g.debt!.playerId)?.name}需支付 ${g.debt.amount}，可取款、出售建筑或抵押。`:g.auction?`${map.tiles[g.auction.tile].name}，最高出价 ${g.auction.highBid}。退出后不能再次参与。`:g.pendingPath?'点选道路后继续走完剩余步数。':myTurn?'操作由服务端确认，费用和结果会同步给所有玩家。':'你可以浏览地产、手牌、图鉴，或与朋友聊天。'}</p></div>{g.trade&&<div className="tip-box">{g.players.find(p=>p.id===g.trade!.from)?.name}给出 {g.trade.giveCash}{g.trade.giveTile!==null?` + ${map.tiles[g.trade.giveTile].name}`:''}，换取 {g.trade.wantCash}{g.trade.wantTile!==null?` + ${map.tiles[g.trade.wantTile].name}`:''}<br/>有效期剩余 {Math.max(0,Math.ceil((g.trade.expiresAt-serverNow)/1000))} 秒</div>}<div className="actions">{g.actions.filter(a=>a.primary||['tradeAccept','tradeReject','ferry'].includes(a.action.type)).map((a,i)=><div key={i}><button className={a.primary?'primary':'secondary'} disabled={disabled} onClick={()=>command(a.action.type==='bid'?{type:'bid',amount:bid}:a.action)}>{pending?'等待确认…':a.label}</button>{hints&&<small>{a.hint}</small>}</div>)}</div>{myTurn&&g.phase==='auction'&&<label>我的竞价<input aria-label="竞价金额" type="number" min={g.auction!.highBid+10} max={me?.cash} step={10} value={bid} onChange={e=>setBid(Number(e.target.value))}/></label>}{me&&<div className="wallet"><div><small>可用现金</small><b>{money(me.cash)}</b></div><div><small>银行存款</small><b>{money(me.deposit)}</b></div><div><small>租金护盾</small><b>{me.shield}</b></div></div>}{g.actions.filter(a=>!a.primary&&!['tradeAccept','tradeReject','ferry','build','downgrade','mortgage','redeem'].includes(a.action.type)).map((a,i)=><button key={i} className="secondary full" disabled={disabled} title={a.hint} onClick={()=>command(a.action)}>{a.label}<small>{a.hint}</small></button>)}{me&&!me.bankrupt&&g.phase!=='finished'&&<><div className="inline-actions"><button disabled={!canManage||disabled} title={canManage?'现金和无建筑地产可交易':'在自己的掷骰或经营阶段发起'} onClick={()=>{setTradeTo(g.players.find(p=>p.id!==me.id&&!p.bankrupt)?.id??'');setDialog('trade');}}>⇄ 发起交易</button><button disabled={!canManage||disabled||map.tiles[me.position].kind!=='shop'} title={map.tiles[me.position].kind!=='shop'?'抵达卡牌商店后可购买':'购买指定卡牌'} onClick={()=>setDialog('shop')}>♧ 卡牌商店</button></div><div className="hand-heading"><b>我的手牌 <small>{me.cardCount}/8</small></b><small>{canManage?'点击选择目标':'自己的可操作阶段可使用'}</small></div><div className="hand">{me.cards?.map((id,i)=>{const c=cardById(id)!;return <button key={`${id}-${i}`} className={`card-mini ${c.category}`} disabled={!canManage||disabled} onClick={()=>openCard(id)} title={`${c.description}；${!canManage?'等待自己的掷骰或经营阶段':'点击查看目标与效果'}`}><span>{c.icon}</span><b>{c.name}</b><small>{CATEGORY_NAMES[c.category]}</small></button>;})}{!me.cardCount&&<p className="hint">手牌用完了，可在商店补充，或通过奇遇获得。</p>}</div></>}{!me&&<div className="tip-box">你正在观战。手牌仅本人可见，观众不能进行操作。</div>}</>:panel==='资产'?<><h2>我的地产</h2>{g.properties.filter(p=>p.owner===me?.id).map(p=><div className="property-item" key={p.tile}><button className="text-button" onClick={()=>setSelectedTile(p.tile)}>{map.tiles[p.tile].name} · {p.mortgaged?'已抵押':`${p.level} 级`}</button>{g.actions.filter(a=>'tile'in a.action&&a.action.tile===p.tile&&['build','downgrade','mortgage','redeem'].includes(a.action.type)).map(a=><button key={a.action.type} disabled={disabled} title={a.hint} onClick={()=>command(a.action)}>{a.label.replace(map.tiles[p.tile].name,'')}<small>{a.hint}</small></button>)}</div>)}{!g.properties.some(p=>p.owner===me?.id)&&<p className="hint">还没有地产。抵达空地后购买，或参与公开拍卖。</p>}</>:<div className="event-feed" aria-live="polite">{[...g.events].reverse().slice(0,30).map(e=><div className={`event ${e.kind}`} key={e.id}><small>{new Date(e.at).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}</small><span>{e.text}</span></div>)}</div>}</section><section className="paper"><Chat room={room} chat={chat} setChat={setChat} send={()=>{connection.current!.send('chat',chat);setChat('');}} disabled={disabled}/></section></aside></div>{g.phase==='finished'&&<section className="settlement paper"><div className="eyebrow">旅程纪念册</div><h2>{g.players.filter(p=>g.winners.includes(p.id)).map(p=>p.name).join('、')}获胜！</h2><p>{g.finishReason}</p><div className="ranking">{[...g.players].sort((a,b)=>b.assets-a.assets).map((p,i)=><div key={p.id}><span>0{i+1}</span><b>{p.name} {g.winners.includes(p.id)?'✦':''}</b><strong>{money(p.assets)}</strong><small>现金 {money(p.cash)} · 存款 {money(p.deposit)}</small></div>)}</div>{room.isHost&&<button className="primary" onClick={()=>lobby('newMatch')}>再开启一段旅程 →</button>}</section>}</>}
- </main>}</div>
- {selected&&<div className="tile-detail paper" role="dialog" aria-label="地点详情"><button className="icon-button" aria-label="关闭地点详情" onClick={()=>setSelectedTile(null)}>×</button><div className="eyebrow">地点 {selected.index} / {kindNames[selected.kind]}</div><h2>{selected.name}</h2>{selected.kind==='property'?<><div className="detail-stats"><span>购买<b>{selected.price}</b></span><span>基础租金<b>{selected.rent}</b></span><span>建设<b>{selected.buildCost}</b></span></div><p>{owner?`${owner.name}所有 · ${property?.level} 级${property?.mortgaged?' · 已抵押，不收租':''}`:'待售地产 · 落在这里可以购买或拍卖'}</p><small>建筑租金倍率：1 / 2.5 / 5 / 9；同街区全占 +30%。角色、卡牌和护盾也会影响实际租金。</small></>:<p>{kindNames[selected.kind]}</p>}{map.id==='ancient'&&[9,23].includes(selected.index)&&<p>偶数轮机关开启，可以跨城；奇数轮沿环城道路前进。</p>}{selected.exits.length>1&&<p>岔路：{selected.exits.map(i=>map.tiles[i].name).join(' / ')}</p>}</div>}
- {dialog&&(dialog==='create'||dialog==='join')&&<Modal title={dialog==='create'?'创建朋友房间':'加入朋友的旅程'} close={()=>setDialog(null)}><form onSubmit={e=>{e.preventDefault();void enter(dialog==='create');}}><label>游客昵称<input maxLength={16} required value={name} onChange={e=>setName(e.target.value)}/></label>{dialog==='join'&&<label>房间码<input maxLength={6} required value={code} placeholder="输入 6 位房间码" onChange={e=>setCode(e.target.value.toUpperCase())}/></label>}<label>{dialog==='create'?'设置密码（可留空）':'房间密码（无密码可留空）'}<input maxLength={64} type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label>{dialog==='create'&&<><label>地图<select value={settings.mapId} onChange={e=>setSettings({...settings,mapId:e.target.value})}>{MAPS.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></label><label>席位上限<select value={settings.maxPlayers} onChange={e=>setSettings({...settings,maxPlayers:Number(e.target.value)})}>{[2,3,4,5,6].map(v=><option key={v}>{v}</option>)}</select></label></>}<label>初始角色<select value={role} onChange={e=>setRole(e.target.value)}>{CHARACTERS.map(c=><option key={c.id} value={c.id}>{c.name} · {c.title}</option>)}</select></label><p className="hint">对局开始后加入会进入观战席。刷新可恢复原席位。</p><button className="primary full" disabled={busy}>{busy?'正在入座…':dialog==='create'?'创建并进入':'加入房间'}</button>{dialog==='join'&&<button className="secondary full" type="button" disabled={busy} onClick={()=>void enter(false,true)}>以观众身份加入</button>}</form></Modal>}
- {dialog==='card'&&selectedCard&&g&&<Modal title={`使用「${selectedCard.name}」`} close={()=>setDialog(null)}><div className="card-preview"><span>{selectedCard.icon}</span><p>{selectedCard.description}</p><small>{CATEGORY_NAMES[selectedCard.category]} · 使用后消耗 1 张</small></div>{selectedCard.target!=='self'&&<label>选择目标<select value={cardTarget} onChange={e=>setCardTarget(e.target.value)}><option value="">请选择高亮范围内的目标</option>{cardTargets?.map(t=><option value={t.id} key={t.id}>{t.name}</option>)}</select></label>}{selectedCard.effect==='dice'&&<label>骰子点数<select value={diceValue} onChange={e=>setDiceValue(Number(e.target.value))}>{[1,2,3,4,5,6].map(n=><option key={n}>{n}</option>)}</select></label>}<p className="hint">{selectedCard.effect==='remoteBuy'?'远程购买会额外扣除目标地产的完整地价。':selectedCard.effect==='move'?'移动后正常处理落点，可能触发租金、税费或岔路。':'服务端会再次检查目标、资金和卡牌时机。'}</p><button className="primary full" disabled={disabled||!canManage||selectedCard.target!=='self'&&!cardTarget} onClick={()=>{command({type:'playCard',cardId:selectedCard.id,...(selectedCard.target==='player'?{targetId:cardTarget}:selectedCard.target==='self'?{}:{tile:Number(cardTarget)}),...(selectedCard.effect==='dice'?{value:diceValue}:{})});if(cardTarget&&selectedCard.target!=='player')setSelectedTile(Number(cardTarget));setDialog(null);}}>确认使用</button></Modal>}
- {dialog==='trade'&&g&&me&&<Modal title="提出一笔交易" close={()=>setDialog(null)}><label>交易伙伴<select value={tradeTo} onChange={e=>{setTradeTo(e.target.value);setWantTile('');}}>{g.players.filter(p=>p.id!==me.id&&!p.bankrupt).map(p=><option key={p.id} value={p.id}>{p.name} · 现金 {p.cash}</option>)}</select></label><div className="trade-grid"><div><h3>我给出</h3><label>现金<input type="number" min={0} max={me.cash} value={giveCash} onChange={e=>setGiveCash(Number(e.target.value))}/></label><label>地产<select value={giveTile} onChange={e=>setGiveTile(e.target.value)}><option value="">不含地产</option>{g.properties.filter(p=>p.owner===me.id&&!p.level&&!p.mortgaged).map(p=><option key={p.tile} value={p.tile}>{map.tiles[p.tile].name}</option>)}</select></label></div><div><h3>我希望获得</h3><label>现金<input type="number" min={0} value={wantCash} onChange={e=>setWantCash(Number(e.target.value))}/></label><label>地产<select value={wantTile} onChange={e=>setWantTile(e.target.value)}><option value="">不含地产</option>{g.properties.filter(p=>p.owner===tradeTo&&!p.level&&!p.mortgaged).map(p=><option key={p.tile} value={p.tile}>{map.tiles[p.tile].name}</option>)}</select></label></div></div><p className="hint">双方现金与地产同时交换。仅可交易无建筑、未抵押地产；提案等待期间暂停本回合操作，30 秒后自动撤回。</p><button className="primary full" disabled={disabled||!canManage||!tradeTo||giveCash+wantCash===0&&!giveTile&&!wantTile} onClick={()=>{command({type:'tradeOffer',to:tradeTo,giveCash,wantCash,giveTile:giveTile===''?null:Number(giveTile),wantTile:wantTile===''?null:Number(wantTile)});setDialog(null);}}>发出提案</button></Modal>}
- {dialog==='shop'&&<Modal title="城市卡牌商店" close={()=>setDialog(null)}><p className="hint">购买指定卡牌，每人最多 8 张。当前现金 {me?.cash}。</p><div className="catalog-grid">{CARDS.map(c=><button key={c.id} disabled={disabled||!canManage||!me||me.cash<c.price||me.cardCount>=8} title={me&&me.cash<c.price?'现金不足':me&&me.cardCount>=8?'手牌已满':c.description} onClick={()=>command({type:'buyCard',cardId:c.id})}><span>{c.icon}</span><b>{c.name} · {c.price}</b><p>{c.description}</p></button>)}</div></Modal>}
- {dialog==='rules'&&<Modal title="旅途图鉴" close={()=>setDialog(null)}><div className="panel-tabs">{['规则','地图','角色','卡牌'].map(t=><button key={t} className={t===rulesTab?'selected':''} onClick={()=>setRulesTab(t)}>{t}</button>)}</div>{rulesTab==='规则'?<div className="rule-copy"><h3>01 / 出发与经营</h3><p>每回合先用卡牌或天赋，再掷两颗骰子。处理落点后，可以升级、抵押、交易，再结束回合。岔路由当前玩家选择。超过 45 秒未决定，会执行默认操作。</p><h3>02 / 城市经济</h3><p>空地可直接购买，放弃则全员轮流竞拍。至少加价 10，退出后不能再出价。地产可升 3 级，租金倍率为 1、2.5、5、9；独占街区额外 +30%。抵押获得半价，赎回支付地价的 55%。建筑出售返还标准建设费的一半。</p><h3>03 / 卡牌、银行与交易</h3><p>手牌最多 8 张，每个角色有被动与每 3 轮一次的天赋。银行可存取现金，存款每轮带来 3% 现金利息。没钱付租金或税费时，先取款、卖建筑或抵押；无法筹齐可破产，将资产清算给债权人或银行。交易经接收人同意后原子交换。</p><h3>04 / 胜负与队伍</h3><p>最后仍在经营的一方获胜。到时按现金 + 存款 + 未抵押地产半价 + 建筑回收价 − 待付债务结算；并列可共同获胜。团队战要求 2v2 或 3v3，同队免租，资产合计结算。快速战默认 10 分钟。</p><h3>05 / 联机与恢复</h3><p>刷新后自动恢复原席位。断线 15 秒后机器人临时接管，返回后交还控制。服务端重启会恢复已确认动作和待处理决策。请使用原浏览器；清除本地数据会丢失游客恢复凭证。观众看不到私有手牌。</p><button className="secondary" onClick={()=>{setDialog(null);setTutorial(room?0:null);if(!room)void enter(true,false,true);}}>重新开始互动教学</button></div>:rulesTab==='地图'?MAPS.map(m=><article className="encyclopedia" key={m.id}><h3>{m.name} · {m.subtitle}</h3><p>{m.description}</p></article>):rulesTab==='角色'?CHARACTERS.map(c=><article className="encyclopedia" key={c.id}><h3>{c.icon} {c.name} · {c.title}</h3><p>{c.description}</p><small>{c.ability}</small></article>):<div className="catalog-grid">{CARDS.map(c=><article key={c.id}><span>{c.icon}</span><h3>{c.name}</h3><p>{c.description}</p><small>{CATEGORY_NAMES[c.category]} · 商店 {c.price}</small></article>)}</div>}</Modal>}
- {dialog==='settings'&&<Modal title="让旅程更合心意" close={()=>setDialog(null)}>{[{label:'自动跟随当前玩家',value:follow,key:'mp-follow',set:setFollow},{label:'减少移动动画',value:reduced,key:'mp-reduced',set:setReduced},{label:'显示操作情境提示',value:hints,key:'mp-hints',set:setHints}].map(s=><label className="toggle-row" key={s.key}><span>{s.label}</span><input type="checkbox" checked={s.value} onChange={e=>{s.set(e.target.checked);localStorage.setItem(s.key,String(e.target.checked));}}/></label>)}<p className="hint">画面设置仅影响本机。规则、随机数和对局进度由服务器裁定。</p></Modal>}
- {dialog==='exit'&&<Modal title="离开这段旅程？" close={()=>setDialog(null)}><p>主动离开进行中的比赛会清算你的资产并退出经营。临时离开可直接关闭页面，稍后刷新恢复。</p><div className="hero-actions"><button className="secondary" onClick={()=>setDialog(null)}>继续旅程</button><button className="danger" onClick={leave}>确认退出经营</button></div></Modal>}
- {tutorial!==null&&room&&<div className="tutorial-box paper" role="region" aria-label="互动教学"><div className="eyebrow">旅途小课堂 · {tutorial+1}/5</div><button className="icon-button" aria-label="跳过教学" onClick={()=>{setTutorial(null);setTutorialGame(false);}}>×</button><h3>{['组建你的第一场比赛','掷骰，探索城市','拥有第一处地产','把资产变成收入','旅程由你来决定'][tutorial]}</h3><p>{['点击空位添加机器人，选择角色后点「我准备好了」，再开始旅程。','点击「掷骰出发」。初始手牌和角色天赋可提前使用。落到空地时出现购买提示。','点击「购买」获得地产，或「进入拍卖」参与轮流出价。购买失败时会提示具体原因。','在「资产」中升级建筑，提高租金；随后结束回合。注意保留现金支付对手租金。','试试卡牌、交易、银行与岔路。刷新可恢复席位，规则图鉴随时可查。'][tutorial]}</p><button className="secondary" onClick={()=>{if(tutorial===4){setTutorial(null);setTutorialGame(false);localStorage.setItem('mp-taught','true');}else setTutorial(tutorial+1);}}>{tutorial===4?'我知道了，继续旅行':'下一条提示'}</button></div>}
- {toast&&<div className="toast" role="status" onClick={()=>setToast('')}>{toast}</div>}
- </>;
+const money = (n: number) => new Intl.NumberFormat('zh-CN').format(n);
+const phaseNames = {
+  roll: '掷骰出发',
+  manage: '经营时间',
+  purchase: '购买地产',
+  auction: '公开拍卖',
+  path: '选择道路',
+  debt: '筹集资金',
+  finished: '旅程结算',
+};
+const kindNames = {
+  start: '起点 · 经过领取 300',
+  property: '可购买的地产',
+  bank: '银行 · 每轮利息 3%',
+  shop: '卡牌商店 · 最多 8 张',
+  event: '城市奇遇',
+  tax: '公共税费',
+  hospital: '休息 · 领取 80',
+  transit: '轮渡 · 船票 80',
+};
+function Modal({
+  title,
+  children,
+  close,
+}: {
+  title: string;
+  children: ReactNode;
+  close: () => void;
+}) {
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement;
+    root.current?.focus();
+    const listener = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+      if (e.key === 'Tab') {
+        const items = root.current?.querySelectorAll<HTMLElement>(
+          'button,input,select,[tabindex="0"]',
+        );
+        if (!items?.length) return;
+        const first = items[0],
+          last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', listener);
+    return () => {
+      document.removeEventListener('keydown', listener);
+      previous?.focus();
+    };
+  }, []);
+  return (
+    <div
+      className="overlay"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) close();
+      }}
+    >
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        ref={root}
+      >
+        <header>
+          <h2>{title}</h2>
+          <button className="icon-button" aria-label="关闭" onClick={close}>
+            ×
+          </button>
+        </header>
+        {children}
+      </div>
+    </div>
+  );
 }
-function Chat({room,chat,setChat,send,disabled}:{room:RoomView;chat:string;setChat:(s:string)=>void;send:()=>void;disabled:boolean}){return <div className="chat-box"><h3>房间聊天 <small>只与这里的伙伴分享</small></h3><div className="chat-feed">{room.chat.slice(-12).map(m=><p key={m.id}><b>{m.name}</b> {m.text}</p>)}{!room.chat.length&&<p className="hint">打个招呼，故事从这里开始。</p>}</div><form onSubmit={e=>{e.preventDefault();if(chat.trim())send();}}><input aria-label="聊天内容" placeholder="说点什么…" maxLength={200} value={chat} onChange={e=>setChat(e.target.value)}/><button aria-label="发送聊天" disabled={disabled||!chat.trim()}>↗</button></form></div>;}
-createRoot(document.getElementById('root')!).render(<App/>);
+function App() {
+  const [room, setRoom] = useState<RoomView | null>(null),
+    [status, setStatus] = useState('尚未连接'),
+    [latency, setLatency] = useState<number>(),
+    [toast, setToast] = useState(''),
+    [busy, setBusy] = useState(false),
+    [pending, setPending] = useState(false),
+    [list, setList] = useState<RoomListing[]>([]);
+  const [name, setName] = useState(localStorage.getItem('mp-name') ?? '旅行家'),
+    [code, setCode] = useState(new URLSearchParams(location.search).get('room') ?? ''),
+    [password, setPassword] = useState(''),
+    [settings, setSettings] = useState<RoomSettings>(DEFAULT_SETTINGS),
+    [role, setRole] = useState('builder');
+  const [dialog, setDialog] = useState<
+      'create' | 'join' | 'rules' | 'settings' | 'trade' | 'card' | 'shop' | 'exit' | null
+    >(null),
+    [rulesTab, setRulesTab] = useState('规则'),
+    [selectedTile, setSelectedTile] = useState<number | null>(null),
+    [selectedCard, setSelectedCard] = useState<CardDefinition | null>(null),
+    [cardTarget, setCardTarget] = useState(''),
+    [diceValue, setDiceValue] = useState(3),
+    [bid, setBid] = useState(10),
+    [chat, setChat] = useState(''),
+    [panel, setPanel] = useState('操作'),
+    [sheetOpen, setSheetOpen] = useState(false);
+  const [follow, setFollow] = useState(localStorage.getItem('mp-follow') !== 'false'),
+    [reduced, setReduced] = useState(localStorage.getItem('mp-reduced') === 'true'),
+    [hints, setHints] = useState(localStorage.getItem('mp-hints') !== 'false'),
+    [now, setNow] = useState(Date.now()),
+    [tutorial, setTutorial] = useState<number | null>(null),
+    [tutorialGame, setTutorialGame] = useState(false);
+  const [tradeTo, setTradeTo] = useState(''),
+    [giveCash, setGiveCash] = useState(0),
+    [wantCash, setWantCash] = useState(0),
+    [giveTile, setGiveTile] = useState(''),
+    [wantTile, setWantTile] = useState('');
+  const offset = useRef(0);
+  const serverNow = now + offset.current;
+  const roomRef = useRef(room);
+  roomRef.current = room;
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined),
+    connection = useRef<Connection | null>(null);
+  const notify = (message: string) => {
+    setToast(message);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(''), 6500);
+  };
+  if (!connection.current)
+    connection.current = new Connection(
+      (v) => {
+        offset.current = v.serverNow - Date.now();
+        setRoom(v);
+      },
+      (s, l) => {
+        setStatus(s);
+        if (l !== undefined) setLatency(l);
+      },
+      notify,
+      () => setPending(false),
+    );
+  useEffect(() => {
+    const raw = localStorage.getItem('mp-seat');
+    if (raw) {
+      try {
+        const c = JSON.parse(raw) as Credentials;
+        void connection.current!.connect(c, true);
+      } catch {
+        localStorage.removeItem('mp-seat');
+      }
+    }
+    void refresh();
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => {
+      clearInterval(tick);
+      connection.current?.stop();
+    };
+  }, []);
+  useEffect(() => {
+    if (!room?.game) return;
+    const g = room.game;
+    if (tutorialGame && tutorial === 0) setTutorial(1);
+    if (tutorialGame && tutorial === 1 && g.phase === 'purchase' && g.activeId === room.viewerId)
+      setTutorial(2);
+    if (tutorialGame && tutorial === 2 && g.phase === 'manage') setTutorial(3);
+    if (tutorialGame && tutorial === 3 && g.turn > 0) setTutorial(4);
+  }, [room?.game?.revision]);
+  useEffect(() => {
+    if (room?.game?.auction) setBid(room.game.auction.highBid + 10);
+  }, [room?.game?.auction?.highBid]);
+  async function refresh() {
+    try {
+      setList(await api<RoomListing[]>('/api/rooms'));
+    } catch {
+      notify('暂时无法读取大厅，请确认服务已启动');
+    }
+  }
+  async function enter(create: boolean, spectator = false, teaching = false) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      localStorage.setItem('mp-name', name);
+      const chosen = teaching ? { ...DEFAULT_SETTINGS, maxPlayers: 2, minutes: 10 } : settings;
+      const c = await api<Credentials>(
+        create ? '/api/rooms' : `/api/rooms/${code.trim().toUpperCase()}/join`,
+        create
+          ? { name, characterId: role, password, settings: chosen }
+          : { name, password, characterId: role, spectator },
+      );
+      localStorage.setItem(
+        'mp-seat',
+        JSON.stringify({ code: c.code, seatId: c.seatId, token: c.token }),
+      );
+      await connection.current!.connect(c);
+      setDialog(null);
+      history.replaceState({}, '', `?room=${c.code}`);
+      setSelectedTile(null);
+      if (teaching) {
+        setTutorialGame(true);
+        setTutorial(0);
+      }
+    } catch (error) {
+      notify((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  function lobby(type: string, extras = {}) {
+    if (status !== '已同步') {
+      notify('请等待连接恢复后操作');
+      return;
+    }
+    connection.current!.send('lobby', { type, ...extras });
+  }
+  function command(action: GameAction) {
+    const g = roomRef.current?.game;
+    if (!g || pending || status !== '已同步') return;
+    setPending(true);
+    connection.current!.command({ id: crypto.randomUUID(), revision: g.revision, action });
+  }
+  function leave() {
+    lobby('leave');
+    setTimeout(() => connection.current!.stop(), 100);
+    localStorage.removeItem('mp-seat');
+    setRoom(null);
+    setDialog(null);
+    setStatus('尚未连接');
+    history.replaceState({}, '', '/');
+    setTutorial(null);
+    setTutorialGame(false);
+    void refresh();
+  }
+  const g = room?.game,
+    me = g?.players.find((p) => p.id === room!.viewerId),
+    map = mapById(room?.settings.mapId ?? settings.mapId),
+    active = g?.players.find((p) => p.id === g.activeId),
+    myTurn = !!g && g.activeId === room?.viewerId && !me?.bankrupt,
+    canManage = myTurn && ['roll', 'manage'].includes(g!.phase) && !g!.trade;
+  const connected = status === '已同步',
+    disabled = pending || !connected;
+  const selected = selectedTile === null ? null : map.tiles[selectedTile],
+    property = g?.properties.find((p) => p.tile === selectedTile),
+    owner = g?.players.find((p) => p.id === property?.owner);
+  const openCard = (id: string) => {
+    setSelectedCard(cardById(id)!);
+    setCardTarget('');
+    setDialog('card');
+  };
+  const cardTargets =
+    selectedCard?.target === 'player'
+      ? g?.players
+          .filter(
+            (p) =>
+              p.id !== me?.id && !p.bankrupt && (g.settings.mode !== 'team' || p.team !== me?.team),
+          )
+          .map((p) => ({ id: p.id, name: p.name }))
+      : g?.properties
+          .filter(
+            (p) =>
+              selectedCard?.target === 'tile' ||
+              (selectedCard?.target === 'ownProperty' && p.owner === me?.id) ||
+              (selectedCard?.target === 'emptyProperty' && !p.owner) ||
+              (selectedCard?.target === 'enemyProperty' &&
+                p.owner &&
+                p.owner !== me?.id &&
+                (g.settings.mode !== 'team' ||
+                  g.players.find((x) => x.id === p.owner)?.team !== me?.team)),
+          )
+          .map((p) => ({
+            id: String(p.tile),
+            name: `${map.tiles[p.tile].name} · ${p.level} 级${p.protectedUntil >= g.round ? ' · 保护中' : ''}`,
+          }));
+  const invite = () => {
+    const url = `${location.origin}/?room=${room!.code}`;
+    void navigator.clipboard
+      .writeText(url)
+      .then(() => notify('邀请链接已复制，房间密码需单独告知好友'))
+      .catch(() => notify(`邀请链接：${url}`));
+  };
+  return (
+    <>
+      <div className="app-shell">
+        <header className="topbar">
+          <a
+            className="brand"
+            href="/"
+            onClick={(e) => {
+              if (room) {
+                e.preventDefault();
+                setDialog('exit');
+              }
+            }}
+          >
+            <span className="brand-mark">M</span>
+            <span>
+              富翁之旅<small>MONOPOLY PRO</small>
+            </span>
+          </a>
+          <nav>
+            <button
+              onClick={() => {
+                setRulesTab('规则');
+                setDialog('rules');
+              }}
+            >
+              规则图鉴
+            </button>
+            <button onClick={() => setDialog('settings')}>设置</button>
+            {room && <button onClick={() => setDialog('exit')}>离开房间</button>}
+          </nav>
+          <div className={`connection ${connected ? 'online' : ''}`} aria-live="polite">
+            <i />
+            {room ? status : '朋友的下一场聚会'}
+            {connected && latency !== undefined && <small>{latency} ms</small>}
+          </div>
+        </header>
+        {!room ? (
+          <main className="home">
+            <section className="hero-copy">
+              <div className="eyebrow">一座小城 · 无限可能</div>
+              <h1>
+                下一站，
+                <br />
+                成为大富翁<span>。</span>
+              </h1>
+              <p>
+                买下一条街，打出一张好牌。
+                <br />
+                把城市变成你的主场，和朋友一起出发。
+              </p>
+              <div className="hero-actions">
+                <button className="primary" onClick={() => setDialog('create')}>
+                  创建朋友房间 <span>↗</span>
+                </button>
+                <button className="secondary" onClick={() => setDialog('join')}>
+                  加入房间
+                </button>
+              </div>
+              <button className="text-button" onClick={() => void enter(true, false, true)}>
+                ✦ 第一次玩？开始互动教学
+              </button>
+              <div className="facts">
+                <span>
+                  <b>2–6</b> 真人 / 机器人
+                </span>
+                <span>
+                  <b>4</b> 主题地图
+                </span>
+                <span>
+                  <b>30</b> 策略卡牌
+                </span>
+              </div>
+            </section>
+            <section className="hero-scene">
+              <div className="scene-tag">
+                {map.name}
+                <small>{map.subtitle}</small>
+              </div>
+              <Board map={map} onTile={setSelectedTile} follow={false} reduced={reduced} />
+              <div className="scene-caption">
+                <span>原创城市微缩景观</span>
+                <span>拖动探索 ↔</span>
+              </div>
+            </section>
+            <section className="map-section">
+              <div className="section-heading">
+                <div>
+                  <div className="eyebrow">选择你的旅程</div>
+                  <h2>每一座城，都有新玩法</h2>
+                </div>
+                <span>四种地图机制 · 随时换个主场</span>
+              </div>
+              <div className="map-grid">
+                {MAPS.map((m, i) => (
+                  <button
+                    className={`map-card ${settings.mapId === m.id ? 'selected' : ''}`}
+                    style={{ '--map-color': m.color } as React.CSSProperties}
+                    key={m.id}
+                    onClick={() => setSettings({ ...settings, mapId: m.id })}
+                  >
+                    <div className="map-art">
+                      <span>{['☀', '≈', '✧', '⌘'][i]}</span>
+                      <i />
+                      <i />
+                      <i />
+                    </div>
+                    <small>
+                      0{i + 1} / {m.recommended}
+                    </small>
+                    <h3>{m.name}</h3>
+                    <p>{m.description}</p>
+                    <span className="map-meta">
+                      {m.subtitle} <b>↗</b>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+            <section className="lobby-section">
+              <div className="section-heading">
+                <div>
+                  <div className="eyebrow">一起玩更有趣</div>
+                  <h2>朋友们正在这里</h2>
+                </div>
+                <button className="secondary" onClick={() => void refresh()}>
+                  刷新大厅
+                </button>
+              </div>
+              {list.length ? (
+                <div className="room-list">
+                  {list.map((r) => (
+                    <button
+                      key={r.code}
+                      onClick={() => {
+                        setCode(r.code);
+                        setDialog('join');
+                      }}
+                    >
+                      <span className="room-code">
+                        {r.locked ? '▣' : '◇'} {r.code}
+                      </span>
+                      <span>{mapById(r.mapId).name}</span>
+                      <span>
+                        {r.status === 'waiting'
+                          ? '等待组局'
+                          : r.status === 'finished'
+                            ? '已结算'
+                            : '对局中 · 可观战'}
+                      </span>
+                      <b>
+                        {r.players}/{r.maxPlayers} →
+                      </b>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-state">还没有房间。邀请朋友，开启今天的第一场旅程。</div>
+              )}
+            </section>
+            <footer>
+              MONOPOLY PRO <span>在小小城市里，创造大大的故事。</span>
+            </footer>
+          </main>
+        ) : (
+          <main className="room-page">
+            <div className="room-heading">
+              <div>
+                <div className="eyebrow">{g ? '城市正在发生故事' : '好友专属的起点'}</div>
+                <h1>
+                  {g ? map.name : '准备出发'}{' '}
+                  <span className="badge">
+                    {room.settings.mode === 'team'
+                      ? '团队战'
+                      : room.settings.mode === 'quick'
+                        ? '快速战'
+                        : '自由战'}
+                  </span>
+                </h1>
+              </div>
+              <div className="invite">
+                <span>
+                  房间 <b>{room.code}</b>
+                  {room.locked ? ' · 密码房' : ''}
+                </span>
+                <button className="secondary" onClick={invite}>
+                  复制邀请
+                </button>
+              </div>
+            </div>
+            {!g ? (
+              <div className="waiting-layout">
+                <section className="paper">
+                  <div className="section-heading">
+                    <h2>旅行伙伴</h2>
+                    <span>
+                      {room.seats.filter((s) => !s.spectator).length}/{room.settings.maxPlayers}{' '}
+                      席位
+                    </span>
+                  </div>
+                  <div className="seat-grid">
+                    {room.seats
+                      .filter((s) => !s.spectator)
+                      .map((s) => {
+                        const c = characterById(s.characterId);
+                        return (
+                          <article
+                            className={`seat ${s.id === room.viewerId ? 'self' : ''}`}
+                            key={s.id}
+                          >
+                            <div className="avatar" style={{ background: c.color }}>
+                              {c.icon}
+                            </div>
+                            <div>
+                              <h3>
+                                {s.name} {s.id === room.hostId && <small>房主</small>}
+                              </h3>
+                              <p>
+                                {c.name} · {c.title}
+                              </p>
+                              <span className={`seat-status ${s.ready ? 'ready' : ''}`}>
+                                {s.bot
+                                  ? '机器人 · 已准备'
+                                  : !s.connected
+                                    ? '连接已断开'
+                                    : s.ready
+                                      ? '已准备'
+                                      : '选择角色中'}
+                                {room.settings.mode === 'team'
+                                  ? ` · ${s.team === 0 ? '青' : '橙'}队`
+                                  : ''}
+                              </span>
+                            </div>
+                            {s.bot && room.isHost && (
+                              <button
+                                className="icon-button"
+                                aria-label={`移除${s.name}`}
+                                onClick={() => lobby('removeBot', { seatId: s.id })}
+                              >
+                                ×
+                              </button>
+                            )}
+                          </article>
+                        );
+                      })}
+                    {Array.from({
+                      length: Math.max(
+                        0,
+                        room.settings.maxPlayers - room.seats.filter((s) => !s.spectator).length,
+                      ),
+                    }).map((_, i) => (
+                      <button
+                        className="empty-seat"
+                        key={i}
+                        disabled={!room.isHost || disabled}
+                        title={!room.isHost ? '由房主添加机器人' : '添加一个准备好的机器人席位'}
+                        onClick={() => lobby('addBot')}
+                      >
+                        ＋<span>{room.isHost ? '添加机器人' : '等待朋友加入'}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="section-heading">
+                    <h2>选择你的角色</h2>
+                    <span>天赋每 3 轮可使用一次</span>
+                  </div>
+                  <div className="character-grid">
+                    {CHARACTERS.map((c) => (
+                      <button
+                        key={c.id}
+                        className={`character ${room.seats.find((s) => s.id === room.viewerId)?.characterId === c.id ? 'selected' : ''}`}
+                        disabled={
+                          disabled || room.seats.find((s) => s.id === room.viewerId)?.spectator
+                        }
+                        onClick={() => lobby('character', { characterId: c.id })}
+                      >
+                        <span className="avatar" style={{ background: c.color }}>
+                          {c.icon}
+                        </span>
+                        <b>{c.name}</b>
+                        <small>{c.title}</small>
+                        <p>{c.description}</p>
+                        <em>{c.ability}</em>
+                      </button>
+                    ))}
+                  </div>
+                  {room.settings.mode === 'team' && (
+                    <div className="team-picker">
+                      <span>我的队伍</span>
+                      {[0, 1].map((team) => (
+                        <button
+                          key={team}
+                          disabled={disabled}
+                          onClick={() => lobby('team', { team })}
+                        >
+                          {team === 0 ? '青队' : '橙队'}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="start-bar">
+                    <p>
+                      所有真人准备后，由房主开始。
+                      <br />
+                      <small>
+                        观战席：{room.seats.filter((s) => s.spectator && s.connected).length}
+                      </small>
+                    </p>
+                    {!room.seats.find((s) => s.id === room.viewerId)?.spectator && (
+                      <button
+                        className="secondary"
+                        disabled={disabled}
+                        onClick={() => lobby('ready')}
+                      >
+                        {room.seats.find((s) => s.id === room.viewerId)?.ready
+                          ? '取消准备'
+                          : '我准备好了'}
+                      </button>
+                    )}
+                    {room.isHost && (
+                      <button
+                        className="primary"
+                        disabled={
+                          disabled ||
+                          room.seats.filter((s) => !s.spectator).length < 2 ||
+                          !room.seats
+                            .filter((s) => !s.spectator)
+                            .every((s) => s.ready && (s.connected || s.bot))
+                        }
+                        title="需要至少两个席位，所有真人连接并准备"
+                        onClick={() => lobby('start')}
+                      >
+                        开始旅程 →
+                      </button>
+                    )}
+                  </div>
+                </section>
+                <aside className="paper room-settings">
+                  <h2>旅程设置</h2>
+                  <label>
+                    地图
+                    <select
+                      value={room.settings.mapId}
+                      disabled={!room.isHost || disabled}
+                      onChange={(e) =>
+                        lobby('settings', { settings: { ...room.settings, mapId: e.target.value } })
+                      }
+                    >
+                      {MAPS.map((m) => (
+                        <option value={m.id} key={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="hint">{map.description}</p>
+                  <label>
+                    模式
+                    <select
+                      value={room.settings.mode}
+                      disabled={!room.isHost || disabled}
+                      onChange={(e) =>
+                        lobby('settings', {
+                          settings: {
+                            ...room.settings,
+                            mode: e.target.value,
+                            minutes: e.target.value === 'quick' ? 10 : 30,
+                          },
+                        })
+                      }
+                    >
+                      <option value="free">自由对战</option>
+                      <option value="quick">快速对战</option>
+                      <option value="team">团队战 2v2 / 3v3</option>
+                    </select>
+                  </label>
+                  <label>
+                    时间限制
+                    <select
+                      value={room.settings.minutes}
+                      disabled={!room.isHost || disabled}
+                      onChange={(e) =>
+                        lobby('settings', {
+                          settings: { ...room.settings, minutes: Number(e.target.value) },
+                        })
+                      }
+                    >
+                      {[5, 10, 15, 30, 45, 60].map((v) => (
+                        <option key={v} value={v}>
+                          {v} 分钟
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    起始现金
+                    <select
+                      value={room.settings.initialCash}
+                      disabled={!room.isHost || disabled}
+                      onChange={(e) =>
+                        lobby('settings', {
+                          settings: { ...room.settings, initialCash: Number(e.target.value) },
+                        })
+                      }
+                    >
+                      {[1000, 2000, 3000, 5000, 10000].map((v) => (
+                        <option key={v} value={v}>
+                          {money(v)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="tip-box">
+                    ✦{' '}
+                    {room.settings.mode === 'team'
+                      ? '团队需均分为两队，同队地产免租。'
+                      : '到时按现金、存款和地产回收价值，扣除待付债务排名。'}
+                    <br />
+                    断线 15 秒后机器人临时托管，回来即可接手。
+                  </div>
+                  <Chat
+                    room={room}
+                    chat={chat}
+                    setChat={setChat}
+                    send={() => {
+                      connection.current!.send('chat', chat);
+                      setChat('');
+                    }}
+                    disabled={disabled}
+                  />
+                </aside>
+              </div>
+            ) : (
+              <>
+                <div className="game-layout">
+                  <section className="board-wrap">
+                    <div className="board-meta">
+                      <span>
+                        第 <b>{g.round}</b> 轮 <i>·</i> {phaseNames[g.phase]}
+                      </span>
+                      <span>
+                        {Math.max(0, Math.ceil((g.endsAt - serverNow) / 60000))} 分钟剩余{' '}
+                        <button className="text-button" onClick={() => setFollow(!follow)}>
+                          {follow ? '◎ 跟随回合' : '○ 自由视角'}
+                        </button>
+                      </span>
+                    </div>
+                    <Board
+                      map={map}
+                      game={g}
+                      highlight={
+                        dialog === 'card' && selectedCard
+                          ? selectedCard.target === 'player'
+                            ? g.players
+                                .filter((p) => cardTargets?.some((t) => t.id === p.id))
+                                .map((p) => p.position)
+                            : (cardTargets ?? []).map((t) => Number(t.id))
+                          : (g.pendingPath?.choices ??
+                            (selectedTile === null ? [] : [selectedTile]))
+                      }
+                      onTile={setSelectedTile}
+                      follow={follow}
+                      reduced={reduced}
+                    />
+                    {hints &&
+                      g.events
+                        .filter((e) => !['turn', 'dice', 'move', 'start'].includes(e.kind))
+                        .slice(-1)
+                        .map(
+                          (e) =>
+                            serverNow - e.at < 10000 && (
+                              <div className={`board-feedback ${e.kind}`} key={e.id} role="status">
+                                {e.text}
+                              </div>
+                            ),
+                        )}
+                    <div className="dice-display">
+                      {g.lastDice.length ? (
+                        g.lastDice.map((d, i) => (
+                          <span key={i}>{['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'][d]}</span>
+                        ))
+                      ) : (
+                        <span>⚄</span>
+                      )}
+                      <small>
+                        {active ? `${active.name}的${phaseNames[g.phase]}` : '旅程结束'}
+                      </small>
+                    </div>
+                    <div className="tile-strip" aria-label="地图地点">
+                      {map.tiles.map((t) => (
+                        <button
+                          key={t.index}
+                          className={selectedTile === t.index ? 'selected' : ''}
+                          onClick={() => setSelectedTile(t.index)}
+                          aria-label={`查看${t.name}`}
+                        >
+                          {t.index}
+                          <span>{t.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                  <aside className="game-sidebar">
+                    <section className="paper player-panel">
+                      <div className="section-heading">
+                        <h2>城市伙伴</h2>
+                        <small>净资产</small>
+                      </div>
+                      {g.players.map((p) => {
+                        const c = characterById(p.characterId),
+                          s = room.seats.find((s) => s.id === p.id);
+                        return (
+                          <div
+                            className={`player-row ${g.activeId === p.id ? 'active' : ''} ${p.bankrupt ? 'bankrupt' : ''}`}
+                            key={p.id}
+                          >
+                            <span className="avatar" style={{ background: c.color }}>
+                              {c.icon}
+                            </span>
+                            <div>
+                              <b>
+                                {p.name}
+                                {p.id === room.viewerId ? ' · 我' : ''}
+                              </b>
+                              <small>
+                                {p.bankrupt
+                                  ? '已破产 · 观战'
+                                  : s?.bot
+                                    ? '机器人'
+                                    : s?.connected
+                                      ? '在线'
+                                      : s &&
+                                          (s.takeover ||
+                                            (s.disconnectedAt !== null &&
+                                              serverNow - s.disconnectedAt >= room.takeoverAfterMs))
+                                        ? '断线 · 机器人托管'
+                                        : '断线 · 等待恢复'}
+                                {g.settings.mode === 'team'
+                                  ? ` · ${p.team === 0 ? '青' : '橙'}队`
+                                  : ''}
+                              </small>
+                            </div>
+                            <strong>
+                              {money(p.assets)}
+                              <small>{p.cardCount} 张牌</small>
+                            </strong>
+                          </div>
+                        );
+                      })}
+                    </section>
+                    <section className={`paper action-panel ${sheetOpen ? 'sheet-open' : ''}`}>
+                      <button
+                        className="drawer-close icon-button"
+                        aria-label="关闭详情抽屉"
+                        onClick={() => setSheetOpen(false)}
+                      >
+                        ×
+                      </button>
+                      <div className="panel-tabs">
+                        {['操作', '资产', '动态'].map((p) => (
+                          <button
+                            className={panel === p ? 'selected' : ''}
+                            key={p}
+                            onClick={() => setPanel(p)}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                      {panel === '操作' ? (
+                        <>
+                          <div className="turn-prompt">
+                            <span className="eyebrow">
+                              {myTurn
+                                ? '轮到你了'
+                                : me?.bankrupt
+                                  ? '继续观战'
+                                  : '等待时也能查看地图'}
+                            </span>
+                            <h2>
+                              {g.phase === 'finished'
+                                ? '这段旅程，圆满落幕'
+                                : g.trade
+                                  ? '交易提案待处理'
+                                  : myTurn
+                                    ? phaseNames[g.phase]
+                                    : `${active?.name ?? '伙伴'}正在操作`}
+                            </h2>
+                            <p>
+                              {g.debt
+                                ? `${g.players.find((p) => p.id === g.debt!.playerId)?.name}需支付 ${g.debt.amount}，可取款、出售建筑或抵押。`
+                                : g.auction
+                                  ? `${map.tiles[g.auction.tile].name}，最高出价 ${g.auction.highBid}。退出后不能再次参与。`
+                                  : g.pendingPath
+                                    ? '点选道路后继续走完剩余步数。'
+                                    : myTurn
+                                      ? '操作由服务端确认，费用和结果会同步给所有玩家。'
+                                      : '你可以浏览地产、手牌、图鉴，或与朋友聊天。'}
+                            </p>
+                          </div>
+                          {g.trade && (
+                            <div className="tip-box">
+                              {g.players.find((p) => p.id === g.trade!.from)?.name}给出{' '}
+                              {g.trade.giveCash}
+                              {g.trade.giveTile !== null
+                                ? ` + ${map.tiles[g.trade.giveTile].name}`
+                                : ''}
+                              ，换取 {g.trade.wantCash}
+                              {g.trade.wantTile !== null
+                                ? ` + ${map.tiles[g.trade.wantTile].name}`
+                                : ''}
+                              <br />
+                              有效期剩余{' '}
+                              {Math.max(0, Math.ceil((g.trade.expiresAt - serverNow) / 1000))} 秒
+                            </div>
+                          )}
+                          <div className="actions">
+                            {g.actions
+                              .filter(
+                                (a) =>
+                                  a.primary ||
+                                  ['tradeAccept', 'tradeReject', 'ferry'].includes(a.action.type),
+                              )
+                              .map((a, i) => (
+                                <div key={i}>
+                                  <button
+                                    className={a.primary ? 'primary' : 'secondary'}
+                                    disabled={disabled}
+                                    onClick={() =>
+                                      command(
+                                        a.action.type === 'bid'
+                                          ? { type: 'bid', amount: bid }
+                                          : a.action,
+                                      )
+                                    }
+                                  >
+                                    {pending ? '等待确认…' : a.label}
+                                  </button>
+                                  {hints && <small>{a.hint}</small>}
+                                </div>
+                              ))}
+                          </div>
+                          {myTurn && g.phase === 'auction' && (
+                            <label>
+                              我的竞价
+                              <input
+                                aria-label="竞价金额"
+                                type="number"
+                                min={g.auction!.highBid + 10}
+                                max={me?.cash}
+                                step={10}
+                                value={bid}
+                                onChange={(e) => setBid(Number(e.target.value))}
+                              />
+                            </label>
+                          )}
+                          {me && (
+                            <div className="wallet">
+                              <div>
+                                <small>可用现金</small>
+                                <b>{money(me.cash)}</b>
+                              </div>
+                              <div>
+                                <small>银行存款</small>
+                                <b>{money(me.deposit)}</b>
+                              </div>
+                              <div>
+                                <small>租金护盾</small>
+                                <b>{me.shield}</b>
+                              </div>
+                            </div>
+                          )}
+                          {g.actions
+                            .filter(
+                              (a) =>
+                                !a.primary &&
+                                ![
+                                  'tradeAccept',
+                                  'tradeReject',
+                                  'ferry',
+                                  'build',
+                                  'downgrade',
+                                  'mortgage',
+                                  'redeem',
+                                ].includes(a.action.type),
+                            )
+                            .map((a, i) => (
+                              <button
+                                key={i}
+                                className="secondary full"
+                                disabled={disabled}
+                                title={a.hint}
+                                onClick={() => command(a.action)}
+                              >
+                                {a.label}
+                                <small>{a.hint}</small>
+                              </button>
+                            ))}
+                          {me && !me.bankrupt && g.phase !== 'finished' && (
+                            <>
+                              <div className="inline-actions">
+                                <button
+                                  disabled={!canManage || disabled}
+                                  title={
+                                    canManage
+                                      ? '现金和无建筑地产可交易'
+                                      : '在自己的掷骰或经营阶段发起'
+                                  }
+                                  onClick={() => {
+                                    setTradeTo(
+                                      g.players.find((p) => p.id !== me.id && !p.bankrupt)?.id ??
+                                        '',
+                                    );
+                                    setDialog('trade');
+                                  }}
+                                >
+                                  ⇄ 发起交易
+                                </button>
+                                <button
+                                  disabled={
+                                    !canManage || disabled || map.tiles[me.position].kind !== 'shop'
+                                  }
+                                  title={
+                                    map.tiles[me.position].kind !== 'shop'
+                                      ? '抵达卡牌商店后可购买'
+                                      : '购买指定卡牌'
+                                  }
+                                  onClick={() => setDialog('shop')}
+                                >
+                                  ♧ 卡牌商店
+                                </button>
+                              </div>
+                              <div className="hand-heading">
+                                <b>
+                                  我的手牌 <small>{me.cardCount}/8</small>
+                                </b>
+                                <small>
+                                  {canManage ? '点击选择目标' : '自己的可操作阶段可使用'}
+                                </small>
+                              </div>
+                              <div className="hand">
+                                {me.cards?.map((id, i) => {
+                                  const c = cardById(id)!;
+                                  return (
+                                    <button
+                                      key={`${id}-${i}`}
+                                      className={`card-mini ${c.category}`}
+                                      disabled={!canManage || disabled}
+                                      onClick={() => openCard(id)}
+                                      title={`${c.description}；${!canManage ? '等待自己的掷骰或经营阶段' : '点击查看目标与效果'}`}
+                                    >
+                                      <span>{c.icon}</span>
+                                      <b>{c.name}</b>
+                                      <small>{CATEGORY_NAMES[c.category]}</small>
+                                    </button>
+                                  );
+                                })}
+                                {!me.cardCount && (
+                                  <p className="hint">手牌用完了，可在商店补充，或通过奇遇获得。</p>
+                                )}
+                              </div>
+                            </>
+                          )}
+                          {!me && (
+                            <div className="tip-box">
+                              你正在观战。手牌仅本人可见，观众不能进行操作。
+                            </div>
+                          )}
+                        </>
+                      ) : panel === '资产' ? (
+                        <>
+                          <Assets
+                            game={g}
+                            me={me}
+                            map={map}
+                            disabled={disabled}
+                            command={command}
+                            select={setSelectedTile}
+                          />
+                        </>
+                      ) : (
+                        <div className="event-feed" aria-live="polite">
+                          {[...g.events]
+                            .reverse()
+                            .slice(0, 30)
+                            .map((e) => (
+                              <div className={`event ${e.kind}`} key={e.id}>
+                                <small>
+                                  {new Date(e.at).toLocaleTimeString('zh-CN', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </small>
+                                <span>{e.text}</span>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </section>
+                    <section className="paper">
+                      <Chat
+                        room={room}
+                        chat={chat}
+                        setChat={setChat}
+                        send={() => {
+                          connection.current!.send('chat', chat);
+                          setChat('');
+                        }}
+                        disabled={disabled}
+                      />
+                    </section>
+                  </aside>
+                </div>
+                {g.phase === 'finished' && (
+                  <section className="settlement paper">
+                    <div className="eyebrow">旅程纪念册</div>
+                    <h2>
+                      {g.players
+                        .filter((p) => g.winners.includes(p.id))
+                        .map((p) => p.name)
+                        .join('、')}
+                      获胜！
+                    </h2>
+                    <p>{g.finishReason}</p>
+                    <div className="ranking">
+                      {[...g.players]
+                        .sort((a, b) => b.assets - a.assets)
+                        .map((p, i) => (
+                          <div key={p.id}>
+                            <span>0{i + 1}</span>
+                            <b>
+                              {p.name} {g.winners.includes(p.id) ? '✦' : ''}
+                            </b>
+                            <strong>{money(p.assets)}</strong>
+                            <small>
+                              现金 {money(p.cash)} · 存款 {money(p.deposit)}
+                            </small>
+                          </div>
+                        ))}
+                    </div>
+                    {room.isHost && (
+                      <button className="primary" onClick={() => lobby('newMatch')}>
+                        再开启一段旅程 →
+                      </button>
+                    )}
+                  </section>
+                )}
+              </>
+            )}
+            {g && (
+              <>
+                <div
+                  className={`drawer-backdrop ${sheetOpen ? 'open' : ''}`}
+                  onClick={() => setSheetOpen(false)}
+                />
+                <nav className="mobile-nav" aria-label="对局快捷面板">
+                  {['操作', '资产', '动态'].map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => {
+                        setPanel(p);
+                        setSheetOpen(true);
+                      }}
+                    >
+                      打开{p}
+                    </button>
+                  ))}
+                </nav>
+              </>
+            )}
+          </main>
+        )}
+      </div>
+      {selected && (
+        <div className="tile-detail paper" role="dialog" aria-label="地点详情">
+          <button
+            className="icon-button"
+            aria-label="关闭地点详情"
+            onClick={() => setSelectedTile(null)}
+          >
+            ×
+          </button>
+          <div className="eyebrow">
+            地点 {selected.index} / {kindNames[selected.kind]}
+          </div>
+          <h2>{selected.name}</h2>
+          {selected.kind === 'property' ? (
+            <>
+              <div className="detail-stats">
+                <span>
+                  购买<b>{selected.price}</b>
+                </span>
+                <span>
+                  基础租金<b>{selected.rent}</b>
+                </span>
+                <span>
+                  建设<b>{selected.buildCost}</b>
+                </span>
+              </div>
+              <p>
+                {owner
+                  ? `${owner.name}所有 · ${property?.level} 级${property?.mortgaged ? ' · 已抵押，不收租' : ''}`
+                  : '待售地产 · 落在这里可以购买或拍卖'}
+              </p>
+              <small>
+                建筑租金倍率：1 / 2.5 / 5 / 9；同街区全占 +30%。角色、卡牌和护盾也会影响实际租金。
+              </small>
+            </>
+          ) : (
+            <p>{kindNames[selected.kind]}</p>
+          )}
+          {map.id === 'ancient' && [9, 23].includes(selected.index) && (
+            <p>偶数轮机关开启，可以跨城；奇数轮沿环城道路前进。</p>
+          )}
+          {selected.exits.length > 1 && (
+            <p>岔路：{selected.exits.map((i) => map.tiles[i].name).join(' / ')}</p>
+          )}
+        </div>
+      )}
+      {dialog && (dialog === 'create' || dialog === 'join') && (
+        <Modal
+          title={dialog === 'create' ? '创建朋友房间' : '加入朋友的旅程'}
+          close={() => setDialog(null)}
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void enter(dialog === 'create');
+            }}
+          >
+            <label>
+              游客昵称
+              <input
+                maxLength={16}
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+            {dialog === 'join' && (
+              <label>
+                房间码
+                <input
+                  maxLength={6}
+                  required
+                  value={code}
+                  placeholder="输入 6 位房间码"
+                  onChange={(e) => setCode(e.target.value.toUpperCase())}
+                />
+              </label>
+            )}
+            <label>
+              {dialog === 'create' ? '设置密码（可留空）' : '房间密码（无密码可留空）'}
+              <input
+                maxLength={64}
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </label>
+            {dialog === 'create' && (
+              <>
+                <label>
+                  地图
+                  <select
+                    value={settings.mapId}
+                    onChange={(e) => setSettings({ ...settings, mapId: e.target.value })}
+                  >
+                    {MAPS.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  席位上限
+                  <select
+                    value={settings.maxPlayers}
+                    onChange={(e) =>
+                      setSettings({ ...settings, maxPlayers: Number(e.target.value) })
+                    }
+                  >
+                    {[2, 3, 4, 5, 6].map((v) => (
+                      <option key={v}>{v}</option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            )}
+            <label>
+              初始角色
+              <select value={role} onChange={(e) => setRole(e.target.value)}>
+                {CHARACTERS.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} · {c.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="hint">对局开始后加入会进入观战席。刷新可恢复原席位。</p>
+            <button className="primary full" disabled={busy}>
+              {busy ? '正在入座…' : dialog === 'create' ? '创建并进入' : '加入房间'}
+            </button>
+            {dialog === 'join' && (
+              <button
+                className="secondary full"
+                type="button"
+                disabled={busy}
+                onClick={() => void enter(false, true)}
+              >
+                以观众身份加入
+              </button>
+            )}
+          </form>
+        </Modal>
+      )}
+      {dialog === 'card' && selectedCard && g && (
+        <Modal title={`使用「${selectedCard.name}」`} close={() => setDialog(null)}>
+          <div className="card-preview">
+            <span>{selectedCard.icon}</span>
+            <p>{selectedCard.description}</p>
+            <small>{CATEGORY_NAMES[selectedCard.category]} · 使用后消耗 1 张</small>
+          </div>
+          {selectedCard.target !== 'self' && (
+            <label>
+              选择目标
+              <select value={cardTarget} onChange={(e) => setCardTarget(e.target.value)}>
+                <option value="">请选择高亮范围内的目标</option>
+                {cardTargets?.map((t) => (
+                  <option value={t.id} key={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {selectedCard.effect === 'dice' && (
+            <label>
+              骰子点数
+              <select value={diceValue} onChange={(e) => setDiceValue(Number(e.target.value))}>
+                {[1, 2, 3, 4, 5, 6].map((n) => (
+                  <option key={n}>{n}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          <p className="hint">
+            {selectedCard.effect === 'remoteBuy'
+              ? '远程购买会额外扣除目标地产的完整地价。'
+              : selectedCard.effect === 'move'
+                ? '移动后正常处理落点，可能触发租金、税费或岔路。'
+                : '服务端会再次检查目标、资金和卡牌时机。'}
+          </p>
+          <button
+            className="primary full"
+            disabled={disabled || !canManage || (selectedCard.target !== 'self' && !cardTarget)}
+            onClick={() => {
+              command({
+                type: 'playCard',
+                cardId: selectedCard.id,
+                ...(selectedCard.target === 'player'
+                  ? { targetId: cardTarget }
+                  : selectedCard.target === 'self'
+                    ? {}
+                    : { tile: Number(cardTarget) }),
+                ...(selectedCard.effect === 'dice' ? { value: diceValue } : {}),
+              });
+              if (cardTarget && selectedCard.target !== 'player')
+                setSelectedTile(Number(cardTarget));
+              setDialog(null);
+            }}
+          >
+            确认使用
+          </button>
+        </Modal>
+      )}
+      {dialog === 'trade' && g && me && (
+        <Modal title="提出一笔交易" close={() => setDialog(null)}>
+          <label>
+            交易伙伴
+            <select
+              value={tradeTo}
+              onChange={(e) => {
+                setTradeTo(e.target.value);
+                setWantTile('');
+              }}
+            >
+              {g.players
+                .filter((p) => p.id !== me.id && !p.bankrupt)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} · 现金 {p.cash}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <div className="trade-grid">
+            <div>
+              <h3>我给出</h3>
+              <label>
+                现金
+                <input
+                  type="number"
+                  min={0}
+                  max={me.cash}
+                  value={giveCash}
+                  onChange={(e) => setGiveCash(Number(e.target.value))}
+                />
+              </label>
+              <label>
+                地产
+                <select value={giveTile} onChange={(e) => setGiveTile(e.target.value)}>
+                  <option value="">不含地产</option>
+                  {g.properties
+                    .filter((p) => p.owner === me.id && !p.level && !p.mortgaged)
+                    .map((p) => (
+                      <option key={p.tile} value={p.tile}>
+                        {map.tiles[p.tile].name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+            <div>
+              <h3>我希望获得</h3>
+              <label>
+                现金
+                <input
+                  type="number"
+                  min={0}
+                  value={wantCash}
+                  onChange={(e) => setWantCash(Number(e.target.value))}
+                />
+              </label>
+              <label>
+                地产
+                <select value={wantTile} onChange={(e) => setWantTile(e.target.value)}>
+                  <option value="">不含地产</option>
+                  {g.properties
+                    .filter((p) => p.owner === tradeTo && !p.level && !p.mortgaged)
+                    .map((p) => (
+                      <option key={p.tile} value={p.tile}>
+                        {map.tiles[p.tile].name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+          </div>
+          <p className="hint">
+            双方现金与地产同时交换。仅可交易无建筑、未抵押地产；提案等待期间暂停本回合操作，30
+            秒后自动撤回。
+          </p>
+          <button
+            className="primary full"
+            disabled={
+              disabled ||
+              !canManage ||
+              !tradeTo ||
+              (giveCash + wantCash === 0 && !giveTile && !wantTile)
+            }
+            onClick={() => {
+              command({
+                type: 'tradeOffer',
+                to: tradeTo,
+                giveCash,
+                wantCash,
+                giveTile: giveTile === '' ? null : Number(giveTile),
+                wantTile: wantTile === '' ? null : Number(wantTile),
+              });
+              setDialog(null);
+            }}
+          >
+            发出提案
+          </button>
+        </Modal>
+      )}
+      {dialog === 'shop' && (
+        <Modal title="城市卡牌商店" close={() => setDialog(null)}>
+          <p className="hint">购买指定卡牌，每人最多 8 张。当前现金 {me?.cash}。</p>
+          <div className="catalog-grid">
+            {CARDS.map((c) => (
+              <button
+                key={c.id}
+                disabled={disabled || !canManage || !me || me.cash < c.price || me.cardCount >= 8}
+                title={
+                  me && me.cash < c.price
+                    ? '现金不足'
+                    : me && me.cardCount >= 8
+                      ? '手牌已满'
+                      : c.description
+                }
+                onClick={() => command({ type: 'buyCard', cardId: c.id })}
+              >
+                <span>{c.icon}</span>
+                <b>
+                  {c.name} · {c.price}
+                </b>
+                <p>{c.description}</p>
+              </button>
+            ))}
+          </div>
+        </Modal>
+      )}
+      {dialog === 'rules' && (
+        <Modal title="旅途图鉴" close={() => setDialog(null)}>
+          <div className="panel-tabs">
+            {['规则', '地图', '角色', '卡牌'].map((t) => (
+              <button
+                key={t}
+                className={t === rulesTab ? 'selected' : ''}
+                onClick={() => setRulesTab(t)}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          {rulesTab === '规则' ? (
+            <div className="rule-copy">
+              <h3>01 / 出发与经营</h3>
+              <p>
+                每回合先用卡牌或天赋，再掷两颗骰子。处理落点后，可以升级、抵押、交易，再结束回合。岔路由当前玩家选择。超过
+                45 秒未决定，会执行默认操作。
+              </p>
+              <h3>02 / 城市经济</h3>
+              <p>
+                空地可直接购买，放弃则全员轮流竞拍。至少加价 10，退出后不能再出价。地产可升 3
+                级，租金倍率为 1、2.5、5、9；独占街区额外 +30%。抵押获得半价，赎回支付地价的
+                55%。建筑出售返还标准建设费的一半。
+              </p>
+              <h3>03 / 卡牌、银行与交易</h3>
+              <p>
+                手牌最多 8 张，每个角色有被动与每 3 轮一次的天赋。银行可存取现金，存款每轮带来 3%
+                现金利息。没钱付租金或税费时，先取款、卖建筑或抵押；无法筹齐可破产，将资产清算给债权人或银行。交易经接收人同意后原子交换。
+              </p>
+              <h3>04 / 胜负与队伍</h3>
+              <p>
+                最后仍在经营的一方获胜。到时按现金 + 存款 + 未抵押地产半价 + 建筑回收价 −
+                待付债务结算；并列可共同获胜。团队战要求 2v2 或
+                3v3，同队免租，资产合计结算。快速战默认 10 分钟。
+              </p>
+              <h3>05 / 联机与恢复</h3>
+              <p>
+                刷新后自动恢复原席位。断线 15
+                秒后机器人临时接管，返回后交还控制。服务端重启会恢复已确认动作和待处理决策。请使用原浏览器；清除本地数据会丢失游客恢复凭证。观众看不到私有手牌。
+              </p>
+              <button
+                className="secondary"
+                onClick={() => {
+                  setDialog(null);
+                  setTutorial(room ? 0 : null);
+                  if (!room) void enter(true, false, true);
+                }}
+              >
+                重新开始互动教学
+              </button>
+            </div>
+          ) : rulesTab === '地图' ? (
+            MAPS.map((m) => (
+              <article className="encyclopedia" key={m.id}>
+                <h3>
+                  {m.name} · {m.subtitle}
+                </h3>
+                <p>{m.description}</p>
+              </article>
+            ))
+          ) : rulesTab === '角色' ? (
+            CHARACTERS.map((c) => (
+              <article className="encyclopedia" key={c.id}>
+                <h3>
+                  {c.icon} {c.name} · {c.title}
+                </h3>
+                <p>{c.description}</p>
+                <small>{c.ability}</small>
+              </article>
+            ))
+          ) : (
+            <div className="catalog-grid">
+              {CARDS.map((c) => (
+                <article key={c.id}>
+                  <span>{c.icon}</span>
+                  <h3>{c.name}</h3>
+                  <p>{c.description}</p>
+                  <small>
+                    {CATEGORY_NAMES[c.category]} · 商店 {c.price}
+                  </small>
+                </article>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
+      {dialog === 'settings' && (
+        <Modal title="让旅程更合心意" close={() => setDialog(null)}>
+          {[
+            { label: '自动跟随当前玩家', value: follow, key: 'mp-follow', set: setFollow },
+            { label: '减少移动动画', value: reduced, key: 'mp-reduced', set: setReduced },
+            { label: '显示操作情境提示', value: hints, key: 'mp-hints', set: setHints },
+          ].map((s) => (
+            <label className="toggle-row" key={s.key}>
+              <span>{s.label}</span>
+              <input
+                type="checkbox"
+                checked={s.value}
+                onChange={(e) => {
+                  s.set(e.target.checked);
+                  localStorage.setItem(s.key, String(e.target.checked));
+                }}
+              />
+            </label>
+          ))}
+          <p className="hint">画面设置仅影响本机。规则、随机数和对局进度由服务器裁定。</p>
+        </Modal>
+      )}
+      {dialog === 'exit' && (
+        <Modal title="离开这段旅程？" close={() => setDialog(null)}>
+          <p>
+            主动离开进行中的比赛会清算你的资产并退出经营。临时离开可直接关闭页面，稍后刷新恢复。
+          </p>
+          <div className="hero-actions">
+            <button className="secondary" onClick={() => setDialog(null)}>
+              继续旅程
+            </button>
+            <button className="danger" onClick={leave}>
+              确认退出经营
+            </button>
+          </div>
+        </Modal>
+      )}
+      {tutorial !== null && room && (
+        <div className="tutorial-box paper" role="region" aria-label="互动教学">
+          <div className="eyebrow">旅途小课堂 · {tutorial + 1}/5</div>
+          <button
+            className="icon-button"
+            aria-label="跳过教学"
+            onClick={() => {
+              setTutorial(null);
+              setTutorialGame(false);
+            }}
+          >
+            ×
+          </button>
+          <h3>
+            {
+              [
+                '组建你的第一场比赛',
+                '掷骰，探索城市',
+                '拥有第一处地产',
+                '把资产变成收入',
+                '旅程由你来决定',
+              ][tutorial]
+            }
+          </h3>
+          <p>
+            {
+              [
+                '点击空位添加机器人，选择角色后点「我准备好了」，再开始旅程。',
+                '点击「掷骰出发」。初始手牌和角色天赋可提前使用。落到空地时出现购买提示。',
+                '点击「购买」获得地产，或「进入拍卖」参与轮流出价。购买失败时会提示具体原因。',
+                '在「资产」中升级建筑，提高租金；随后结束回合。注意保留现金支付对手租金。',
+                '试试卡牌、交易、银行与岔路。刷新可恢复席位，规则图鉴随时可查。',
+              ][tutorial]
+            }
+          </p>
+          <button
+            className="secondary"
+            onClick={() => {
+              if (tutorial === 4) {
+                setTutorial(null);
+                setTutorialGame(false);
+                localStorage.setItem('mp-taught', 'true');
+              } else setTutorial(tutorial + 1);
+            }}
+          >
+            {tutorial === 4 ? '我知道了，继续旅行' : '下一条提示'}
+          </button>
+        </div>
+      )}
+      {toast && (
+        <div className="toast" role="status" onClick={() => setToast('')}>
+          {toast}
+        </div>
+      )}
+    </>
+  );
+}
+function Chat({
+  room,
+  chat,
+  setChat,
+  send,
+  disabled,
+}: {
+  room: RoomView;
+  chat: string;
+  setChat: (s: string) => void;
+  send: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="chat-box">
+      <h3>
+        房间聊天 <small>只与这里的伙伴分享</small>
+      </h3>
+      <div className="chat-feed">
+        {room.chat.slice(-12).map((m) => (
+          <p key={m.id}>
+            <b>{m.name}</b> {m.text}
+          </p>
+        ))}
+        {!room.chat.length && <p className="hint">打个招呼，故事从这里开始。</p>}
+      </div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (chat.trim()) send();
+        }}
+      >
+        <input
+          aria-label="聊天内容"
+          placeholder="说点什么…"
+          maxLength={200}
+          value={chat}
+          onChange={(e) => setChat(e.target.value)}
+        />
+        <button aria-label="发送聊天" disabled={disabled || !chat.trim()}>
+          ↗
+        </button>
+      </form>
+    </div>
+  );
+}
+createRoot(document.getElementById('root')!).render(<App />);

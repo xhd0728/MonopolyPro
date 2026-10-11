@@ -9,7 +9,7 @@ Each completed milestone is committed locally with Conventional Commits. A commi
 | P2 | Complete authoritative match, economy, bots, bankruptcy, settlement | Complete |
 | P3 | Idempotence, disconnect takeover, refresh and process restart recovery | Complete |
 | P4 | Four maps, six characters, 30 cards, team mode, simulations | Complete |
-| P5 | Responsive game UI, tutorial, atlas, feedback, connection states | Pending |
+| P5 | Responsive game UI, tutorial, atlas, feedback, connection states | Complete |
 | P6 | Deployment package, systemd/Caddy, backup/rollback, 30-minute load run | Pending |
 
 Verification: engine rules and invariants; 2/4/6-seat network flows; privacy; duplicate/unauthorized commands; recovery at purchase, auction, path and trade decisions; browser walkthroughs at desktop/mobile sizes; 20 rooms/120 seats for 30 minutes with environment/results recorded.
@@ -22,3 +22,5 @@ P2: purchase/build/rent, mortgage/redemption, auction, atomic trades, debt/bankr
 P3: transactional snapshot/event/command storage, one-use connection grants, persistent seat credentials and duplicate-runtime rejection verified. Service tests restore trade/auction/path snapshots; socket test SIGKILLs and restarts the server, resumes the exact seat and replays the old command without a second mutation. 15-second handover boundary verified with controlled time.
 
 P4: catalog identity, map connectivity and coordinate uniqueness checks passed. Four distinct route mechanics, six character passives/abilities, all 30 effects and balanced 2v2/3v3 settlement are covered by the complete-match simulation suite.
+
+P5: Chromium desktop 1440x1000 and mobile 390x844 flows passed: two independent browser contexts, readiness, card target dialog, purchase/build, trade, refresh, offline takeover/recovery, atlas, mobile drawer and settlement. Teaching can be skipped/restarted. No page errors or mobile horizontal overflow. Original Three.js scenes are lazy loaded with theme-specific landmarks. Screenshots are in ignored artifacts/ui/.
