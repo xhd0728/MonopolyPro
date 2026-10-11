@@ -32,7 +32,7 @@ const rooms=new Map<string,MonopolyRoom>(),creating=new Map<string,Promise<strin
 class MonopolyRoom extends Room {
   code=''; private occupants=new Map<string,Client>(); private timer?:ReturnType<typeof setInterval>;
   onCreate(options:{code:string}){
-    service.record(options.code);this.code=options.code;this.maxClients=32;this.autoDispose=false;rooms.set(this.code,this);
+    service.record(options.code);if(rooms.has(options.code))throw new RequestError('房间运行实例已存在');this.code=options.code;this.maxClients=32;this.autoDispose=false;rooms.set(this.code,this);
     const guard=(client:Client,fn:()=>void)=>{
       if(this.occupants.get(client.auth as string)!==client)return;
       if(!allowed(`ws:${client.sessionId}`,60,10000)){client.send('error','消息过于频繁');return;}
@@ -47,7 +47,7 @@ class MonopolyRoom extends Room {
   }
   onAuth(_client:Client,options:{key?:string}){return service.consumeGrant(this.code,options.key);}
   onJoin(client:Client){const id=client.auth as string;const old=this.occupants.get(id);this.occupants.set(id,client);if(old)old.leave(4001,'席位已在其他窗口恢复');service.connected(this.code,id);this.views();}
-  onLeave(client:Client){const id=client.auth as string;if(this.occupants.get(id)!==client)return;this.occupants.delete(id);service.disconnected(this.code,id);this.views();}
+  onLeave(client:Client){if(!store.get(this.code))return;const id=client.auth as string;if(this.occupants.get(id)!==client)return;this.occupants.delete(id);service.disconnected(this.code,id);this.views();}
   onDispose(){if(this.timer)clearInterval(this.timer);if(rooms.get(this.code)===this)rooms.delete(this.code);}
   sendView(client:Client){client.send('view',service.view(this.code,client.auth));}
   views(){for(const client of this.occupants.values())this.sendView(client);}
