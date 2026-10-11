@@ -244,17 +244,28 @@ function App() {
     setPending(true);
     connection.current!.command({ id: crypto.randomUUID(), revision: g.revision, action });
   }
-  function leave() {
-    lobby('leave');
-    setTimeout(() => connection.current!.stop(), 100);
-    localStorage.removeItem('mp-seat');
-    setRoom(null);
-    setDialog(null);
-    setStatus('尚未连接');
-    history.replaceState({}, '', '/');
-    setTutorial(null);
-    setTutorialGame(false);
-    void refresh();
+  async function leave() {
+    if (!connected || busy || pending) {
+      notify(pending ? '请等待当前操作确认后退出' : '请恢复连接后退出；恢复凭证已保留');
+      return;
+    }
+    setBusy(true);
+    try {
+      await connection.current!.leave();
+      connection.current!.stop();
+      localStorage.removeItem('mp-seat');
+      setRoom(null);
+      setDialog(null);
+      setStatus('尚未连接');
+      history.replaceState({}, '', '/');
+      setTutorial(null);
+      setTutorialGame(false);
+      void refresh();
+    } catch (error) {
+      notify((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
   const g = room?.game,
     me = g?.players.find((p) => p.id === room!.viewerId),
@@ -1614,10 +1625,15 @@ function App() {
             <button className="secondary" onClick={() => setDialog(null)}>
               继续旅程
             </button>
-            <button className="danger" onClick={leave}>
-              确认退出经营
+            <button
+              className="danger"
+              disabled={busy || pending || !connected}
+              onClick={() => void leave()}
+            >
+              {busy ? '等待退出确认…' : '确认退出经营'}
             </button>
           </div>
+          {!connected && <p className="hint">请恢复连接后退出；你的恢复凭证会保留。</p>}
         </Modal>
       )}
       {tutorial !== null && room && (

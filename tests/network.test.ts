@@ -114,6 +114,8 @@ async function until(fn: () => boolean, timeout = 5000) {
 test('real sockets: 2/4/6 seats, spectator privacy, concurrency, duplicate, stale commands and crash restore', async () => {
   const f = await fixture();
   try {
+    const page = await fetch(f.base);
+    assert.match(page.headers.get('cache-control')!, /no-cache/);
     for (const count of [2, 4, 6]) {
       const c = await f.api('/api/rooms', {
         name: '房主',
@@ -154,6 +156,14 @@ test('real sockets: 2/4/6 seats, spectator privacy, concurrency, duplicate, stal
       await until(() => unauthorized.length > 0 && acks.length === 4);
       assert.equal(unauthorized[0].ok, false);
       assert.equal(acks[3].ok, true);
+      first.room.send('command', {
+        id: randomUUID(),
+        revision: first.view.game!.revision,
+        action: { type: 'bid', amount: null },
+      });
+      await until(() => acks.length === 5);
+      assert.equal(acks[4].ok, false);
+      assert.equal(acks[4].error, '请求格式无效');
       if (count === 2) {
         const revision = first.view.game!.revision;
         await f.stop(true);

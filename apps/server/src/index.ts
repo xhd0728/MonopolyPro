@@ -99,14 +99,23 @@ class MonopolyRoom extends Room {
     this.onMessage('ping', (c, data) => guard(c, () => c.send('pong', data)));
     this.onMessage('command', (c, data) =>
       guard(c, () => {
-        const result = service.command(this.code, c.auth, data);
-        c.send('ack', result);
+        try {
+          c.send('ack', service.command(this.code, c.auth, data));
+        } catch (error) {
+          c.send('ack', {
+            id: typeof data?.id === 'string' ? data.id : '',
+            ok: false,
+            revision: service.record(this.code).game?.revision ?? 0,
+            error: error instanceof ZodError ? '请求格式无效' : (error as Error).message,
+          });
+        }
         this.views();
       }),
     );
     this.onMessage('lobby', (c, data) =>
       guard(c, () => {
         service.lobby(this.code, c.auth, data);
+        if (data.type === 'leave') c.send('left');
         this.views();
       }),
     );
@@ -225,7 +234,15 @@ app.post('/api/rooms/:code/resume', async (req, res) => {
 });
 const clientDir = resolve('dist/client');
 if (existsSync(clientDir)) {
-  app.use(express.static(clientDir, { index: 'index.html', maxAge: '1h' }));
+  app.use(
+    express.static(clientDir, {
+      index: 'index.html',
+      maxAge: '1h',
+      setHeaders(res, path) {
+        if (path.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+      },
+    }),
+  );
   app.get('/', (_req, res) => res.sendFile(resolve(clientDir, 'index.html')));
 }
 app.use(

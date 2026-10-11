@@ -34,6 +34,11 @@ export class Connection {
   private attempts = 0;
   private stopped = false;
   pending?: GameCommand;
+  private leaving?: {
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  };
   constructor(
     private receive: (view: RoomView) => void,
     private status: (status: string, latency?: number) => void,
@@ -41,9 +46,18 @@ export class Connection {
     private acknowledged: () => void,
   ) {}
   async connect(credentials: Credentials, resume = false) {
+    clearTimeout(this.reconnectTimer);
+    clearInterval(this.heartbeat);
+    if (this.credentials && this.credentials.code !== credentials.code && this.pending) {
+      this.pending = undefined;
+      this.acknowledged();
+    }
     this.credentials = credentials;
     this.stopped = false;
     const generation = ++this.generation;
+    const previous = this.room;
+    this.room = undefined;
+    void previous?.leave();
     this.status(resume ? '正在恢复席位' : '正在连接');
     try {
       const c =
@@ -62,32 +76,54 @@ export class Connection {
       this.room = room;
       room.reconnection.enabled = false;
       this.attempts = 0;
+      const current = () => generation === this.generation && this.room === room && !this.stopped;
       room.onMessage('view', (view: RoomView) => {
+        if (!current()) return;
         this.receive(view);
         this.status('已同步');
         if (this.pending) room.send('command', this.pending);
       });
       room.onMessage('ack', (result: CommandResult) => {
+        if (!current()) return;
         if (this.pending?.id === result.id) {
           this.pending = undefined;
           this.acknowledged();
           if (!result.ok) this.error(result.error ?? '操作失败');
         }
       });
-      room.onMessage('error', (message: string) => this.error(message));
-      room.onMessage('pong', (at: number) =>
-        this.status('已同步', Math.round(performance.now() - at)),
+      room.onMessage('error', (message: string) => {
+        if (!current()) return;
+        if (this.pending) {
+          this.pending = undefined;
+          this.acknowledged();
+        }
+        this.rejectLeave(message);
+        this.error(message);
+      });
+      room.onMessage('left', () => {
+        if (!current() || !this.leaving) return;
+        clearTimeout(this.leaving.timer);
+        this.leaving.resolve();
+        this.leaving = undefined;
+      });
+      room.onMessage(
+        'pong',
+        (at: number) => current() && this.status('已同步', Math.round(performance.now() - at)),
       );
       room.onLeave((code) => {
         if (generation !== this.generation || this.stopped) return;
         if (code === 4001) {
+          clearInterval(this.heartbeat);
+          this.rejectLeave('席位已在其他窗口恢复');
           this.stopped = true;
           this.status('席位已在其他窗口恢复');
           return;
         }
         this.schedule();
       });
-      room.onError((_code, message) => this.error(message ?? '连接出错'));
+      room.onError((_code, message) => {
+        if (current()) this.error(message ?? '连接出错');
+      });
       room.send('sync');
       clearInterval(this.heartbeat);
       this.heartbeat = setInterval(() => {
@@ -103,6 +139,7 @@ export class Connection {
     }
   }
   private schedule() {
+    this.rejectLeave('连接已断开，请恢复连接后退出；恢复凭证已保留');
     this.room = undefined;
     clearInterval(this.heartbeat);
     const delay = Math.min(1000 * 2 ** this.attempts++, 10000);
@@ -118,11 +155,35 @@ export class Connection {
   send(type: string, data: unknown) {
     this.room?.send(type, data);
   }
+  leave(): Promise<void> {
+    if (!this.room || this.stopped)
+      return Promise.reject(new Error('请恢复连接后退出；恢复凭证已保留'));
+    if (this.leaving) return Promise.reject(new Error('正在确认退出'));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => this.rejectLeave('未收到退出确认，恢复凭证已保留，请稍后重试'),
+        5000,
+      );
+      this.leaving = { resolve, reject, timer };
+      this.room!.send('lobby', { type: 'leave' });
+    });
+  }
+  private rejectLeave(message: string) {
+    if (!this.leaving) return;
+    clearTimeout(this.leaving.timer);
+    this.leaving.reject(new Error(message));
+    this.leaving = undefined;
+  }
   stop() {
     this.stopped = true;
     this.generation++;
     clearTimeout(this.reconnectTimer);
     clearInterval(this.heartbeat);
+    this.rejectLeave('连接已关闭，恢复凭证已保留');
+    if (this.pending) {
+      this.pending = undefined;
+      this.acknowledged();
+    }
     const room = this.room;
     this.room = undefined;
     void room?.leave();

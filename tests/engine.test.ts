@@ -101,6 +101,52 @@ test('trade validates all assets before atomic exchange and freezes turn', () =>
     [2920, 3080],
   );
 });
+test('players leaving an auction preserve the active bidder and settle before the next turn', () => {
+  let g = game('town', 4);
+  g.phase = 'purchase';
+  g.players[0].position = 1;
+  g = act(g, { type: 'pass' });
+  g = act(g, { type: 'bid', amount: 100 });
+  assert.equal(actingPlayerId(g), 'p1');
+  g = act(g, { type: 'surrender' }, 'p3');
+  assert.equal(actingPlayerId(g), 'p1', 'an unrelated departure must not skip a bidder');
+  g = act(g, { type: 'surrender' });
+  assert.equal(g.phase, 'auction', 'the initiating player leaving must not cancel bidding');
+  assert.equal(actingPlayerId(g), 'p1');
+  assert.equal(g.auction!.highBidderId, null);
+  g = act(g, { type: 'bid', amount: 200 }, 'p1');
+  g = act(g, { type: 'auctionPass' }, 'p2');
+  assert.equal(propertyAt(g, 1)!.owner, 'p1');
+  assert.equal(g.players[1].cash, 2800);
+  assert.equal(g.phase, 'roll');
+  assert.equal(g.turn, 1);
+  assert.equal(g.auction, null);
+  assertInvariants(g);
+});
+test('public asset breakdown and payable rents match authority calculations without private hands', () => {
+  const g = game('town', 4);
+  propertyAt(g, 1)!.owner = 'p1';
+  propertyAt(g, 1)!.level = 2;
+  propertyAt(g, 2)!.owner = 'p1';
+  propertyAt(g, 2)!.mortgaged = true;
+  g.players[1].deposit = 600;
+  g.debt = { playerId: 'p1', amount: 100, creditorId: null, reason: '税费' };
+  const v = viewFor(g, 'p3');
+  const p = v.players[1];
+  assert.equal(p.assets, p.cash + p.deposit + p.propertyValue - p.debt);
+  assert.equal(p.propertyCount, 2);
+  assert.equal(p.buildingCount, 2);
+  assert.equal(p.debt, 100);
+  assert.equal(
+    v.properties.find((x) => x.tile === 1)!.payableRent,
+    rentOf(g, propertyAt(g, 1)!, g.players[3]),
+  );
+  assert.equal(v.properties.find((x) => x.tile === 2)!.rent, 0);
+  assert.equal(p.cards, undefined);
+  assert.equal(p.nextDice, undefined);
+  g.settings.mode = 'team';
+  assert.equal(viewFor(g, 'p3').properties.find((x) => x.tile === 1)!.payableRent, 0);
+});
 test('debt can be resolved by emergency withdrawal; bankruptcy clears ownership', () => {
   let g = game();
   g.players[0].cash = 1;

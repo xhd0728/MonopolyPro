@@ -176,7 +176,16 @@ export type PlayerView = Omit<PlayerState, 'cards' | 'nextDice'> & {
   cardCount: number;
   nextDice?: number | null;
   assets: number;
+  propertyValue: number;
+  propertyCount: number;
+  buildingCount: number;
+  debt: number;
 };
+export interface PropertyView extends PropertyState {
+  rent: number;
+  payableRent: number;
+  upgradeCost: number;
+}
 export interface ActionOption {
   action: GameAction;
   label: string;
@@ -184,8 +193,9 @@ export interface ActionOption {
   disabled?: string;
   primary?: boolean;
 }
-export interface GameView extends Omit<GameState, 'players' | 'traps'> {
+export interface GameView extends Omit<GameState, 'players' | 'traps' | 'properties'> {
   players: PlayerView[];
+  properties: PropertyView[];
   actions: ActionOption[];
   viewerId: string | null;
   activeId: string | null;

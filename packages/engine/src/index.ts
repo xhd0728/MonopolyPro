@@ -271,12 +271,12 @@ function advanceTurn(g: GameState, env: EngineEnvironment) {
           g,
           env,
           'map',
-          g.round % 2 === 0 ? '古城机关开启，跨城道路可通行。' : '古城机关关闭，恢复环城道路。',
+          g.round % 2 === 0 ? '丝路商路开放，可选择跨洲快线。' : '丝路商路关闭，沿常规环线前进。',
         );
       if (g.round % 4 === 0) {
         const amount = 70 + env.randomInt(80);
         for (const p of g.players.filter((p) => !p.bankrupt))
-          reward(g, p, amount, env, '城市庆典奖励');
+          reward(g, p, amount, env, '环球庆典奖励');
       }
     }
     const p = currentPlayer(g);
@@ -384,7 +384,7 @@ function startAuction(g: GameState, env: EngineEnvironment) {
   setPhase(g, 'auction', env);
   log(g, env, 'auction', `${tileAt(g, g.auction.tile).name}进入公开拍卖`);
 }
-function advanceAuction(g: GameState, env: EngineEnvironment) {
+function advanceAuction(g: GameState, env: EngineEnvironment, preserveBidder = false) {
   const a = g.auction!;
   const remaining = a.bidderIds.filter(
     (id) => !a.passedIds.includes(id) && !playerById(g, id)!.bankrupt,
@@ -405,9 +405,16 @@ function advanceAuction(g: GameState, env: EngineEnvironment) {
       );
     } else log(g, env, 'auction', '无人出价，地产保留在市场中。');
     g.auction = null;
-    setPhase(g, 'manage', env);
+    if (currentPlayer(g).bankrupt) advanceTurn(g, env);
+    else setPhase(g, 'manage', env);
     return;
   }
+  if (
+    preserveBidder &&
+    remaining.includes(a.bidderIds[a.bidderIndex]) &&
+    a.bidderIds[a.bidderIndex] !== a.highBidderId
+  )
+    return;
   for (let n = 0; n < a.bidderIds.length; n++) {
     a.bidderIndex = (a.bidderIndex + 1) % a.bidderIds.length;
     const id = a.bidderIds[a.bidderIndex];
@@ -445,7 +452,8 @@ function bankrupt(g: GameState, p: PlayerState, env: EngineEnvironment) {
         g.auction.highBidderId = null;
         g.auction.highBid = 0;
       }
-      advanceAuction(g, env);
+      advanceAuction(g, env, true);
+      return;
     }
     if (currentPlayer(g).id === p.id) advanceTurn(g, env);
   }
@@ -1054,11 +1062,26 @@ export function actionsFor(g: GameState, id: string): ActionOption[] {
 }
 export function viewFor(g: GameState, viewerId: string | null): GameView {
   const { players, traps, ...publicState } = structuredClone(g);
+  const viewer = playerById(g, viewerId ?? '');
   return {
     ...publicState,
     viewerId,
     activeId: actingPlayerId(g),
     actions: viewerId ? actionsFor(g, viewerId) : [],
+    properties: g.properties.map((property) => {
+      const owner = property.owner ? playerById(g, property.owner) : undefined;
+      return {
+        ...property,
+        rent: rentOf(g, property),
+        payableRent:
+          owner &&
+          viewer &&
+          (owner.id === viewer.id || (g.settings.mode === 'team' && owner.team === viewer.team))
+            ? 0
+            : rentOf(g, property, viewer),
+        upgradeCost: owner ? buildCost(g, owner, property) : tileAt(g, property.tile).buildCost,
+      };
+    }),
     players: players.map((p) => {
       const { cards, nextDice, ...pub } = p;
       return {
@@ -1066,6 +1089,13 @@ export function viewFor(g: GameState, viewerId: string | null): GameView {
         cardCount: cards.length,
         ...(p.id === viewerId ? { cards, nextDice } : {}),
         assets: assetsOf(g, p),
+        propertyValue:
+          assetsOf(g, p) - p.cash - p.deposit + (g.debt?.playerId === p.id ? g.debt.amount : 0),
+        propertyCount: g.properties.filter((x) => x.owner === p.id).length,
+        buildingCount: g.properties
+          .filter((x) => x.owner === p.id)
+          .reduce((n, x) => n + x.level, 0),
+        debt: g.debt?.playerId === p.id ? g.debt.amount : 0,
       };
     }),
     traps: Object.fromEntries(
