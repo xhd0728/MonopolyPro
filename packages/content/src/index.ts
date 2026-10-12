@@ -149,6 +149,18 @@ const COUNTRIES: Record<string, string> = {
   MG: '马达加斯加',
   MU: '毛里求斯',
 };
+/** Board-label abbreviations for names longer than four characters. */
+const SHORT_NAMES: Record<string, string> = {
+  印度尼西亚: '印尼',
+  吉尔吉斯斯坦: '吉尔吉斯',
+  乌兹别克斯坦: '乌兹别克',
+  土库曼斯坦: '土库曼',
+  哈萨克斯坦: '哈萨克',
+  埃塞俄比亚: '埃塞',
+  沙特阿拉伯: '沙特',
+  马达加斯加: '马岛',
+};
+export const shortCountryName = (name: string) => SHORT_NAMES[name] ?? name;
 export const countryFlag = (code?: string) =>
   code ? [...code].map((c) => String.fromCodePoint(127397 + c.charCodeAt(0))).join('') : '';
 // Countries in route order. Every three consecutive countries form one colour group.

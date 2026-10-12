@@ -72,6 +72,11 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
     const p = (await host.locator('.turn-prompt').innerText()).includes('轮到你了') ? host : guest;
     await openPanel(p);
     await expect(p.locator('.actions button').first()).toBeEnabled();
+    const jail = p.getByRole('button', { name: '掷骰出狱', exact: true });
+    if (await jail.isVisible()) {
+      await accepted(p, jail);
+      await openPanel(p);
+    }
     const roll = p.getByRole('button', { name: '掷骰出发', exact: true });
     if (await roll.isVisible()) {
       await roll.click();
@@ -130,6 +135,8 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
   await b.setOffline(true);
   await expect(guest.locator('.connection')).toContainText(/重连|恢复/, { timeout: 15000 });
   await expect(host.locator('.player-panel')).toContainText('机器人托管', { timeout: 15000 });
+  // The turn loop may leave the mobile drawer open; its backdrop covers the top bar.
+  await closePanel(guest);
   await guest.getByRole('button', { name: '离开房间', exact: true }).click();
   await expect(guest.getByRole('button', { name: '确认退出经营' })).toBeDisabled();
   expect(await guest.evaluate(() => !!localStorage.getItem('mp-seat'))).toBe(true);
@@ -197,10 +204,10 @@ test('mobile country express map: real fork selection and auction input advance 
     auction = false;
   for (let turn = 0; turn < 12 && (!fork || !auction); turn++) {
     await openPanel(page);
-    await expect(page.getByRole('button', { name: '掷骰出发', exact: true })).toBeEnabled({
-      timeout: 12000,
-    });
-    await accepted(page, page.getByRole('button', { name: '掷骰出发', exact: true }));
+    // A jailed player rolls for a six instead of rolling to move.
+    const start = page.locator('.actions').getByRole('button', { name: /^掷骰出(发|狱)$/ });
+    await expect(start).toBeEnabled({ timeout: 12000 });
+    await accepted(page, start);
     await expect(page.locator('.turn-prompt h2')).not.toHaveText('掷骰出发');
     while (await page.getByRole('button', { name: /^前往/ }).count()) {
       fork = true;
@@ -309,7 +316,9 @@ test('the complete board and all six players fit one screen; dice and opponent a
   }
   await page.getByRole('button', { name: '我准备好了' }).click();
   await page.getByRole('button', { name: '开始旅程' }).click();
-  await expect(page.locator('.country-tile')).toHaveCount(28);
+  await expect(page.locator('.country-tile')).toHaveCount(36);
+  await expect(page.locator('.pawn')).toHaveCount(6);
+  await expect(page.getByRole('button', { name: '棋盘上掷骰出发' })).toBeVisible();
   for (const [width, height] of [
     [1440, 900],
     [1366, 768],
@@ -339,7 +348,8 @@ test('the complete board and all six players fit one screen; dice and opponent a
               pageFits:
                 document.documentElement.scrollHeight <= innerHeight + 1 &&
                 document.documentElement.scrollWidth <= innerWidth + 1,
-              boardFits: tiles.length === 28 && tiles.every(within),
+              boardFits: tiles.length === 36 && tiles.every(within),
+              pawnsOnBoard: [...document.querySelectorAll<HTMLElement>('.pawn')].every(within),
               playersFit: players.length === 6 && players.every(within),
               tileContentFits: tiles.every((t) => t.scrollHeight <= t.clientHeight + 1),
               handFits:
@@ -355,6 +365,7 @@ test('the complete board and all six players fit one screen; dice and opponent a
       .toEqual({
         pageFits: true,
         boardFits: true,
+        pawnsOnBoard: true,
         playersFit: true,
         tileContentFits: true,
         handFits: true,

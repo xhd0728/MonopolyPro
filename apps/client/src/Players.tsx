@@ -128,7 +128,7 @@ export const PlayerRoster = memo(function PlayerRoster({
                 {p.debt > 0 && <span className="debt-label">待付 {money(p.debt)}</span>}
               </div>
               <span className="player-last-action" title={p.lastAction ?? '尚未行动'}>
-                {p.lastAction?.replace(p.name, '').trim() || '等待出发'}
+                {p.lastAction?.replace(p.name, '').replace(/^[：:，,\s]+/, '') || '等待出发'}
               </span>
               <span className="player-character">
                 {character.icon} {character.name}

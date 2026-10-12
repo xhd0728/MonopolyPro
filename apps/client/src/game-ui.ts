@@ -1,7 +1,20 @@
 const moneyFormatter = new Intl.NumberFormat('zh-CN');
 export const money = (n: number) => moneyFormatter.format(n);
-const colors = ['#337878', '#c78445', '#8470ac', '#a55e71', '#587fbd', '#788e43'];
+// Pawn colours: distinct from each other and from the group bands at small sizes.
+const colors = ['#e2483b', '#2f7fd8', '#21a36b', '#f0a21c', '#8a4fd1', '#e0559b'];
 export const playerColor = (index: number) => colors[index % colors.length];
+// Eight colour groups in route order, like the bands on a classic board.
+const groups = [
+  '#9a6b4a',
+  '#4fb3e3',
+  '#d4569b',
+  '#f08c2e',
+  '#e04848',
+  '#e9c43b',
+  '#2fa36b',
+  '#3f5bd6',
+];
+export const groupColor = (group: number) => groups[group % groups.length];
 import type { CardDefinition, GameView, PlayerView } from '../../../packages/shared/src/index.ts';
 export function cardTargetReason(
   card: CardDefinition,

@@ -23,10 +23,11 @@ import {
 import { Board } from './Board.tsx';
 import { Assets } from './Assets.tsx';
 import { PlayerRoster, PlayerDetails } from './Players.tsx';
-import { money, cardTargetReason, validMoney } from './game-ui.ts';
-import { MatchHud, ActionAnnouncements, phaseGuide } from './GameHud.tsx';
+import { money, cardTargetReason, validMoney, groupColor } from './game-ui.ts';
+import { MatchHud, ActionAnnouncements, phaseGuide, type HudAction } from './GameHud.tsx';
 import { api, Connection, type Credentials } from './network.ts';
 import { Clock, setServerOffset } from './clock.tsx';
+import './theme.css';
 const phaseNames = {
   roll: '掷骰出发',
   jail: '拘留所',
@@ -151,8 +152,7 @@ function App() {
   const [botMode, setBotMode] = useState<'rule' | 'llm'>('llm');
   const automaticSheet = useRef(false),
     pendingAction = useRef<GameAction | null>(null);
-  const [follow, setFollow] = useState(localStorage.getItem('mp-follow') !== 'false'),
-    [reduced, setReduced] = useState(localStorage.getItem('mp-reduced') === 'true'),
+  const [reduced, setReduced] = useState(localStorage.getItem('mp-reduced') === 'true'),
     [hints, setHints] = useState(localStorage.getItem('mp-hints') !== 'false'),
     [tutorial, setTutorial] = useState<number | null>(null),
     [tutorialGame, setTutorialGame] = useState(false);
@@ -276,6 +276,20 @@ function App() {
     }
     connection.current!.send('lobby', { type, ...extras });
   }
+  // Fork squares on the board are clickable choices; any other square opens its details.
+  const commandRef = useRef<(action: GameAction) => void>(() => {});
+  commandRef.current = command;
+  const clickTile = useCallback((tile: number) => {
+    const current = roomRef.current,
+      game = current?.game;
+    if (
+      game?.phase === 'path' &&
+      game.activeId === current!.viewerId &&
+      game.pendingPath?.choices.includes(tile)
+    )
+      commandRef.current({ type: 'choosePath', tile });
+    else setSelectedTile(tile);
+  }, []);
   function command(action: GameAction) {
     const g = roomRef.current?.game;
     if (!g || pending || status !== '已同步') return;
@@ -387,6 +401,14 @@ function App() {
           ? '团队需均分为 2v2 或 3v3，请补齐人数并调整队伍'
           : '';
   const quickAction = g?.actions.find((a) => a.primary);
+  const hudAction: HudAction | null =
+    myTurn && quickAction && ['roll', 'jailRoll', 'buy', 'end'].includes(quickAction.action.type)
+      ? {
+          label: pending ? '等待确认…' : quickAction.label,
+          disabled,
+          run: () => command(quickAction.action),
+        }
+      : null;
   const invite = () => {
     const url = `${location.origin}/?room=${room!.code}`;
     void navigator.clipboard
@@ -473,7 +495,7 @@ function App() {
                 {map.name}
                 <small>{map.subtitle}</small>
               </div>
-              <Board map={map} onTile={setSelectedTile} follow={false} reduced={reduced} />
+              <Board map={map} onTile={setSelectedTile} reduced={reduced} />
               <div className="scene-caption">
                 <span>2D 国家路线棋盘</span>
                 <span>点击国家查看详情</span>
@@ -560,30 +582,32 @@ function App() {
           </main>
         ) : (
           <main className={`room-page ${g ? 'match-page' : ''}`}>
-            <div className="room-heading">
-              <div>
-                <div className="eyebrow">{g ? '环球旅程 · 资产与路线同步' : '好友专属的起点'}</div>
-                <h1>
-                  {g ? map.name : '准备出发'}{' '}
-                  <span className="badge">
-                    {room.settings.mode === 'team'
-                      ? '团队战'
-                      : room.settings.mode === 'quick'
-                        ? '快速战'
-                        : '自由战'}
+            {!g && (
+              <div className="room-heading">
+                <div>
+                  <div className="eyebrow">好友专属的起点</div>
+                  <h1>
+                    准备出发{' '}
+                    <span className="badge">
+                      {room.settings.mode === 'team'
+                        ? '团队战'
+                        : room.settings.mode === 'quick'
+                          ? '快速战'
+                          : '自由战'}
+                    </span>
+                  </h1>
+                </div>
+                <div className="invite">
+                  <span>
+                    房间 <b>{room.code}</b>
+                    {room.locked ? ' · 密码房' : ''}
                   </span>
-                </h1>
+                  <button className="secondary" onClick={invite}>
+                    复制邀请
+                  </button>
+                </div>
               </div>
-              <div className="invite">
-                <span>
-                  房间 <b>{room.code}</b>
-                  {room.locked ? ' · 密码房' : ''}
-                </span>
-                <button className="secondary" onClick={invite}>
-                  复制邀请
-                </button>
-              </div>
-            </div>
+            )}
             {!g ? (
               <div className="waiting-layout">
                 <section className="paper">
@@ -855,10 +879,18 @@ function App() {
                   <div className="game-layout">
                     <section className="board-wrap">
                       <div className="board-meta" data-revision={g.revision}>
-                        <span>
-                          第 <b>{g.round}</b> 轮 <i>·</i> {phaseNames[g.phase]}
+                        <span className="meta-map">
+                          <b>{map.name}</b>
+                          <span className="badge">
+                            {room.settings.mode === 'team'
+                              ? '团队战'
+                              : room.settings.mode === 'quick'
+                                ? '快速战'
+                                : '自由战'}
+                          </span>
                         </span>
-                        <span>
+                        <span className="meta-phase">{phaseNames[g.phase]}</span>
+                        <span className="meta-clock">
                           <Clock>
                             {(now) =>
                               Math.max(
@@ -867,27 +899,26 @@ function App() {
                               )
                             }
                           </Clock>{' '}
-                          分钟剩余{' '}
-                          <button className="text-button" onClick={() => setFollow(!follow)}>
-                            {follow ? '◎ 跟随回合' : '○ 自由视角'}
+                          分钟剩余
+                        </span>
+                        <span className="meta-room invite">
+                          房间 <b>{room.code}</b>
+                          <button className="text-button" onClick={invite}>
+                            复制邀请
                           </button>
                         </span>
                       </div>
                       <Board
-                        compactCenter={
-                          <MatchHud
-                            room={room}
-                            map={map}
-                            rolling={pending && pendingAction.current?.type === 'roll'}
-                            compact
-                          />
-                        }
                         center={
-                          <MatchHud
-                            room={room}
-                            map={map}
-                            rolling={pending && pendingAction.current?.type === 'roll'}
-                          />
+                          <>
+                            <MatchHud
+                              room={room}
+                              map={map}
+                              rolling={pending && pendingAction.current?.type === 'roll'}
+                              action={hudAction}
+                            />
+                            <ActionAnnouncements game={g} enabled={hints} />
+                          </>
                         }
                         map={map}
                         game={g}
@@ -903,11 +934,9 @@ function App() {
                             : (g.pendingPath?.choices ??
                               (selectedTile === null ? [] : [selectedTile]))
                         }
-                        onTile={setSelectedTile}
-                        follow={follow}
+                        onTile={clickTile}
                         reduced={reduced}
                       />
-                      <ActionAnnouncements game={g} enabled={hints} />
                     </section>
                     <aside className="game-sidebar">
                       <section className={`paper action-panel ${sheetOpen ? 'sheet-open' : ''}`}>
@@ -1371,7 +1400,10 @@ function App() {
       )}
       {selected && (
         <Modal title="地点详情" closeLabel="关闭地点详情" close={() => setSelectedTile(null)}>
-          <div className="country-detail-heading">
+          <div
+            className={`country-detail-heading ${selected.kind === 'property' ? 'deed' : ''}`}
+            style={{ '--group': groupColor(selected.group) } as React.CSSProperties}
+          >
             <span>{countryFlag(selected.countryCode) || '✦'}</span>
             <div>
               <small>
@@ -1400,6 +1432,16 @@ function App() {
                   <strong>{money(Math.floor(selected.price / 2))}</strong>
                 </div>
               </div>
+              <table className="rent-table" aria-label="租金表">
+                <tbody>
+                  {['空地', '1 级', '2 级', '3 级'].map((label, level) => (
+                    <tr key={label} className={property?.level === level && owner ? 'now' : ''}>
+                      <th>{label}</th>
+                      <td>{money(Math.round(selected.rent * [1, 2.5, 5, 9][level]))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
               <p className="country-owner-description">
                 {owner
                   ? `${owner.name}所有 · ${property?.level} 级建筑${property?.mortgaged ? ' · 已抵押，不收租' : ''}`
@@ -1768,24 +1810,31 @@ function App() {
                 每回合先用卡牌或天赋，再掷一颗六面骰。处理落点后，可以升级、抵押、交易，再结束回合。岔路由当前玩家选择。超过
                 {Math.ceil((room?.decisionTimeoutMs ?? 45000) / 1000)} 秒未决定，会执行默认操作。
               </p>
-              <h3>02 / 国家地产与经济</h3>
+              <h3>02 / 四个角落与拘留所</h3>
+              <p>
+                棋盘一圈 36 格，四角依次是起点、海关拘留所、免费停车场和海关遣返。经过起点领取
+                300。停在遣返或抽到「护照过期」会直接进入拘留所，不经过起点、不领薪水；只是路过拘留所算作探访。被拘留后的下一回合可以缴纳
+                100 保释金、使用「自由通行」卡（探险家天赋也可以），或掷骰碰运气：掷出 6
+                点当场出狱并前进，否则留下一回合，之后自由出发。拘留期间仍可收租、建设和交易，但不能使用移动类卡牌。税费、维护费和保释金都会进入免费停车场奖池，下一位停车的玩家全部领走。
+              </p>
+              <h3>03 / 国家地产与经济</h3>
               <p>
                 空地可直接购买，放弃则全员轮流竞拍。至少加价 10，退出后不能再出价。地产可升 3
                 级，租金倍率为 1、2.5、5、9；独占街区额外 +30%。抵押获得半价，赎回支付地价的
                 55%。建筑出售返还标准建设费的一半。
               </p>
-              <h3>03 / 卡牌、银行与交易</h3>
+              <h3>04 / 卡牌、银行与交易</h3>
               <p>
                 手牌最多 8 张，每个角色有被动与每 3 轮一次的天赋。银行可存取现金，存款每轮带来 3%
                 现金利息。没钱付租金或税费时，先取款、卖建筑或抵押；无法筹齐可破产，将资产清算给债权人或银行。交易经接收人同意后原子交换。
               </p>
-              <h3>04 / 胜负与队伍</h3>
+              <h3>05 / 胜负与队伍</h3>
               <p>
                 最后仍在经营的一方获胜。到时按现金 + 存款 + 未抵押地产半价 + 建筑回收价 −
                 待付债务结算；并列可共同获胜。团队战要求 2v2 或
                 3v3，同队免租，资产合计结算。快速战默认 10 分钟。
               </p>
-              <h3>05 / 联机与恢复</h3>
+              <h3>06 / 联机与恢复</h3>
               <p>
                 刷新后自动恢复原席位。断线 15
                 秒后机器人临时接管，返回后交还控制。服务端重启会恢复已确认动作和待处理决策。请使用原浏览器；清除本地数据会丢失游客恢复凭证。观众看不到私有手牌。
@@ -1839,7 +1888,6 @@ function App() {
       {dialog === 'settings' && (
         <Modal title="让旅程更合心意" close={() => setDialog(null)}>
           {[
-            { label: '自动跟随当前玩家', value: follow, key: 'mp-follow', set: setFollow },
             { label: '减少移动动画', value: reduced, key: 'mp-reduced', set: setReduced },
             { label: '显示操作情境提示', value: hints, key: 'mp-hints', set: setHints },
           ].map((s) => (

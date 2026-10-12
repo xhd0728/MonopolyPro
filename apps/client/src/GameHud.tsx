@@ -15,36 +15,44 @@ export function DiceView({ game, rolling = false }: { game: GameView; rolling?: 
   const event = [...game.events].reverse().find((e) => e.kind === 'dice');
   const player = game.players.find((p) => p.id === event?.actor);
   const value = game.lastDice[0] ?? 0;
-  const bonus = player?.characterId === 'runner' ? 1 : 0;
+  const bonus = player?.characterId === 'runner' && !event?.text.includes('拘留所') ? 1 : 0;
+  // While a roll is pending, flicker through faces so the die visibly tumbles.
+  const [spin, setSpin] = useState(1);
+  useEffect(() => {
+    if (!rolling) return;
+    const timer = setInterval(() => setSpin((n) => (n % 6) + 1), 90);
+    return () => clearInterval(timer);
+  }, [rolling]);
+  const face = rolling ? spin : value;
   return (
     <div
       className={`dice-stage ${rolling ? 'rolling' : ''}`}
       aria-label="骰子结果"
       aria-live="polite"
-      key={event?.id ?? 0}
     >
+      <span
+        key={rolling ? 'rolling' : (event?.id ?? 0)}
+        className={`dice-cube ${face ? 'rolled' : 'unrolled'} ${face === 1 || face === 4 ? 'red' : ''}`}
+        aria-label={rolling ? '正在掷骰' : value ? `${value} 点` : '等待掷骰'}
+      >
+        {face
+          ? Array.from({ length: 9 }, (_, i) => (
+              <i className={pips[face]?.includes(i) ? 'pip' : ''} key={i} />
+            ))
+          : '?'}
+      </span>
       <div className="dice-caption">
-        <b>{rolling ? '正在掷骰' : event ? `${player?.name ?? '玩家'}的骰子` : '掷骰出发'}</b>
+        <b>
+          {rolling ? '正在掷骰…' : event ? `${player?.name ?? '玩家'}掷出 ${value} 点` : '等待掷骰'}
+        </b>
         <small>
-          {event ? `前进 ${value + bonus} 格${bonus ? '（天赋 +1）' : ''}` : '服务端裁定点数'}
+          {rolling
+            ? '由服务器裁定点数'
+            : event
+              ? `前进 ${value + bonus} 格${bonus ? '，含漫游者 +1' : ''}`
+              : '每回合掷一颗六面骰'}
         </small>
       </div>
-      <div className="dice-pair">
-        <span
-          className={`dice-cube ${value ? 'rolled' : 'unrolled'}`}
-          aria-label={value ? `${value} 点` : '等待掷骰'}
-        >
-          {value
-            ? Array.from({ length: 9 }, (_, i) => (
-                <i className={pips[value]?.includes(i) ? 'pip' : ''} key={i} />
-              ))
-            : '?'}
-        </span>
-      </div>
-      <strong className="dice-total">
-        {event ? value : '—'}
-        <small>点数</small>
-      </strong>
     </div>
   );
 }
@@ -63,6 +71,9 @@ const explanations: Record<string, string> = {
   tax: '税费交给公共资金；现金不足时进入筹款阶段。',
   reward: '奖励已计入现金，可查看玩家资产确认变化。',
   dice: '按骰子点数前进并处理落点，角色天赋可能改变步数。',
+  jail: '拘留所：缴纳保释金、使用「自由通行」或掷出 6 点出狱；否则停留一回合。',
+  payment: '税费、维护费和保释金进入免费停车场奖池，下一位停车的玩家全部领取。',
+  event: '旅途机遇随机发生：奖金、卡牌、护盾、后退、遣返或生日礼金。',
 };
 function explainEvent(event: GameView['events'][number]) {
   if (event.kind === 'card') {
@@ -121,58 +132,47 @@ export function phaseGuide(game: GameView, map: MapDefinition): { title: string;
       : '等待时可看国家费用与玩家资产；对手行动会实时显示在这里。',
   };
 }
+export interface HudAction {
+  label: string;
+  run: () => void;
+  disabled: boolean;
+}
 export function MatchHud({
   room,
   map,
   rolling,
-  compact = false,
+  action,
 }: {
   room: RoomView;
   map: MapDefinition;
   rolling: boolean;
-  compact?: boolean;
+  action?: HudAction | null;
 }) {
   const game = room.game!,
     guide = phaseGuide(game, map);
-  const latest = [...game.events]
-    .reverse()
-    .find((e) => e.actor && !['turn', 'start', 'move', 'ai'].includes(e.kind));
-  const playerIndex = game.players.findIndex((p) => p.id === latest?.actor);
+  const thinking =
+    room.aiActivity?.state === 'thinking'
+      ? game.players.find((p) => p.id === room.aiActivity!.playerId)?.name
+      : undefined;
   return (
-    <div className={`match-hud ${compact ? 'hud-compact' : ''}`}>
+    <div className="match-hud">
+      <span className="hud-route">
+        {map.name} · 第 {game.round} 轮{game.pot > 0 && <em>停车场奖池 {money(game.pot)}</em>}
+      </span>
       <DiceView game={game} rolling={rolling} />
-      {!compact && (
-        <div className="phase-guide" aria-label="本阶段说明">
-          <span className="eyebrow">
-            {game.players.find((p) => p.id === game.activeId)?.id === game.viewerId
-              ? '你的下一步'
-              : '回合进行中'}
-          </span>
-          <h3>{guide.title}</h3>
-          <p>{guide.text}</p>
-        </div>
-      )}
-      {!compact && room.aiActivity?.state === 'thinking' && (
-        <div className="ai-thinking" role="status">
-          ✦ {game.players.find((p) => p.id === room.aiActivity!.playerId)?.name} · LLM 正在思考
-        </div>
-      )}
-      {!compact && latest && (
-        <div
-          className="recent-action"
-          style={{ borderLeftColor: playerColor(Math.max(0, playerIndex)) }}
-          role="status"
+      <div className="phase-guide" aria-label="本阶段说明">
+        <h3>{guide.title}</h3>
+        <p>{thinking ? `${thinking}正在用 LLM 思考，服务端会校验它的选择。` : guide.text}</p>
+      </div>
+      {action && (
+        <button
+          className="hud-action"
+          aria-label={`棋盘上${action.label}`}
+          disabled={action.disabled}
+          onClick={action.run}
         >
-          <small>刚刚发生</small>
-          <b>{latest.text}</b>
-          {latest.amount !== undefined && (
-            <strong className={latest.amount < 0 ? 'expense' : 'income'}>
-              {latest.amount > 0 ? '+' : ''}
-              {money(latest.amount)}
-            </strong>
-          )}
-          <p>{explainEvent(latest)}</p>
-        </div>
+          {action.label}
+        </button>
       )}
     </div>
   );
@@ -203,7 +203,18 @@ export function ActionAnnouncements({ game, enabled }: { game: GameView; enabled
     <div className="action-announcements" aria-live="polite" aria-label="实时行动提示">
       {messages.map((e) => (
         <div key={e.id}>
-          <span>{e.actor === game.viewerId ? '你的行动' : '对手行动'}</span>
+          <span
+            style={{
+              background: playerColor(
+                Math.max(
+                  0,
+                  game.players.findIndex((p) => p.id === e.actor),
+                ),
+              ),
+            }}
+          >
+            {e.actor === game.viewerId ? '你的行动' : '对手行动'}
+          </span>
           <b>{e.text}</b>
           {e.amount !== undefined && (
             <strong className={e.amount < 0 ? 'expense' : 'income'}>

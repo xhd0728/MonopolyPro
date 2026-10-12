@@ -1,283 +1,368 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { countryFlag } from '../../../packages/content/src/index.ts';
-import type { GameView, MapDefinition } from '../../../packages/shared/src/index.ts';
-import { playerColor } from './game-ui.ts';
+import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  characterById,
+  countryFlag,
+  shortCountryName,
+} from '../../../packages/content/src/index.ts';
+import type {
+  GameView,
+  MapDefinition,
+  TileDefinition,
+} from '../../../packages/shared/src/index.ts';
+import { groupColor, playerColor } from './game-ui.ts';
 import './board.css';
-const groupColors = ['#d5b67e', '#83a9b9', '#94b08b', '#af9abd'];
-const symbols = {
-  start: '↗',
-  bank: '▤',
-  shop: '♧',
-  jail: '⛓',
-  parking: 'P',
-  gotojail: '⚠',
-  tax: '¤',
-  event: '✦',
-  transit: '⚓',
-  property: '',
+
+/** Seal characters for corners and special squares, read like stamps in a passport. */
+const SEALS: Partial<Record<TileDefinition['kind'], string>> = {
+  start: '起',
+  jail: '拘',
+  parking: '停',
+  gotojail: '遣',
+  bank: '银',
+  shop: '卡',
+  tax: '税',
+  event: '?',
+  transit: '港',
 };
+
+// Ring geometry: corners are 1.5 units, the eight side squares 1 unit, 11 units in total.
+const CORNER = 1.5,
+  SPAN = 8 + CORNER * 2;
+const cellStart = (i: number) => (i === 0 ? 0 : CORNER + i - 1);
+const cellSize = (i: number) => (i === 0 || i === 9 ? CORNER : 1);
+/** Centre of a grid cell as a fraction of the board side (0–1). */
+export const cellCentre = (i: number) => (cellStart(i) + cellSize(i) / 2) / SPAN;
+const sideOf = (t: TileDefinition) =>
+  t.z === 0 && t.x > 0 && t.x < 9
+    ? 'top'
+    : t.x === 9 && t.z > 0 && t.z < 9
+      ? 'right'
+      : t.z === 9 && t.x > 0 && t.x < 9
+        ? 'bottom'
+        : t.x === 0 && t.z > 0 && t.z < 9
+          ? 'left'
+          : 'corner';
+
+function tileCaption(t: TileDefinition, game: GameView | null | undefined) {
+  switch (t.kind) {
+    case 'start':
+      return '经过 +300';
+    case 'jail':
+      return '探访 / 拘留';
+    case 'parking':
+      return `奖池 ${game?.pot ?? 0}`;
+    case 'gotojail':
+      return '前往拘留所';
+    case 'bank':
+      return '利息 3%';
+    case 'shop':
+      return '购买卡牌';
+    case 'tax':
+      return '缴税';
+    case 'transit':
+      return '船票 80';
+    case 'event':
+      return '抽取机遇';
+    default:
+      return '';
+  }
+}
+
+const TileGrid = memo(function TileGrid({
+  map,
+  game,
+  highlight,
+  onTile,
+}: {
+  map: MapDefinition;
+  game?: GameView | null;
+  highlight: string;
+  onTile: (i: number) => void;
+}) {
+  const lit = new Set(highlight ? highlight.split(',').map(Number) : []);
+  const active = game?.players.find((p) => p.id === game.activeId);
+  const ownerIndex = new Map(game?.players.map((p, i) => [p.id, i]) ?? []);
+  const properties = new Map(game?.properties.map((p) => [p.tile, p]) ?? []);
+  const occupants = new Map<number, string[]>();
+  for (const p of game?.players ?? [])
+    if (!p.bankrupt) occupants.set(p.position, [...(occupants.get(p.position) ?? []), p.name]);
+  const gates = new Map(map.shortcuts.map(([from, to]) => [from, to]));
+  const gatesOpen = map.mechanic !== 'gates' || (game?.round ?? 1) % 2 === 0;
+  return (
+    <>
+      {map.tiles.map((t) => {
+        const property = properties.get(t.index);
+        const owner = property?.owner ? ownerIndex.get(property.owner) : undefined;
+        const ownerName = owner === undefined ? undefined : game!.players[owner].name;
+        const here = occupants.get(t.index);
+        const trap = game?.traps[t.index];
+        const gate = gates.get(t.index);
+        const side = sideOf(t);
+        return (
+          <button
+            key={t.index}
+            data-tile={t.index}
+            data-side={side}
+            className={[
+              'country-tile',
+              t.kind,
+              lit.has(t.index) && 'highlight',
+              active?.position === t.index && 'current',
+              property?.mortgaged && 'mortgaged',
+              owner !== undefined && 'owned',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            style={
+              {
+                gridColumn: t.x + 1,
+                gridRow: t.z + 1,
+                '--group': groupColor(t.group),
+                '--owner': owner === undefined ? 'transparent' : playerColor(owner),
+              } as CSSProperties
+            }
+            onClick={() => onTile(t.index)}
+            aria-label={`查看${t.name}`}
+            title={[
+              t.name,
+              t.kind === 'property'
+                ? ownerName
+                  ? `${ownerName}所有，${property!.level} 级${property!.mortgaged ? '，已抵押' : `，租金 ${property!.rent}`}`
+                  : `地价 ${t.price}，待售`
+                : tileCaption(t, game),
+              here && `此处：${here.join('、')}`,
+            ]
+              .filter(Boolean)
+              .join('；')}
+          >
+            {t.kind === 'property' ? (
+              <>
+                <span className="tile-band">
+                  {owner !== undefined && <i className="tile-owner">{owner + 1}</i>}
+                  {Array.from({ length: property?.level ?? 0 }, (_, n) => (
+                    <i
+                      className={`tile-house ${property!.level === 3 ? 'landmark' : ''}`}
+                      key={n}
+                    />
+                  ))}
+                </span>
+                <span className="tile-flag" aria-hidden="true">
+                  {countryFlag(t.countryCode)}
+                </span>
+                <b className="tile-name">{shortCountryName(t.name)}</b>
+                <span className="tile-price">
+                  {property?.mortgaged
+                    ? '抵押'
+                    : owner !== undefined
+                      ? `租 ${property!.rent}`
+                      : t.price}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="tile-seal" aria-hidden="true">
+                  {SEALS[t.kind]}
+                </span>
+                <b className="tile-name">{t.name}</b>
+                <span className="tile-price">{tileCaption(t, game)}</span>
+              </>
+            )}
+            {trap && (
+              <span className="tile-trap" title={`施工点：对手停靠支付 ${trap.amount}`}>
+                ⚠
+              </span>
+            )}
+            {gate !== undefined && (
+              <span className={`tile-gateway ${gatesOpen ? '' : 'closed'}`} aria-hidden="true">
+                {map.mechanic === 'ferry' ? '⚓' : gatesOpen ? '⇢' : '×'}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </>
+  );
+});
+
+// Offset (in side-square units) from a square's centre toward the ocean.
+const INNER: Record<string, [number, number]> = {
+  top: [0, 0.46],
+  bottom: [0, -0.46],
+  left: [0.5, 0],
+  right: [-0.5, 0],
+};
+/** Pawns live above the grid so they can hop square by square without re-rendering tiles. */
+function TokenLayer({
+  game,
+  map,
+  reduced,
+}: {
+  game: GameView;
+  map: MapDefinition;
+  reduced: boolean;
+}) {
+  const live = game.players.filter((p) => !p.bankrupt);
+  const [shown, setShown] = useState<Record<string, number>>(() =>
+    Object.fromEntries(live.map((p) => [p.id, p.position])),
+  );
+  const [moving, setMoving] = useState<string[]>([]);
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
+  const seen = useRef({ gameId: game.id, event: game.nextEvent - 1 });
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => {
+    const fresh =
+      seen.current.gameId === game.id ? game.events.filter((e) => e.id > seen.current.event) : [];
+    seen.current = { gameId: game.id, event: game.nextEvent - 1 };
+    for (const t of timers.current) clearTimeout(t);
+    timers.current = [];
+    // A fresh roll waits for the die to land before the pawn starts hopping.
+    const lead = fresh.some((e) => e.kind === 'dice') && !reduced ? 520 : 0;
+    const next = { ...shownRef.current };
+    const hopping: string[] = [];
+    for (const p of live) {
+      const from = shownRef.current[p.id];
+      if (from === undefined || from === p.position || reduced) {
+        next[p.id] = p.position;
+        continue;
+      }
+      let route = fresh.filter((e) => e.actor === p.id && e.path?.length).flatMap((e) => e.path!);
+      if (game.pendingPath && game.activeId === p.id) route = [...route, ...game.pendingPath.path];
+      const after = route.lastIndexOf(from);
+      if (after >= 0) route = route.slice(after + 1);
+      if (route.at(-1) !== p.position) route.push(p.position);
+      const step = Math.min(190, 2400 / route.length);
+      hopping.push(p.id);
+      route.forEach((tile, n) =>
+        timers.current.push(
+          setTimeout(() => setShown((s) => ({ ...s, [p.id]: tile })), lead + n * step),
+        ),
+      );
+      timers.current.push(
+        setTimeout(
+          () => setMoving((m) => m.filter((id) => id !== p.id)),
+          lead + route.length * step + 120,
+        ),
+      );
+    }
+    setShown(next);
+    setMoving(hopping);
+  }, [game.id, game.revision, reduced]);
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
+  const stacks = new Map<number, string[]>();
+  for (const p of live) {
+    const at = shown[p.id] ?? p.position;
+    stacks.set(at, [...(stacks.get(at) ?? []), p.id]);
+  }
+  return (
+    <div className="token-layer" aria-hidden="true">
+      {live.map((p) => {
+        const index = game.players.findIndex((x) => x.id === p.id);
+        const tile = map.tiles[shown[p.id] ?? p.position];
+        const stack = stacks.get(tile.index) ?? [p.id];
+        const slot = stack.indexOf(p.id);
+        // Stand on the ocean-facing half of the square so the flag and name stay readable,
+        // and fan stacked pawns around that spot.
+        const [ix, iy] = INNER[sideOf(tile)] ?? [
+          tile.x === 0 ? 0.42 : -0.42,
+          tile.z === 0 ? 0.42 : -0.42,
+        ];
+        const angle = (slot / stack.length) * Math.PI * 2 - Math.PI / 2;
+        const spread = stack.length > 1 ? 0.22 : 0;
+        return (
+          <span
+            key={p.id}
+            className={`pawn ${game.activeId === p.id ? 'active' : ''} ${moving.includes(p.id) ? 'hopping' : ''}`}
+            style={
+              {
+                '--cx': cellCentre(tile.x).toFixed(4),
+                '--cy': cellCentre(tile.z).toFixed(4),
+                '--dx': (ix + Math.cos(angle) * spread).toFixed(3),
+                '--dy': (iy + Math.sin(angle) * spread).toFixed(3),
+                '--pawn': playerColor(index),
+                zIndex: 10 + (game.activeId === p.id ? 10 : slot),
+              } as CSSProperties
+            }
+          >
+            <span className="pawn-body">{characterById(p.characterId).icon}</span>
+            <span className="pawn-number">{index + 1}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Board({
   map,
   game,
   onTile,
-  follow,
   reduced,
   highlight = [],
   center,
-  compactCenter,
 }: {
   map: MapDefinition;
   game?: GameView | null;
   onTile: (i: number) => void;
-  follow: boolean;
   reduced: boolean;
   highlight?: number[];
   center?: ReactNode;
-  compactCenter?: ReactNode;
 }) {
-  const root = useRef<HTMLDivElement>(null);
-  const [compact, setCompact] = useState(false);
-  useEffect(() => {
-    const observer = new ResizeObserver(([entry]) =>
-      setCompact(
-        entry.contentRect.width < 620 ||
-          (!!game && window.matchMedia('(max-width: 800px)').matches),
-      ),
-    );
-    observer.observe(root.current!);
-    return () => observer.disconnect();
-  }, []);
-  const active = game?.players.find((p) => p.id === game.activeId);
-  useEffect(() => {
-    if (!follow || !compact || !active) return;
-    const element = root.current?.querySelector<HTMLElement>(`[data-tile="${active.position}"]`);
-    if (!element || !root.current) return;
-    // Scroll the board's own viewport, without moving the page or covering another panel.
-    root.current.scrollTo({
-      top: Math.max(
-        0,
-        element.offsetTop - root.current.clientHeight / 2 + element.clientHeight / 2,
-      ),
-      behavior: reduced ? 'instant' : 'smooth',
-    });
-  }, [active?.position, active?.id, compact, follow, reduced]);
-  const size = map.tiles.length,
-    side = Math.round(size / 4) + 1;
-  const columns = compact ? 4 : side,
-    rows = compact ? Math.ceil(size / 4) : side;
-  const point = (i: number) => {
-    if (!compact) return { x: map.tiles[i].x, y: map.tiles[i].z };
-    const row = Math.floor(i / 4);
-    return { x: row % 2 ? 3 - (i % 4) : i % 4, y: row };
-  };
-  const shortcuts = map.shortcuts;
-  const open = map.mechanic !== 'gates' || (game?.round ?? 1) % 2 === 0;
+  const gatesOpen = map.mechanic !== 'gates' || (game?.round ?? 1) % 2 === 0;
+  const at = (i: number) => map.tiles[i];
   return (
-    <div
-      ref={root}
-      className={`board-canvas board-viewport ${compact ? 'compact' : ''}`}
-      role="group"
-      aria-label={`${map.name}二维国家棋盘`}
-    >
-      {compact && compactCenter && <div className="compact-board-center">{compactCenter}</div>}
-      <div
-        className="country-board"
-        style={{ '--columns': columns, '--rows': rows } as CSSProperties}
-      >
-        <svg
-          className="route-lines"
-          viewBox={`0 0 ${columns * 100} ${rows * 100}`}
-          preserveAspectRatio="none"
-          aria-hidden="true"
-        >
-          <defs>
-            <marker
-              id={`arrow-${map.id}`}
-              viewBox="0 0 8 8"
-              refX="7"
-              refY="4"
-              markerWidth="5"
-              markerHeight="5"
-              orient="auto-start-reverse"
-            >
-              <path d="M0 0L8 4L0 8" fill="#a6b5ac" />
-            </marker>
-          </defs>
-          {map.tiles.map((t, i) => {
-            const a = point(i),
-              b = point((i + 1) % size);
-            if (compact && i === size - 1) return null;
-            return (
-              <line
-                key={i}
-                x1={a.x * 100 + 50}
-                y1={a.y * 100 + 50}
-                x2={b.x * 100 + 50}
-                y2={b.y * 100 + 50}
-                markerEnd={`url(#arrow-${map.id})`}
-              />
-            );
-          })}
-          {!compact &&
-            shortcuts.map(([from, to]) => {
-              const a = point(from),
-                b = point(to);
+    <div className="board-frame" role="group" aria-label={`${map.name}二维国家棋盘`}>
+      <div className="board-square" data-map={map.id}>
+        <div className="board-ocean">
+          <div className="board-center">
+            {center ?? (
+              <div className="board-title">
+                <h2>{map.name}</h2>
+                <p>{map.subtitle}</p>
+                <small>
+                  {map.mechanic === 'ferry'
+                    ? '虚线是跨洋轮渡航线'
+                    : map.mechanic === 'gates'
+                      ? '虚线是丝路商路，偶数轮开放'
+                      : map.mechanic === 'metro'
+                        ? '虚线是国际快线，抵达岔路时自选'
+                        : '顺时针前进，经过起点领取 300'}
+                </small>
+              </div>
+            )}
+          </div>
+        </div>
+        {map.shortcuts.length > 0 && (
+          <svg
+            className="route-arcs"
+            viewBox="0 0 1 1"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            {map.shortcuts.map(([from, to]) => {
+              const a = at(from),
+                b = at(to);
               return (
                 <path
                   key={from}
-                  className={`shortcut ${open ? '' : 'closed'}`}
-                  d={`M${a.x * 100 + 50},${a.y * 100 + 50} Q${columns * 50},${rows * 50} ${b.x * 100 + 50},${b.y * 100 + 50}`}
+                  className={gatesOpen ? '' : 'closed'}
+                  d={`M${cellCentre(a.x)},${cellCentre(a.z)} Q0.5,0.5 ${cellCentre(b.x)},${cellCentre(b.z)}`}
                 />
               );
             })}
-        </svg>
-        {!compact && (
-          <div className="board-center">
-            {center ?? (
-              <>
-                <span className="board-compass" aria-hidden="true">
-                  ✥
-                </span>
-                <small>MONOPOLY PRO</small>
-                <h2>{map.name}</h2>
-                <p>{map.subtitle}</p>
-                <div className="board-legend">
-                  <span>
-                    <i style={{ background: groupColors[0] }} />
-                    同色国家组成地产组
-                  </span>
-                  <span>⌂ 建筑 0–3 级 · 点击查看详情</span>
-                </div>
-                {shortcuts.length > 0 && (
-                  <div className="route-guide">
-                    <b>
-                      {map.mechanic === 'ferry'
-                        ? '轮渡 · 80 金币'
-                        : map.mechanic === 'gates'
-                          ? `商路${open ? '开放' : '关闭'} · 偶数轮开放`
-                          : '国际快线 · 自选岔路'}
-                    </b>
-                    {shortcuts.map(([from, to]) => (
-                      <span key={from}>
-                        {map.tiles[from].name} ⇢ {map.tiles[to].name}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <span className="board-center-note">经过起点 +300 · 最后经营者 / 限时资产胜出</span>
-              </>
-            )}
-          </div>
+          </svg>
         )}
-        {map.tiles.map((t) => {
-          const pos = point(t.index),
-            property = game?.properties.find((p) => p.tile === t.index);
-          const ownerIndex = game?.players.findIndex((p) => p.id === property?.owner) ?? -1;
-          const owner = ownerIndex >= 0 ? game?.players[ownerIndex] : undefined;
-          const occupants =
-            game?.players.filter((p) => !p.bankrupt && p.position === t.index) ?? [];
-          const gateway = shortcuts.find(([from]) => from === t.index);
-          return (
-            <button
-              key={t.index}
-              data-tile={t.index}
-              className={`country-tile ${t.kind} ${highlight.includes(t.index) ? 'highlight' : ''} ${active?.position === t.index ? 'current' : ''} ${property?.mortgaged ? 'mortgaged' : ''}`}
-              style={
-                {
-                  gridColumn: pos.x + 1,
-                  gridRow: pos.y + 1,
-                  '--group-color': groupColors[t.group],
-                  '--owner-color': ownerIndex < 0 ? 'transparent' : playerColor(ownerIndex),
-                } as CSSProperties
-              }
-              onClick={() => onTile(t.index)}
-              aria-label={`查看${t.name}`}
-              title={`${t.name}${t.kind === 'property' ? ` · 地价 ${t.price}${owner ? ` · ${owner.name}所有 · ${property?.level}级` : ' · 待售'}` : ''}`}
-            >
-              <span className="tile-number">{String(t.index).padStart(2, '0')}</span>
-              <span className="tile-country-head">
-                <span className="tile-flag" aria-hidden="true">
-                  {countryFlag(t.countryCode) || symbols[t.kind]}
-                </span>
-                <b className="tile-name">{t.name}</b>
-              </span>
-              <span className="tile-price">
-                {t.kind === 'property'
-                  ? `地价 ${t.price}`
-                  : t.kind === 'start'
-                    ? '+300'
-                    : t.kind === 'transit'
-                      ? '船票 80'
-                      : t.kind === 'bank'
-                        ? '利息 3%'
-                        : t.kind === 'tax'
-                          ? '税费'
-                          : t.kind === 'shop'
-                            ? '购买卡牌'
-                            : t.kind === 'jail'
-                              ? '探访 / 拘留'
-                              : t.kind === 'parking'
-                                ? `奖池 ${game?.pot ?? 0}`
-                                : t.kind === 'gotojail'
-                                  ? '前往拘留所'
-                                  : '抽取机遇'}
-              </span>
-              {property && (
-                <span className="tile-owner">
-                  {owner
-                    ? `${owner.name}${property.mortgaged ? ' · 抵押' : ` · ${'▮'.repeat(property.level) || '空地'}`}`
-                    : '待售'}
-                </span>
-              )}
-              {gateway && (
-                <span className={`tile-gateway ${open ? '' : 'closed'}`}>
-                  {map.mechanic === 'ferry' ? '⚓' : open ? '⇢' : '×'}{' '}
-                  {gateway[1].toString().padStart(2, '0')}
-                </span>
-              )}
-              {occupants.length > 0 && (
-                <span className="pawn-stack">
-                  {(occupants.length > 3
-                    ? [...occupants]
-                        .sort((a, b) => Number(b.id === active?.id) - Number(a.id === active?.id))
-                        .slice(0, 2)
-                    : occupants
-                  ).map((p) => (
-                    <span
-                      key={p.id}
-                      className={`flat-pawn ${active?.id === p.id ? 'active' : ''}`}
-                      style={{
-                        background: playerColor(game!.players.findIndex((x) => x.id === p.id)),
-                      }}
-                      title={p.name}
-                      aria-label={`${p.name}在${t.name}`}
-                    >
-                      {game!.players.findIndex((x) => x.id === p.id) + 1}
-                    </span>
-                  ))}
-                  {occupants.length > 3 && (
-                    <span
-                      className="pawn-more"
-                      title={occupants.map((p) => p.name).join('、')}
-                      aria-label={`共 ${occupants.length} 位玩家在${t.name}：${occupants.map((p) => p.name).join('、')}`}
-                    >
-                      +{occupants.length - 2}
-                    </span>
-                  )}
-                </span>
-              )}
-            </button>
-          );
-        })}
+        <TileGrid map={map} game={game} highlight={highlight.join(',')} onTile={onTile} />
+        {game && <TokenLayer game={game} map={map} reduced={reduced} />}
+        {game && (
+          <span className="sr-only">
+            {game.players
+              .filter((p) => !p.bankrupt)
+              .map((p) => `${p.name}在${map.tiles[p.position].name}`)
+              .join('；')}
+          </span>
+        )}
       </div>
-      {compact && (
-        <div className="compact-route-guide">
-          {map.mechanic === 'none'
-            ? `按编号前进，${size - 1} → 00 回到起点。`
-            : `${map.mechanic === 'ferry' ? '轮渡 80 金币' : map.mechanic === 'gates' ? `商路${open ? '开放' : '关闭'}（偶数轮开放）` : '岔路可选快线'} · ${shortcuts.map(([from, to]) => `${String(from).padStart(2, '0')} → ${String(to).padStart(2, '0')}`).join(' / ')}`}
-          <span>上下滑动看国家 · 点击查看费用与归属</span>
-        </div>
-      )}
     </div>
   );
 }
