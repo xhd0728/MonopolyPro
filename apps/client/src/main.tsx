@@ -26,7 +26,7 @@ import {
 import { Board } from './Board.tsx';
 import { Assets } from './Assets.tsx';
 import { PlayerRoster, PlayerDetails } from './Players.tsx';
-import { money, cardTargetReason, validMoney, groupColor } from './game-ui.ts';
+import { money, cardTargetReason, validMoney, groupColor, pingBand } from './game-ui.ts';
 import {
   MatchHud,
   ActionAnnouncements,
@@ -535,7 +535,11 @@ function App() {
           <div className={`connection ${connected ? 'online' : ''}`} aria-live="polite">
             <i />
             {room ? status : '朋友的下一场聚会'}
-            {connected && latency !== undefined && <small>{latency} ms</small>}
+            {connected && latency !== undefined && (
+              <span className={`ping ${pingBand(latency)}`} title="与服务器之间的往返延迟">
+                Ping {latency} ms
+              </span>
+            )}
           </div>
         </header>
         {!room ? (

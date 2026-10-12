@@ -357,6 +357,8 @@ export interface RoomRecord {
 }
 export interface SeatView extends Omit<Seat, 'tokenHash' | 'controlEpoch'> {
   takeover: boolean;
+  /** Last reported round trip in ms for connected humans. */
+  latency?: number;
 }
 export interface RoomView {
   code: string;

@@ -87,6 +87,8 @@ export class GameService {
   private takeoverSignatures = new Map<string, string>();
   private grants = new Map<string, { code: string; seatId: string; expires: number }>();
   private emotes = new Map<string, EmoteView[]>();
+  /** Last reported round trip per room:seat, memory only. */
+  private latency = new Map<string, number>();
   private emoteAt = new Map<string, number>();
   readonly options: ServiceOptions;
   constructor(
@@ -306,8 +308,10 @@ export class GameService {
       isHost: r.hostId === id,
       seats: r.seats.map((s) => {
         const { tokenHash, controlEpoch, ...pub } = s;
+        const latency = this.latency.get(`${r.code}:${s.id}`);
         return {
           ...pub,
+          ...(s.connected && !s.bot && latency !== undefined ? { latency } : {}),
           takeover:
             !s.bot &&
             !s.spectator &&
@@ -525,6 +529,18 @@ export class GameService {
     r.updatedAt = this.now();
     this.store.save(r, { playerId: id, id: cmd.id, fingerprint, result });
     return result;
+  }
+  /**
+   * Store a client's round trip. Returns true when the seat moved between good / ok / poor,
+   * which is worth a broadcast; smaller changes ride along with the next view.
+   */
+  reportLatency(code: string, id: string, rtt: unknown): boolean {
+    if (typeof rtt !== 'number' || !Number.isFinite(rtt) || rtt < 0 || rtt > 60000) return false;
+    const key = `${code}:${id}`,
+      before = this.latency.get(key);
+    this.latency.set(key, Math.round(rtt));
+    const band = (n: number | undefined) => (n === undefined ? -1 : n < 100 ? 0 : n < 250 ? 1 : 2);
+    return band(before) !== band(rtt);
   }
   /** Rate-limited reactions; kept in memory for a few seconds and broadcast with views. */
   emote(code: string, id: string, input: unknown) {
@@ -805,6 +821,8 @@ export class GameService {
         this.botJobs.delete(r.code);
         this.aiActivity.delete(r.code);
         this.emotes.delete(r.code);
+        for (const key of this.latency.keys())
+          if (key.startsWith(`${r.code}:`)) this.latency.delete(key);
         for (const key of this.emoteAt.keys())
           if (key.startsWith(`${r.code}:`)) this.emoteAt.delete(key);
         removed.push(r.code);

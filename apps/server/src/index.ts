@@ -101,7 +101,15 @@ class MonopolyRoom extends Room {
       }
     };
     this.onMessage('sync', (c) => guard(c, () => this.sendView(c)));
-    this.onMessage('ping', (c, data) => guard(c, () => c.send('pong', data)));
+    this.onMessage('ping', (c, data) =>
+      guard(c, () => {
+        // Older clients send a bare timestamp; newer ones also report their last round trip.
+        const at = typeof data === 'object' && data ? data.at : data;
+        if (typeof data === 'object' && data && service.reportLatency(this.code, c.auth, data.rtt))
+          this.views();
+        c.send('pong', at);
+      }),
+    );
     this.onMessage('command', (c, data) =>
       guard(c, () => {
         try {

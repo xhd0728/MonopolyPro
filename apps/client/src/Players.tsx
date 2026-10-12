@@ -9,7 +9,7 @@ import type {
   SeatView,
 } from '../../../packages/shared/src/index.ts';
 import { characterById, countryFlag } from '../../../packages/content/src/index.ts';
-import { money, playerColor } from './game-ui.ts';
+import { money, pingBand, playerColor } from './game-ui.ts';
 function connectionName(
   player: PlayerView,
   seat: SeatView | undefined,
@@ -152,6 +152,9 @@ export const PlayerRoster = memo(function PlayerRoster({
                   <OfflineClock>{(now) => connectionName(p, seat, room, now)}</OfflineClock>
                 ) : (
                   connectionName(p, seat, room, serverTime())
+                )}
+                {seat?.latency !== undefined && (
+                  <span className={`ping-mini ${pingBand(seat.latency)}`}> · {seat.latency}ms</span>
                 )}
                 {g.settings.mode === 'team' && <span> · {p.team === 0 ? '青' : '橙'}队</span>}
                 {g.activeId === p.id && <b>{g.phase === 'auction' ? '正在竞拍' : '当前回合'}</b>}

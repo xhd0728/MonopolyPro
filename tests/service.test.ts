@@ -317,3 +317,18 @@ test('auto-play, renaming mid-match, and the host handing an idle seat to a bot'
   assert.throws(() => svc.authenticate(h.code, y.token), /无法恢复/);
   s2.close();
 });
+test('reported pings show on connected human seats and only band changes trigger a broadcast', () => {
+  const store = new Store(':memory:');
+  const service = new GameService(store, { now: () => 1000 });
+  const c = service.create({ name: '甲' });
+  service.connected(c.code, c.seatId);
+  assert.equal(service.reportLatency(c.code, c.seatId, 40), true, 'first report');
+  assert.equal(service.reportLatency(c.code, c.seatId, 60), false, 'still good');
+  assert.equal(service.reportLatency(c.code, c.seatId, 300), true, 'became poor');
+  assert.equal(service.reportLatency(c.code, c.seatId, 'x'), false);
+  assert.equal(service.reportLatency(c.code, c.seatId, -1), false);
+  assert.equal(service.view(c.code, c.seatId).seats[0].latency, 300);
+  service.disconnected(c.code, c.seatId);
+  assert.equal(service.view(c.code, c.seatId).seats[0].latency, undefined);
+  store.close();
+});

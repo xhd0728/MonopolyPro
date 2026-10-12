@@ -47,6 +47,7 @@ export class Connection {
     /** The host removed this seat or handed it to a bot. */
     private removed?: (message: string) => void,
   ) {}
+  private rtt: number | undefined;
   async connect(credentials: Credentials, resume = false) {
     clearTimeout(this.reconnectTimer);
     clearInterval(this.heartbeat);
@@ -111,10 +112,11 @@ export class Connection {
         this.leaving.resolve();
         this.leaving = undefined;
       });
-      room.onMessage(
-        'pong',
-        (at: number) => current() && this.status('已同步', Math.round(performance.now() - at)),
-      );
+      room.onMessage('pong', (at: number) => {
+        if (!current()) return;
+        this.rtt = Math.round(performance.now() - at);
+        this.status('已同步', this.rtt);
+      });
       room.onLeave((code) => {
         if (generation !== this.generation || this.stopped) return;
         if (code === 4002) {
@@ -137,10 +139,14 @@ export class Connection {
         if (current()) this.error(message ?? '连接出错');
       });
       room.send('sync');
+      // Measure right away, then every five seconds; the last round trip is shared with the
+      // room so everyone can see each other's connection quality.
+      const ping = () => room.send('ping', { at: performance.now(), rtt: this.rtt ?? null });
+      ping();
       clearInterval(this.heartbeat);
       this.heartbeat = setInterval(() => {
         if (this.room === room) {
-          room.send('ping', performance.now());
+          ping();
           if (this.pending) room.send('sync');
         }
       }, 5000);

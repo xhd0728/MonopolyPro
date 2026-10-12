@@ -938,3 +938,43 @@ label {
     gap: 6px;
   }
 }
+
+/* Ping */
+.connection .ping {
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--num);
+  font-size: 12px;
+  font-weight: 700;
+  color: #0b2a44;
+  background: #5fd39a;
+}
+.connection .ping.ok {
+  background: #f5b62e;
+}
+.connection .ping.poor {
+  background: #ff8a7a;
+}
+.ping-mini {
+  font-family: var(--num);
+}
+.ping-mini.good {
+  color: #15855a;
+}
+.ping-mini.ok {
+  color: #b77a00;
+}
+.ping-mini.poor {
+  color: #c2412f;
+}
+@media (max-width: 800px) {
+  .connection .ping {
+    padding: 1px 6px;
+    font-size: 10px;
+  }
+}
+/* Keep the ping pill visible on phones (other connection details are hidden there). */
+.in-match .connection > .ping {
+  display: inline-block;
+}

@@ -40,3 +40,6 @@ export function cardTargetReason(
   return '';
 }
 export const validMoney = (amount: number) => Number.isSafeInteger(amount) && amount >= 0;
+
+/** Connection quality band used for ping colours. */
+export const pingBand = (ms: number) => (ms < 100 ? 'good' : ms < 250 ? 'ok' : 'poor');
