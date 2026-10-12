@@ -342,6 +342,9 @@ test('the complete board and all six players fit one screen; dice and opponent a
               boardFits: tiles.length === 28 && tiles.every(within),
               playersFit: players.length === 6 && players.every(within),
               tileContentFits: tiles.every((t) => t.scrollHeight <= t.clientHeight + 1),
+              handFits:
+                innerWidth <= 800 ||
+                [...document.querySelectorAll<HTMLElement>('.hand button')].every(within),
               diceVisible: [...document.querySelectorAll<HTMLElement>('.dice-stage')].some(
                 (d) => d.getClientRects().length > 0 && within(d),
               ),
@@ -354,6 +357,7 @@ test('the complete board and all six players fit one screen; dice and opponent a
         boardFits: true,
         playersFit: true,
         tileContentFits: true,
+        handFits: true,
         diceVisible: true,
       });
     if (width === 1440 || width === 1366 || width === 390 || width === 360)
