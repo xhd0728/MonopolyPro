@@ -257,8 +257,8 @@ test('six player finances remain readable on desktop and mobile; a second window
   await page.getByRole('button', { name: '开始旅程' }).click();
   await expect(page.locator('.player-card')).toHaveCount(6);
   await expect(page.locator('.board-meta')).toContainText('30 分钟剩余');
-  const countdown = (await page.locator('.decision-timer').innerText()).match(/还剩\s*(\d+)/);
-  expect(Number(countdown?.[1])).toBeLessThanOrEqual(45);
+  // Human decisions are not timed unless the host turns a limit on.
+  await expect(page.locator('.decision-timer')).toContainText('不限时');
   await expect(page.locator('.country-tile.property').first()).toBeVisible();
   // Emotes: fixed reactions, shown on the sender's card and pawn.
   await page.getByRole('button', { name: '发送表情' }).click();

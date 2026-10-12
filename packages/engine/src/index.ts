@@ -1428,9 +1428,9 @@ export function applyAction(
         wantCash: action.wantCash,
         giveTile: action.giveTile,
         wantTile: action.wantTile,
-        expiresAt: env.now + 30000,
+        expiresAt: env.now + 60000,
       };
-      log(g, env, 'trade', `${p.name}向${target.name}发起交易，30 秒内有效。`, p.id);
+      log(g, env, 'trade', `${p.name}向${target.name}发起交易，60 秒内有效。`, p.id);
       break;
     }
     case 'tradeAccept':

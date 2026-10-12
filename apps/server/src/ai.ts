@@ -1,5 +1,6 @@
 import { BOARD, MAPS, CARDS } from '../../../packages/content/src/index.ts';
 import type { GameAction, GameView } from '../../../packages/shared/src/index.ts';
+import { AI_DECISION_CAP_MS } from '../../../packages/shared/src/index.ts';
 export interface AiDecision {
   action: GameAction;
   source: 'llm' | 'rule';
@@ -48,7 +49,8 @@ export function readAiConfig(env: NodeJS.ProcessEnv): AiConfig | null {
     key,
     model,
     mode: mode as AiConfig['mode'],
-    timeoutMs: Math.min(timeoutMs, 20000),
+    // One request may use up to the table-wide two-minute cap for AI decisions.
+    timeoutMs: Math.min(timeoutMs, AI_DECISION_CAP_MS),
     disableThinking: env.MONOPOLY_AI_DISABLE_THINKING === 'true',
     reasoningEffort: env.MONOPOLY_AI_REASONING_EFFORT || undefined,
   };

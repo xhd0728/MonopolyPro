@@ -15,6 +15,7 @@ import {
 } from '../../../packages/content/src/index.ts';
 import {
   DEFAULT_SETTINGS,
+  TURN_SECONDS,
   type RoomSettings,
   type RoomListing,
   type RoomView,
@@ -833,6 +834,24 @@ function App() {
                     </select>
                   </label>
                   <label>
+                    玩家操作时限
+                    <select
+                      value={room.settings.turnSeconds ?? 0}
+                      disabled={!room.isHost || disabled}
+                      onChange={(e) =>
+                        lobby('settings', {
+                          settings: { ...room.settings, turnSeconds: Number(e.target.value) },
+                        })
+                      }
+                    >
+                      {TURN_SECONDS.map((v) => (
+                        <option key={v} value={v}>
+                          {v ? `${v} 秒后自动推进` : '不限时（默认）'}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
                     起始现金
                     <select
                       value={room.settings.initialCash}
@@ -1027,7 +1046,12 @@ function App() {
                               ) : (
                                 <p>{phaseGuide(g, map).text}</p>
                               )}
-                              {g.phase !== 'finished' && !g.trade && (
+                              {g.phase !== 'finished' && !g.trade && !room.decisionTimeoutMs && (
+                                <span className="decision-timer">
+                                  不限时 · 想离开一会儿可以开启挂机托管
+                                </span>
+                              )}
+                              {g.phase !== 'finished' && !g.trade && room.decisionTimeoutMs > 0 && (
                                 <span className="decision-timer">
                                   本次决定还剩{' '}
                                   <Clock>
@@ -1863,8 +1887,7 @@ function App() {
             <div className="rule-copy">
               <h3>01 / 出发与经营</h3>
               <p>
-                每回合先用卡牌或天赋，再掷一颗六面骰。处理落点后，可以升级、抵押、交易，再结束回合。岔路由当前玩家选择。超过
-                {Math.ceil((room?.decisionTimeoutMs ?? 45000) / 1000)} 秒未决定，会执行默认操作。
+                每回合先用卡牌或天赋，再掷一颗六面骰。处理落点后，可以升级、抵押、交易，再结束回合。岔路由当前玩家选择。真人玩家默认不限时；房主可以设置操作时限，超时由系统执行稳妥的默认操作。机器人最多思考两分钟，超时由规则机器人接手。
               </p>
               <h3>02 / 四个角落与拘留所</h3>
               <p>

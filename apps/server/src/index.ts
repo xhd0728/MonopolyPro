@@ -23,7 +23,6 @@ const store = new Store(resolve(process.env.DATA_DIR ?? 'data', 'monopoly.sqlite
 const service = new GameService(store, {
   takeoverMs: numberEnv('DISCONNECT_TAKEOVER_MS', 15000),
   botStepMs: numberEnv('BOT_STEP_MS', 1200),
-  decisionTimeoutMs: numberEnv('DECISION_TIMEOUT_MS', 45000),
   maxRooms: numberEnv('MAX_ROOMS', 200),
   roomIdleMs: numberEnv('ROOM_IDLE_MS', 86400000),
   brain: aiConfig ? createBotBrain(aiConfig) : undefined,

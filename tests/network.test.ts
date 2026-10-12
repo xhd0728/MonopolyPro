@@ -32,7 +32,6 @@ async function fixture() {
         DATA_DIR: dir,
         BOT_STEP_MS: '100',
         DISCONNECT_TAKEOVER_MS: '300',
-        DECISION_TIMEOUT_MS: '45000',
         PUBLIC_ORIGIN: base,
         NODE_ENV: 'production',
       },

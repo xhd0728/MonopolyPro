@@ -7,6 +7,8 @@ export interface RoomSettings {
   minutes: number;
   initialCash: number;
   maxPlayers: number;
+  /** Seconds a human gets per decision before the server plays a safe default. 0 = no limit. */
+  turnSeconds: number;
 }
 export type TileKind =
   | 'start'
@@ -434,12 +436,21 @@ export const commandSchema = z.object({
   action: actionSchema,
 });
 export type GameCommand = z.infer<typeof commandSchema>;
+/** Human decision limits the host can choose; 0 (no limit) is the default. */
+export const TURN_SECONDS = [0, 60, 120, 300];
+/** AI seats always decide within this bound (LLM requests are cut off and fall back). */
+export const AI_DECISION_CAP_MS = 120000;
 export const settingsSchema = z.object({
   mapId: z.enum(['town', 'islands', 'neon', 'ancient']),
   mode: z.enum(['free', 'quick', 'team']),
   minutes: z.number().int().min(5).max(60),
   initialCash: z.number().int().min(1000).max(10000),
   maxPlayers: z.number().int().min(2).max(6),
+  turnSeconds: z
+    .number()
+    .int()
+    .refine((n) => TURN_SECONDS.includes(n), '无效的操作时限')
+    .default(0),
 });
 export const DEFAULT_SETTINGS: RoomSettings = {
   mapId: 'town',
@@ -447,6 +458,7 @@ export const DEFAULT_SETTINGS: RoomSettings = {
   minutes: 30,
   initialCash: 3000,
   maxPlayers: 6,
+  turnSeconds: 0,
 };
 export interface CommandResult {
   id: string;

@@ -18,6 +18,7 @@ import {
 } from '../../../packages/engine/src/index.ts';
 import { botAction } from '../../../packages/engine/src/bot.ts';
 import {
+  AI_DECISION_CAP_MS,
   commandSchema,
   DEFAULT_SETTINGS,
   EMOTES,
@@ -60,17 +61,26 @@ export function ensure(condition: unknown, message: string, status = 400): asser
 export interface ServiceOptions {
   takeoverMs: number;
   botStepMs: number;
-  decisionTimeoutMs: number;
   maxRooms: number;
   roomIdleMs: number;
   now?: () => number;
   brain?: BotBrain;
   aiMaxConcurrent?: number;
+  /** Upper bound for one AI decision (default two minutes). */
+  aiDecisionCapMs?: number;
 }
 export class GameService {
   private botJobs = new Map<
     string,
-    { controller: AbortController; gameId: string; revision: number; seatId: string; epoch: number }
+    {
+      controller: AbortController;
+      gameId: string;
+      revision: number;
+      seatId: string;
+      epoch: number;
+      startedAt: number;
+      capped: boolean;
+    }
   >();
   private aiActivity = new Map<string, NonNullable<RoomView['aiActivity']>>();
   private dirtyRooms = new Set<string>();
@@ -86,7 +96,6 @@ export class GameService {
     this.options = {
       takeoverMs: 15000,
       botStepMs: 1200,
-      decisionTimeoutMs: 45000,
       maxRooms: 200,
       roomIdleMs: 86400000,
       ...options,
@@ -313,7 +322,7 @@ export class GameService {
       locked: !!r.passwordHash,
       serverNow: this.now(),
       takeoverAfterMs: this.options.takeoverMs,
-      decisionTimeoutMs: this.options.decisionTimeoutMs,
+      decisionTimeoutMs: (r.settings.turnSeconds ?? 0) * 1000,
       ai: { configured: !!this.options.brain, model: this.options.brain?.model ?? null },
       emotes: (this.emotes.get(r.code) ?? []).filter((e) => this.now() - e.at < EMOTE_SHOW_MS),
       aiActivity: this.aiActivity.get(code) ?? null,
@@ -511,8 +520,13 @@ export class GameService {
       (!seat.connected &&
         seat.disconnectedAt !== null &&
         this.now() - seat.disconnectedAt >= this.options.takeoverMs) ||
-      this.now() - g.decisionAt >= this.options.decisionTimeoutMs
+      this.humanTimedOut(r)
     );
+  }
+  /** Human decision limit from the room settings; rooms without one never force a move. */
+  private humanTimedOut(r: Readonly<RoomRecord>) {
+    const limit = (r.settings.turnSeconds ?? 0) * 1000;
+    return !!r.game && limit > 0 && this.now() - r.game.decisionAt >= limit;
   }
   tick(code: string): boolean {
     const committed = this.peek(code);
@@ -567,7 +581,7 @@ export class GameService {
           !seat.connected &&
           seat.disconnectedAt !== null &&
           this.now() - seat.disconnectedAt >= this.options.takeoverMs;
-        const timeout = this.now() - r.game.decisionAt >= this.options.decisionTimeoutMs;
+        const timeout = this.humanTimedOut(r);
         if (seat && (seat.bot || takeover || timeout)) {
           const action =
             timeout && !seat.bot && !takeover
@@ -643,8 +657,16 @@ export class GameService {
       revision: game.revision,
       seatId: seat.id,
       epoch: seat.controlEpoch,
+      startedAt: this.now(),
+      capped: false,
     };
     this.botJobs.set(code, job);
+    // Hard cap: an AI seat never holds the table longer than two minutes.
+    const cap = setTimeout(() => {
+      job.capped = true;
+      job.controller.abort();
+    }, this.options.aiDecisionCapMs ?? AI_DECISION_CAP_MS);
+    job.controller.signal.addEventListener('abort', () => clearTimeout(cap), { once: true });
     this.aiActivity.set(code, {
       playerId: seat.id,
       state: 'thinking',
@@ -655,7 +677,13 @@ export class GameService {
       if (this.botJobs.get(code) !== job) return;
       this.botJobs.delete(code);
       const latest = this.store.get(code);
-      if (!latest || !this.validJob(latest, job) || job.controller.signal.aborted) {
+      // Aborted jobs are stale (another action, shutdown) unless the two-minute cap fired:
+      // then the rule bot plays instead.
+      if (
+        !latest ||
+        !this.validJob(latest, job) ||
+        (job.controller.signal.aborted && !job.capped)
+      ) {
         this.aiActivity.delete(code);
         this.dirtyRooms.add(code);
         return;
@@ -694,7 +722,13 @@ export class GameService {
     void this.options
       .brain!.choose(viewFor(game, seat.id), choices, fallback, job.controller.signal)
       .then(finish, () =>
-        finish({ action: fallback, source: 'rule', message: '模型暂不可用，规则机器人继续' }),
+        finish({
+          action: fallback,
+          source: 'rule',
+          message: job.capped
+            ? '模型超过两分钟未决定，规则机器人继续'
+            : '模型暂不可用，规则机器人继续',
+        }),
       );
   }
   dispose() {

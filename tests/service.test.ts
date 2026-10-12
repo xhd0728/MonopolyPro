@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../apps/server/src/store.ts';
 import { GameService } from '../apps/server/src/service.ts';
+import { DEFAULT_SETTINGS } from '../packages/shared/src/index.ts';
 const fixture = () => {
   const store = new Store(':memory:');
   let now = 1000;
@@ -244,4 +245,25 @@ test('emotes are fixed, rate limited, shown briefly and never persisted', () => 
   );
   assert.equal(JSON.stringify(store.get(c.code)).includes('👍'), false);
   store.close();
+});
+
+test('human decisions are untimed by default; a host-set limit plays a safe default', () => {
+  for (const turnSeconds of [0, 60]) {
+    const store = new Store(':memory:');
+    let now = 1000;
+    const service = new GameService(store, { now: () => now });
+    const c = service.create({ name: '甲', settings: { ...DEFAULT_SETTINGS, turnSeconds } });
+    service.connected(c.code, c.seatId);
+    service.lobby(c.code, c.seatId, { type: 'addBot', botMode: 'rule' });
+    service.lobby(c.code, c.seatId, { type: 'ready' });
+    service.lobby(c.code, c.seatId, { type: 'start' });
+    const before = service.record(c.code).game!.revision;
+    now += 10 * 60 * 1000;
+    service.tick(c.code);
+    const after = service.record(c.code).game!.revision;
+    if (turnSeconds) assert.ok(after > before, 'a set limit moves the game on');
+    else assert.equal(after, before, 'no limit: the game waits for the player');
+    assert.equal(service.view(c.code, c.seatId).decisionTimeoutMs, turnSeconds * 1000);
+    store.close();
+  }
 });

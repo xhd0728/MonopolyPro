@@ -22,7 +22,6 @@ export default defineConfig({
       NODE_ENV: 'test',
       BOT_STEP_MS: '250',
       DISCONNECT_TAKEOVER_MS: '1500',
-      DECISION_TIMEOUT_MS: '45000',
     },
     timeout: 20000,
   },

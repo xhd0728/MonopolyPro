@@ -17,11 +17,12 @@ const config = {
   mode: 'chat' as const,
   timeoutMs: 1000,
 };
-function fixture(choose?: BotBrain['choose']) {
+function fixture(choose?: BotBrain['choose'], aiDecisionCapMs?: number) {
   const store = new Store(':memory:');
   const service = new GameService(store, {
     now: () => 1000,
     ...(choose ? { brain: { model: 'fixture', choose } } : {}),
+    ...(aiDecisionCapMs ? { aiDecisionCapMs } : {}),
   });
   const c = service.create({ name: '真人' });
   service.connected(c.code, c.seatId);
@@ -141,6 +142,22 @@ test('AI applies legal actions transactionally, persists events, and reports fal
   assert.equal(record.game!.events.at(-1)?.kind, 'ai');
   assert.equal(service.view(c.code, c.seatId).aiActivity?.state, 'fallback');
   assert.equal(JSON.stringify(service.view(c.code, c.seatId)).includes('test-secret'), false);
+  service.dispose();
+  store.close();
+});
+
+test('an AI seat that never answers is cut off at the cap and the rule bot plays', async () => {
+  // A provider that hangs until aborted, like a stalled network request.
+  const hang = (_v: unknown, _c: unknown, _f: unknown, signal: AbortSignal) =>
+    new Promise<AiDecision>((_r, reject) =>
+      signal.addEventListener('abort', () => reject(Error('aborted')), { once: true }),
+    );
+  const { store, service, c } = fixture(hang as BotBrain['choose'], 30);
+  service.tick(c.code);
+  assert.equal(service.view(c.code, c.seatId).aiActivity?.state, 'thinking');
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(service.record(c.code).game!.revision, 1, 'the rule fallback was applied');
+  assert.match(service.view(c.code, c.seatId).aiActivity!.message, /两分钟/);
   service.dispose();
   store.close();
 });
