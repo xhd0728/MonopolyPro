@@ -978,3 +978,70 @@ label {
 .in-match .connection > .ping {
   display: inline-block;
 }
+
+/* End-of-match summary */
+.settlement .ranking > div {
+  border-left: 5px solid var(--who);
+}
+.worth-bar {
+  display: block;
+  grid-column: 1 / -1;
+  height: 6px;
+  border-radius: 999px;
+  background: #eef3f7;
+  overflow: hidden;
+}
+.worth-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--who);
+}
+.stat-line {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.titles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0;
+}
+.titles span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #fff4d6;
+  font-size: 13px;
+}
+.titles small {
+  color: var(--muted);
+}
+
+.settlement .ranking {
+  max-width: 720px;
+}
+.settlement .ranking > div {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 12px 14px;
+}
+.settlement .ranking > div > span {
+  font-family: var(--num);
+  color: var(--muted);
+}
+.settlement .ranking strong {
+  margin: 0;
+  font-family: var(--num);
+  font-size: 20px;
+}
+.settlement .ranking small {
+  width: auto;
+}
+.settlement .stat-line {
+  font-size: 12px;
+}

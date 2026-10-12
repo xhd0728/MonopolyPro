@@ -843,3 +843,52 @@ test('44-square boards: corners, jail, salary and complete bot matches on every 
   assert.equal(g.players[0].position, 1);
   assert.equal(g.players[0].cash, 3000 + 600);
 });
+test('match statistics count rent, purchases, builds, laps, jail visits, cards and trades', () => {
+  let g = game();
+  g.players[0].position = 1;
+  g.phase = 'purchase';
+  g = act(g, { type: 'buy' });
+  g = act(g, { type: 'build', tile: 1 });
+  assert.equal(g.players[0].stats.bought, 1);
+  assert.equal(g.players[0].stats.built, 1);
+  g = act(g, { type: 'end' });
+  // p1 lands on p0's square and pays rent.
+  g.players[1].position = 0;
+  g.players[1].nextDice = 1;
+  g = act(g, { type: 'roll' }, 'p1');
+  const rent = g.players[0].stats.rentIn;
+  assert.ok(rent > 0);
+  assert.equal(g.players[1].stats.rentOut, rent);
+  assert.equal(g.players[0].stats.biggestRent, rent);
+  // Laps and jail visits.
+  g = game();
+  g.players[0].position = BOARD.tiles - 1;
+  g.players[0].nextDice = 1;
+  g = act(g, { type: 'roll' });
+  assert.equal(g.players[0].stats.laps, 1);
+  g = game();
+  g.players[0].position = BOARD.goToJail - 1;
+  g.players[0].nextDice = 1;
+  g = act(g, { type: 'roll' });
+  assert.equal(g.players[0].stats.jailed, 1);
+  // Cards played and trades completed.
+  g = game();
+  g.players[0].cards = ['bonus'];
+  g = act(g, { type: 'playCard', cardId: 'bonus' });
+  assert.equal(g.players[0].stats.cards, 1);
+  g = act(g, {
+    type: 'tradeOffer',
+    to: 'p1',
+    giveCash: 10,
+    wantCash: 0,
+    giveTiles: [],
+    wantTiles: [],
+  });
+  g = act(g, { type: 'tradeAccept' }, 'p1');
+  assert.deepEqual(
+    g.players.map((p) => p.stats.trades),
+    [1, 1],
+  );
+  // Stats are public: every viewer sees them.
+  assert.equal(viewFor(g, null).players[0].stats.cards, 1);
+});

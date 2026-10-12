@@ -11,6 +11,7 @@ import {
   newsById,
 } from '../../content/src/index.ts';
 import type {
+  PlayerStats,
   ActionOption,
   DeckCardDefinition,
   DeckId,
@@ -181,6 +182,17 @@ function flipNews(g: GameState, env: EngineEnvironment) {
     }
   }
 }
+export const emptyStats = (): PlayerStats => ({
+  rentIn: 0,
+  rentOut: 0,
+  biggestRent: 0,
+  bought: 0,
+  built: 0,
+  laps: 0,
+  jailed: 0,
+  cards: 0,
+  trades: 0,
+});
 function shuffle<T>(items: T[], env: EngineEnvironment): T[] {
   const out = [...items];
   for (let i = out.length - 1; i > 0; i--) {
@@ -223,7 +235,10 @@ export function migrateGame(state: GameState, randomInt?: (max: number) => numbe
     g.trade.giveTiles ??= old.giveTile != null ? [old.giveTile] : [];
     g.trade.wantTiles ??= old.wantTile != null ? [old.wantTile] : [];
   }
-  for (const p of g.players) (p as Partial<PlayerState>).prophet ??= 0;
+  for (const p of g.players) {
+    (p as Partial<PlayerState>).prophet ??= 0;
+    p.stats = { ...emptyStats(), ...p.stats };
+  }
   return g as GameState;
 }
 export function createGame(
@@ -251,6 +266,7 @@ export function createGame(
           skipTurns: 0,
           jailTurns: 0,
           prophet: 0,
+          stats: emptyStats(),
           nextDice: null,
           discount: false,
           abilityRound: -2,
@@ -360,9 +376,22 @@ function charge(
       });
     } else if (creditorId) playerById(g, creditorId)!.cash += amount;
     else g.pot += amount;
+    if (meta?.spot === 'rent' && creditorId) {
+      const owner = playerById(g, creditorId)!;
+      p.stats.rentOut += amount;
+      owner.stats.rentIn += amount;
+      owner.stats.biggestRent = Math.max(owner.stats.biggestRent, amount);
+    }
     log(g, env, 'payment', `${p.name}：${reason} −${amount}`, p.id, -amount, undefined, meta);
   } else {
-    g.debt = { playerId: p.id, amount, creditorId, reason, ...(split ? { split } : {}) };
+    g.debt = {
+      playerId: p.id,
+      amount,
+      creditorId,
+      reason,
+      ...(split ? { split } : {}),
+      ...(meta?.spot === 'rent' ? { rent: true } : {}),
+    };
     setPhase(g, 'debt', env);
     log(
       g,
@@ -380,7 +409,16 @@ function settleDebt(g: GameState, env: EngineEnvironment) {
   if (p.cash < d.amount) return;
   g.debt = null;
   setPhase(g, 'manage', env);
-  charge(g, p, d.amount, d.creditorId, env, d.reason, undefined, d.split);
+  charge(
+    g,
+    p,
+    d.amount,
+    d.creditorId,
+    env,
+    d.reason,
+    d.rent ? { spot: 'rent' } : undefined,
+    d.split,
+  );
 }
 function finish(g: GameState, reason: string, env: EngineEnvironment) {
   const alive = g.players.filter((p) => !p.bankrupt);
@@ -585,6 +623,7 @@ const FERRY_FARE = 80;
 function sendToJail(g: GameState, p: PlayerState, env: EngineEnvironment, reason: string) {
   p.position = mapOf(g).corners.jail;
   p.jailTurns = 1;
+  p.stats.jailed++;
   p.nextDice = null;
   g.pendingPath = null;
   setPhase(g, 'manage', env);
@@ -717,6 +756,7 @@ export function isBehind(g: GameState, p: PlayerState): boolean {
 /** Start salary, plus a visible +50% catch-up subsidy for players who are far behind. */
 function paySalary(g: GameState, p: PlayerState, env: EngineEnvironment) {
   const behind = isBehind(g, p);
+  p.stats.laps++;
   reward(g, p, salaryOf(g), env, '经过起点');
   if (behind) reward(g, p, Math.round(salaryOf(g) / 2), env, '追赶补贴（落后于领先者 40% 以上）');
 }
@@ -871,6 +911,7 @@ function applyDeckCard(
       }
       const lot = lots[env.randomInt(lots.length)];
       lot.level++;
+      p.stats.built++;
       log(
         g,
         env,
@@ -961,6 +1002,7 @@ function advanceAuction(g: GameState, env: EngineEnvironment, preserveBidder = f
       requireRule(p.cash >= a.highBid, '竞拍资金不足');
       p.cash -= a.highBid;
       propertyAt(g, a.tile)!.owner = p.id;
+      p.stats.bought++;
       log(
         g,
         env,
@@ -1118,6 +1160,7 @@ function cardAction(
     case 'upgrade':
       requireRule(property!.level < 3 && !property!.mortgaged, '建筑已满级或处于抵押状态');
       property!.level++;
+      p.stats.built++;
       break;
     case 'discount':
       p.discount = true;
@@ -1134,6 +1177,7 @@ function cardAction(
       requireRule(p.cash >= price, `需要 ${price} 现金`);
       p.cash -= price;
       property!.owner = p.id;
+      p.stats.bought++;
       break;
     }
     case 'protect':
@@ -1176,6 +1220,7 @@ function cardAction(
       break;
   }
   p.cards.splice(p.cards.indexOf(card.id), 1);
+  p.stats.cards++;
   log(
     g,
     env,
@@ -1369,6 +1414,7 @@ export function applyAction(
       requireRule(!property.owner && p.cash >= price, `需要 ${price} 现金`);
       p.cash -= price;
       property.owner = p.id;
+      p.stats.bought++;
       setPhase(g, 'manage', env);
       log(g, env, 'purchase', `${p.name}买下${tile.name}，花费 ${price}`, p.id, -price, undefined, {
         spot: 'purchase',
@@ -1424,6 +1470,7 @@ export function applyAction(
         p.cash -= cost;
         p.discount = false;
         property.level++;
+        p.stats.built++;
         log(
           g,
           env,
@@ -1568,6 +1615,8 @@ export function applyAction(
         from.cash += offer.wantCash - offer.giveCash;
         p.cash += offer.giveCash - offer.wantCash;
         for (const t of offer.giveTiles) propertyAt(g, t)!.owner = p.id;
+        p.stats.trades++;
+        from.stats.trades++;
         for (const t of offer.wantTiles) propertyAt(g, t)!.owner = from.id;
         log(
           g,

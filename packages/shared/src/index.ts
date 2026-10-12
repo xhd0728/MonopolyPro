@@ -199,6 +199,19 @@ export interface PlayerState {
   bot: boolean;
   /** Correct free roll guesses this match (rewarded up to a small cap). */
   prophet: number;
+  /** Match statistics for the summary screen. */
+  stats: PlayerStats;
+}
+export interface PlayerStats {
+  rentIn: number;
+  rentOut: number;
+  biggestRent: number;
+  bought: number;
+  built: number;
+  laps: number;
+  jailed: number;
+  cards: number;
+  trades: number;
 }
 /** Moments every seat should notice; the client spotlights them on the board. */
 export type SpotKind =
@@ -237,6 +250,8 @@ export interface DebtDecision {
   reason: string;
   /** Creditors who share the amount equally instead of a single creditor. */
   split?: string[];
+  /** The debt is rent, counted in both players' statistics once paid. */
+  rent?: boolean;
 }
 export interface AuctionDecision {
   tile: number;
@@ -486,7 +501,7 @@ export const settingsSchema = z.object({
     .refine((n) => TURN_SECONDS.includes(n), '无效的操作时限')
     .default(0),
   end: z.enum(['rounds', 'time', 'target']).default('rounds'),
-  rounds: z.number().int().min(4).max(40).default(12),
+  rounds: z.number().int().min(4).max(40).default(16),
   target: z.number().int().min(5000).max(100000).default(15000),
   size: z.union([z.literal(36), z.literal(44)]).default(36),
 });
@@ -500,7 +515,7 @@ export const DEFAULT_SETTINGS: RoomSettings = {
   maxPlayers: 6,
   turnSeconds: 0,
   end: 'rounds',
-  rounds: 12,
+  rounds: 16,
   target: 15000,
   size: 36,
 };

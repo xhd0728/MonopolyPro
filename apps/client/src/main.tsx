@@ -39,6 +39,7 @@ import { Clock, serverTime, setServerOffset } from './clock.tsx';
 import { EmoteBar, Headlines, useLiveEmotes, useTurnAttention } from './Feedback.tsx';
 import { setSoundEnabled, soundEnabled, unlockSound } from './sound.ts';
 import { useShortcuts } from './shortcuts.ts';
+import { MatchSummary } from './Summary.tsx';
 import { TradeDialog, TradeOfferCard, tradeBlock, type TradeDraft } from './Trade.tsx';
 import './theme.css';
 const phaseNames = {
@@ -67,10 +68,10 @@ const kindNames = {
 const NO_EMOTES: RoomView['emotes'] = [];
 /** End-condition choices for the lobby, encoded as mode:value. */
 const END_CHOICES: [string, string][] = [
-  ['rounds:8', '8 轮（约 15 分钟）'],
-  ['rounds:12', '12 轮（默认，约 20–25 分钟）'],
-  ['rounds:16', '16 轮（约 30 分钟）'],
-  ['rounds:24', '24 轮（长局）'],
+  ['rounds:10', '10 轮（快速，约 20 分钟，绕行约 1 圈）'],
+  ['rounds:16', '16 轮（默认，约 30 分钟，绕行约 1.5 圈）'],
+  ['rounds:20', '20 轮（约 40 分钟）'],
+  ['rounds:30', '30 轮（长局）'],
   ['time:15', '限时 15 分钟'],
   ['time:30', '限时 30 分钟'],
   ['time:45', '限时 45 分钟'],
@@ -914,7 +915,7 @@ function App() {
                             ...room.settings,
                             mode: e.target.value,
                             end: 'rounds',
-                            rounds: e.target.value === 'quick' ? 8 : 12,
+                            rounds: e.target.value === 'quick' ? 10 : 16,
                           },
                         })
                       }
@@ -1437,47 +1438,12 @@ function App() {
                   </div>
                 </div>
                 {g.phase === 'finished' && (
-                  <section className="settlement paper">
-                    <div className="eyebrow">旅程纪念册</div>
-                    <h2>
-                      {g.players
-                        .filter((p) => g.winners.includes(p.id))
-                        .map((p) => p.name)
-                        .join('、')}
-                      获胜！
-                    </h2>
-                    <p>{g.finishReason}</p>
-                    {(() => {
-                      const best = Math.max(0, ...g.players.map((p) => p.prophet));
-                      const seers = g.players.filter((p) => best > 0 && p.prophet === best);
-                      return seers.length ? (
-                        <p className="prophet-title">
-                          🔮 最佳预言家：{seers.map((p) => p.name).join('、')}（猜中 {best} 次）
-                        </p>
-                      ) : null;
-                    })()}
-                    <div className="ranking">
-                      {[...g.players]
-                        .sort((a, b) => b.assets - a.assets)
-                        .map((p, i) => (
-                          <div key={p.id}>
-                            <span>0{i + 1}</span>
-                            <b>
-                              {p.name} {g.winners.includes(p.id) ? '✦' : ''}
-                            </b>
-                            <strong>{money(p.assets)}</strong>
-                            <small>
-                              现金 {money(p.cash)} · 存款 {money(p.deposit)}
-                            </small>
-                          </div>
-                        ))}
-                    </div>
-                    {room.isHost && (
-                      <button className="primary" onClick={() => lobby('newMatch')}>
-                        再开启一段旅程 →
-                      </button>
-                    )}
-                  </section>
+                  <MatchSummary
+                    game={g}
+                    map={map}
+                    isHost={room.isHost}
+                    restart={() => lobby('newMatch')}
+                  />
                 )}
               </>
             )}
@@ -1998,7 +1964,7 @@ function App() {
               </p>
               <h3>06 / 胜负与队伍</h3>
               <p>
-                房主选择结束方式：固定轮数（默认 12 轮，快速战 8
+                房主选择结束方式：固定轮数（默认 16 轮，快速战 10
                 轮）、限时，或谁的净资产先达到目标。无论哪种方式，最多 90 分钟。最后两轮、最后 5
                 分钟，或有人达到目标的 80% 时进入「终局冲刺」，所有租金 ×1.5。结束时按现金 + 存款 +
                 未抵押地产半价 + 建筑回收价 −
