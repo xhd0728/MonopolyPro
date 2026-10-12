@@ -168,6 +168,20 @@ test('debt can be resolved by emergency withdrawal; bankruptcy clears ownership'
   assert.equal(g.phase, 'finished');
   assert.deepEqual(g.winners, ['p1']);
 });
+test('each roll uses exactly one six-sided die; runner adds one step', () => {
+  for (let face = 0; face < 6; face++) {
+    let g = game();
+    const roll = { now: 1000, randomInt: (max: number) => (max === 6 ? face : 0) };
+    g = applyAction(g, 'p0', { type: 'roll' }, roll);
+    assert.deepEqual(g.lastDice, [face + 1]);
+    assert.equal(g.players[0].position, face + 1, 'builder moves exactly the die value');
+  }
+  let g = game();
+  g.players[0].characterId = 'runner';
+  g = applyAction(g, 'p0', { type: 'roll' }, { now: 1000, randomInt: () => 5 });
+  assert.deepEqual(g.lastDice, [6]);
+  assert.equal(g.players[0].position, 7, 'runner gets +1 on top of the single die');
+});
 test('private cards and predetermined dice do not reach opponents or spectators', () => {
   const g = game();
   g.players[0].nextDice = 6;

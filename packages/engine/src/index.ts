@@ -651,18 +651,18 @@ export function applyAction(
     }
     case 'roll': {
       requireRule(currentPlayer(g).id === p.id && g.phase === 'roll', '现在不能掷骰');
-      const dice =
-        p.nextDice !== null ? [p.nextDice] : [env.randomInt(6) + 1, env.randomInt(6) + 1];
+      // One six-sided die: a remote-dice card fixes the value, otherwise the server rolls.
+      const die = p.nextDice ?? env.randomInt(6) + 1;
       p.nextDice = null;
-      g.lastDice = dice;
+      g.lastDice = [die];
       log(
         g,
         env,
         'dice',
-        `${p.name}掷出 ${dice.join(' + ')}${p.characterId === 'runner' ? '，漫游者额外 +1' : ''}`,
+        `${p.name}掷出 ${die} 点${p.characterId === 'runner' ? '，漫游者额外 +1' : ''}`,
         p.id,
       );
-      move(g, dice.reduce((sum, n) => sum + n, 0) + (p.characterId === 'runner' ? 1 : 0), env);
+      move(g, die + (p.characterId === 'runner' ? 1 : 0), env);
       break;
     }
     case 'choosePath': {

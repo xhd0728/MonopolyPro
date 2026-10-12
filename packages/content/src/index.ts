@@ -342,16 +342,7 @@ export const CARDS: CardDefinition[] = [
   card('sprint', '城市快跑', 'move', 'move', 3, 'self', '立即前进 3 格，并结算落点。', '🛵'),
   card('express', '快线通行', 'move', 'move', 6, 'self', '立即前进 6 格，并结算落点。', '🚆'),
   card('home', '回到起点', 'move', 'teleport', 0, 'self', '回到起点并领取 300 薪水。', '🏠'),
-  card(
-    'remote',
-    '遥控骰子',
-    'move',
-    'dice',
-    0,
-    'self',
-    '指定下一次骰子为 1–6 点，不叠加第二枚骰子。',
-    '🎲',
-  ),
+  card('remote', '遥控骰子', 'move', 'dice', 0, 'self', '指定下一次掷骰的点数为 1–6。', '🎲'),
   card(
     'swap',
     '位置交换',

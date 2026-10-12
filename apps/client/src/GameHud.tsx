@@ -14,9 +14,8 @@ const pips: Record<number, number[]> = {
 export function DiceView({ game, rolling = false }: { game: GameView; rolling?: boolean }) {
   const event = [...game.events].reverse().find((e) => e.kind === 'dice');
   const player = game.players.find((p) => p.id === event?.actor);
-  const values = game.lastDice.length ? game.lastDice : [0, 0];
-  const total = values.reduce((n, d) => n + d, 0),
-    bonus = player?.characterId === 'runner' ? 1 : 0;
+  const value = game.lastDice[0] ?? 0;
+  const bonus = player?.characterId === 'runner' ? 1 : 0;
   return (
     <div
       className={`dice-stage ${rolling ? 'rolling' : ''}`}
@@ -27,26 +26,23 @@ export function DiceView({ game, rolling = false }: { game: GameView; rolling?: 
       <div className="dice-caption">
         <b>{rolling ? '正在掷骰' : event ? `${player?.name ?? '玩家'}的骰子` : '掷骰出发'}</b>
         <small>
-          {event ? `前进 ${total + bonus} 格${bonus ? '（天赋 +1）' : ''}` : '服务端裁定点数'}
+          {event ? `前进 ${value + bonus} 格${bonus ? '（天赋 +1）' : ''}` : '服务端裁定点数'}
         </small>
       </div>
       <div className="dice-pair">
-        {values.map((value, index) => (
-          <span
-            className={`dice-cube ${value ? 'rolled' : 'unrolled'}`}
-            key={index}
-            aria-label={value ? `${value} 点` : '等待掷骰'}
-          >
-            {value
-              ? Array.from({ length: 9 }, (_, i) => (
-                  <i className={pips[value]?.includes(i) ? 'pip' : ''} key={i} />
-                ))
-              : '?'}
-          </span>
-        ))}
+        <span
+          className={`dice-cube ${value ? 'rolled' : 'unrolled'}`}
+          aria-label={value ? `${value} 点` : '等待掷骰'}
+        >
+          {value
+            ? Array.from({ length: 9 }, (_, i) => (
+                <i className={pips[value]?.includes(i) ? 'pip' : ''} key={i} />
+              ))
+            : '?'}
+        </span>
       </div>
       <strong className="dice-total">
-        {event ? total : '—'}
+        {event ? value : '—'}
         <small>点数</small>
       </strong>
     </div>
