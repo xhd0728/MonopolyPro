@@ -86,6 +86,7 @@ export function botAction(g: GameState, id: string): GameAction | null {
       if (
         opponent &&
         (card.effect !== 'stealCard' || opponent.cards.length > 0) &&
+        (card.effect !== 'swap' || opponent.jailTurns === 0) &&
         p.cards.length < 8
       )
         return { type: 'playCard', cardId: id, targetId: opponent.id };

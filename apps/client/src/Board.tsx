@@ -89,6 +89,9 @@ const TileGrid = memo(function TileGrid({
     if (!p.bankrupt) occupants.set(p.position, [...(occupants.get(p.position) ?? []), p.name]);
   const gates = new Map(map.shortcuts.map(([from, to]) => [from, to]));
   const gatesOpen = map.mechanic !== 'gates' || (game?.round ?? 1) % 2 === 0;
+  const forkChoices = new Set(
+    game?.phase === 'path' && game.activeId === game.viewerId ? game.pendingPath!.choices : [],
+  );
   return (
     <>
       {map.tiles.map((t) => {
@@ -123,7 +126,7 @@ const TileGrid = memo(function TileGrid({
               } as CSSProperties
             }
             onClick={() => onTile(t.index)}
-            aria-label={`查看${t.name}`}
+            aria-label={forkChoices.has(t.index) ? `选择路线前往${t.name}` : `查看${t.name}`}
             title={[
               t.name,
               t.kind === 'property'
@@ -192,7 +195,11 @@ const INNER: Record<string, [number, number]> = {
   left: [0.5, 0],
   right: [-0.5, 0],
 };
-/** Pawns live above the grid so they can hop square by square without re-rendering tiles. */
+/**
+ * Pawns live above the grid so they can hop square by square without re-rendering tiles.
+ * Each pawn has its own queue: when bots act faster than the animation, new steps are
+ * appended instead of cutting the current hop short.
+ */
 function TokenLayer({
   game,
   map,
@@ -207,49 +214,66 @@ function TokenLayer({
     Object.fromEntries(live.map((p) => [p.id, p.position])),
   );
   const [moving, setMoving] = useState<string[]>([]);
-  const shownRef = useRef(shown);
-  shownRef.current = shown;
+  const lanes = useRef(
+    new Map<
+      string,
+      { queue: number[]; timer?: ReturnType<typeof setTimeout>; target: number; partial?: number[] }
+    >(),
+  );
   const seen = useRef({ gameId: game.id, event: game.nextEvent - 1 });
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   useEffect(() => {
-    const fresh =
-      seen.current.gameId === game.id ? game.events.filter((e) => e.id > seen.current.event) : [];
+    const sameGame = seen.current.gameId === game.id;
+    const fresh = sameGame ? game.events.filter((e) => e.id > seen.current.event) : [];
     seen.current = { gameId: game.id, event: game.nextEvent - 1 };
-    for (const t of timers.current) clearTimeout(t);
-    timers.current = [];
     // A fresh roll waits for the die to land before the pawn starts hopping.
     const lead = fresh.some((e) => e.kind === 'dice') && !reduced ? 520 : 0;
-    const next = { ...shownRef.current };
-    const hopping: string[] = [];
+    const step = (id: string) => {
+      const lane = lanes.current.get(id)!;
+      const next = lane.queue.shift();
+      if (next === undefined) {
+        lane.timer = undefined;
+        setMoving((m) => m.filter((x) => x !== id));
+        return;
+      }
+      setShown((s) => ({ ...s, [id]: next }));
+      // Long routes speed up so a whole move stays around two seconds.
+      lane.timer = setTimeout(() => step(id), Math.min(190, 2000 / (lane.queue.length + 1)));
+    };
     for (const p of live) {
-      const from = shownRef.current[p.id];
-      if (from === undefined || from === p.position || reduced) {
-        next[p.id] = p.position;
+      let lane = lanes.current.get(p.id);
+      if (!lane || !sameGame || reduced) {
+        if (lane?.timer) clearTimeout(lane.timer);
+        lanes.current.set(p.id, { queue: [], target: p.position });
+        setShown((s) => ({ ...s, [p.id]: p.position }));
         continue;
       }
-      let route = fresh.filter((e) => e.actor === p.id && e.path?.length).flatMap((e) => e.path!);
-      if (game.pendingPath && game.activeId === p.id) route = [...route, ...game.pendingPath.path];
-      const after = route.lastIndexOf(from);
-      if (after >= 0) route = route.slice(after + 1);
+      const pending = game.pendingPath && game.activeId === p.id ? game.pendingPath.path : [];
+      if (lane.target === p.position && !pending.length) continue;
+      let route = [
+        ...fresh.filter((e) => e.actor === p.id && e.path?.length).flatMap((e) => e.path!),
+        ...pending,
+      ];
+      // At a fork the partial path was already animated; skip it when the full path arrives.
+      const done = lane.partial;
+      if (done?.length && done.every((tile, i) => route[i] === tile))
+        route = route.slice(done.length);
+      lane.partial = pending.length ? pending : undefined;
       if (route.at(-1) !== p.position) route.push(p.position);
-      const step = Math.min(190, 2400 / route.length);
-      hopping.push(p.id);
-      route.forEach((tile, n) =>
-        timers.current.push(
-          setTimeout(() => setShown((s) => ({ ...s, [p.id]: tile })), lead + n * step),
-        ),
-      );
-      timers.current.push(
-        setTimeout(
-          () => setMoving((m) => m.filter((id) => id !== p.id)),
-          lead + route.length * step + 120,
-        ),
-      );
+      lane.target = p.position;
+      lane.queue.push(...route);
+      setMoving((m) => (m.includes(p.id) ? m : [...m, p.id]));
+      if (!lane.timer) {
+        const id = p.id;
+        lane.timer = setTimeout(() => step(id), lead);
+      }
     }
-    setShown(next);
-    setMoving(hopping);
   }, [game.id, game.revision, reduced]);
-  useEffect(() => () => timers.current.forEach(clearTimeout), []);
+  useEffect(
+    () => () => {
+      for (const lane of lanes.current.values()) if (lane.timer) clearTimeout(lane.timer);
+    },
+    [],
+  );
   const stacks = new Map<number, string[]>();
   for (const p of live) {
     const at = shown[p.id] ?? p.position;

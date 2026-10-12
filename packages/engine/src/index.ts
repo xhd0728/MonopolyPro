@@ -597,6 +597,7 @@ function cardAction(
       p.nextDice = action.value;
       break;
     case 'swap': {
+      requireRule(target.jailTurns === 0, '对手正在拘留所，不能与其交换位置');
       const old = p.position;
       p.position = target.position;
       target.position = old;
@@ -1072,7 +1073,7 @@ export function assertInvariants(g: GameState) {
         p.deposit >= 0 &&
         p.position >= 0 &&
         p.position < mapById(g.settings.mapId).tiles.length &&
-        (p.jailTurns === 0 || p.jailTurns === 1) &&
+        (p.jailTurns === 0 || (p.jailTurns === 1 && p.position === BOARD.jail)) &&
         p.cards.length <= 8,
     ),
     '资产或玩家状态不满足约束',

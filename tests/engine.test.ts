@@ -411,3 +411,15 @@ test('passing the start square pays the configured salary', () => {
   assert.equal(g.players[0].cash, 3000 + BOARD.salary);
   assert.equal(BOARD.salary, 500, 'single-die laps take ~10 turns; salary is scaled up to match');
 });
+test('a jailed opponent cannot be swapped out of the jail corner', () => {
+  let g = game();
+  g.players[1].position = BOARD.jail;
+  g.players[1].jailTurns = 1;
+  g.players[0].cards = ['swap'];
+  assert.throws(() => act(g, { type: 'playCard', cardId: 'swap', targetId: 'p1' }), /拘留所/);
+  assert.equal(botAction(g, 'p0')?.type === 'playCard', false, 'the bot keeps the card');
+  g.players[1].jailTurns = 0;
+  g = act(g, { type: 'playCard', cardId: 'swap', targetId: 'p1' });
+  assert.equal(g.players[0].position, BOARD.jail);
+  assert.equal(g.players[0].jailTurns, 0, 'standing on the jail square is only visiting');
+});

@@ -15,7 +15,9 @@ export function DiceView({ game, rolling = false }: { game: GameView; rolling?: 
   const event = [...game.events].reverse().find((e) => e.kind === 'dice');
   const player = game.players.find((p) => p.id === event?.actor);
   const value = game.lastDice[0] ?? 0;
-  const bonus = player?.characterId === 'runner' && !event?.text.includes('拘留所') ? 1 : 0;
+  const bonus = player?.characterId === 'runner' ? 1 : 0;
+  const jailRoll = !!event?.text.includes('在拘留所掷出');
+  const stayed = jailRoll && value < 6;
   // While a roll is pending, flicker through faces so the die visibly tumbles.
   const [spin, setSpin] = useState(1);
   useEffect(() => {
@@ -48,9 +50,11 @@ export function DiceView({ game, rolling = false }: { game: GameView; rolling?: 
         <small>
           {rolling
             ? '由服务器裁定点数'
-            : event
-              ? `前进 ${value + bonus} 格${bonus ? '，含漫游者 +1' : ''}`
-              : '每回合掷一颗六面骰'}
+            : stayed
+              ? '没有掷出 6，本回合留在拘留所'
+              : event
+                ? `${jailRoll ? '出狱并' : ''}前进 ${value + bonus} 格${bonus ? '，含漫游者 +1' : ''}`
+                : '每回合掷一颗六面骰'}
         </small>
       </div>
     </div>

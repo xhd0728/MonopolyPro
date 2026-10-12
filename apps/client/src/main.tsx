@@ -373,6 +373,7 @@ function App() {
         : '',
   }));
   const chosenCardReason = cardTargets.find((t) => t.id === cardTarget)?.reason ?? '';
+  const jailedMove = !!me?.jailTurns && selectedCard?.category === 'move';
   const bidReason = !validMoney(bid)
     ? '请输入整数竞价金额'
     : bid < (g?.auction?.highBid ?? 0) + 10
@@ -915,7 +916,10 @@ function App() {
                             <MatchHud
                               room={room}
                               map={map}
-                              rolling={pending && pendingAction.current?.type === 'roll'}
+                              rolling={
+                                pending &&
+                                ['roll', 'jailRoll'].includes(pendingAction.current?.type ?? '')
+                              }
                               action={hudAction}
                             />
                             <ActionAnnouncements game={g} enabled={hints} />
@@ -1624,12 +1628,15 @@ function App() {
                 : '请选择有效目标；使用后消耗这张卡牌。'}
           </p>
           {(!canManage ||
+            jailedMove ||
             chosenCardReason ||
             (selectedCard.target !== 'self' && !cardTargets.some((t) => !t.reason))) && (
             <p className="field-error">
               {!canManage
                 ? '等待自己的掷骰或经营阶段使用；现在可以查看卡牌效果。'
-                : chosenCardReason || '当前没有可用目标，请保留到合适的时机。'}
+                : jailedMove
+                  ? '拘留中不能使用移动类卡牌；出狱后再用。'
+                  : chosenCardReason || '当前没有可用目标，请保留到合适的时机。'}
             </p>
           )}
           <button
@@ -1637,6 +1644,7 @@ function App() {
             disabled={
               disabled ||
               !canManage ||
+              jailedMove ||
               !!chosenCardReason ||
               (selectedCard.target !== 'self' && !cardTarget)
             }
