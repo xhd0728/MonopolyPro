@@ -26,7 +26,13 @@ import { Board } from './Board.tsx';
 import { Assets } from './Assets.tsx';
 import { PlayerRoster, PlayerDetails } from './Players.tsx';
 import { money, cardTargetReason, validMoney, groupColor } from './game-ui.ts';
-import { MatchHud, ActionAnnouncements, phaseGuide, type HudAction } from './GameHud.tsx';
+import {
+  MatchHud,
+  ActionAnnouncements,
+  adviceFor,
+  phaseGuide,
+  type HudAction,
+} from './GameHud.tsx';
 import { api, Connection, type Credentials } from './network.ts';
 import { Clock, setServerOffset } from './clock.tsx';
 import { EmoteBar, Headlines, useLiveEmotes, useTurnAttention } from './Feedback.tsx';
@@ -1016,7 +1022,11 @@ function App() {
                                       ? phaseNames[g.phase]
                                       : `${active?.name ?? '伙伴'}正在操作`}
                               </h2>
-                              <p>{phaseGuide(g, map).text}</p>
+                              {adviceFor(g, map) ? (
+                                <p className="turn-tip">💡 建议：{adviceFor(g, map)}</p>
+                              ) : (
+                                <p>{phaseGuide(g, map).text}</p>
+                              )}
                               {g.phase !== 'finished' && !g.trade && (
                                 <span className="decision-timer">
                                   本次决定还剩{' '}

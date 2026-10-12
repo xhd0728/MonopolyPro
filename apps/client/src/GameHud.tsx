@@ -136,6 +136,67 @@ export function phaseGuide(game: GameView, map: MapDefinition): { title: string;
       : '等待时可看国家费用与玩家资产；对手行动会实时显示在这里。',
   };
 }
+/**
+ * One concrete suggestion for the seat that has to decide now, so nobody is left wondering
+ * what to do. Advice only; the server still decides what is legal.
+ */
+export function adviceFor(game: GameView, map: MapDefinition): string | null {
+  const me = game.players.find((p) => p.id === game.viewerId);
+  if (!me || me.bankrupt || game.activeId !== me.id || game.trade) return null;
+  const here = map.tiles[me.position];
+  const mine = game.properties.filter((p) => p.owner === me.id);
+  const groupOf = (tile: number) => map.tiles[tile].group;
+  const ownsGroup = (group: number) =>
+    game.properties.filter((p) => groupOf(p.tile) === group).every((p) => p.owner === me.id);
+  const can = (type: string) => game.actions.some((a) => a.action.type === type);
+  switch (game.phase) {
+    case 'purchase': {
+      const price = game.properties.find((p) => p.tile === me.position)?.price ?? here.price;
+      const rest = game.properties.filter(
+        (p) => groupOf(p.tile) === here.group && p.tile !== me.position,
+      );
+      if (rest.length && rest.every((p) => p.owner === me.id))
+        return `买下${here.name}即可独占这一组，组内租金全部 +30%。`;
+      if (!can('buy')) return '现金不够买下这里，可以进入拍卖，低价时也能参与竞拍。';
+      if (me.cash - price < 300)
+        return `买下后只剩 ${money(me.cash - price)} 现金，小心付不起别人的租金。`;
+      return '地产是收租的来源，开局多买几处通常更有利。';
+    }
+    case 'jail':
+      if (me.cards?.includes('rescue')) return '手里有「自由通行」，用它可以直接出狱。';
+      if (can('bail') && game.properties.some((p) => !p.owner))
+        return '还有不少空地，缴保释金尽早出发去抢地更划算。';
+      return '掷骰碰碰运气：掷出 6 立刻出狱，否则下回合自由。';
+    case 'debt':
+      return '先取出存款，再出售建筑，最后才抵押地产；筹够后会自动付款。';
+    case 'auction': {
+      const price = map.tiles[game.auction!.tile].price;
+      return `这块地原价 ${money(price)}，出价别超过它太多，也别让对手低价拿走。`;
+    }
+    case 'path':
+      return '点击棋盘上高亮的国家选择路线；捷径更快，但可能错过起点薪水。';
+    case 'roll':
+      if (me.cards?.some((id) => ['remote', 'step', 'sprint', 'express'].includes(id)))
+        return '可以先用移动类手牌调整落点，再掷骰。';
+      return '直接掷骰出发吧；等待时别人也能猜你的点数。';
+    case 'manage': {
+      const monopoly = mine.find(
+        (p) =>
+          ownsGroup(groupOf(p.tile)) &&
+          game.actions.some(
+            (a) => a.action.type === 'build' && 'tile' in a.action && a.action.tile === p.tile,
+          ),
+      );
+      if (monopoly) return `你已独占${map.tiles[monopoly.tile].name}所在的组，现在升级它最划算。`;
+      if (here.kind === 'bank' && me.cash > 800) return '你在银行：多余现金存进去，每轮有利息。';
+      if (here.kind === 'shop' && me.cardCount < 8) return '你在卡牌市场，可以花钱挑一张想要的牌。';
+      if (can('build') && me.cash > 1200) return '现金充裕，可以升级一处地产提高租金。';
+      return '没有更急的事了，点「结束回合」交给下一位。';
+    }
+    default:
+      return null;
+  }
+}
 export interface HudAction {
   label: string;
   run: () => void;
@@ -156,7 +217,8 @@ export function MatchHud({
   onGuess?: (pick: 'high' | 'low') => void;
 }) {
   const game = room.game!,
-    guide = phaseGuide(game, map);
+    guide = phaseGuide(game, map),
+    tip = adviceFor(game, map);
   const news = game.news && game.news.round === game.round ? newsById(game.news.id) : undefined;
   const thinking =
     room.aiActivity?.state === 'thinking'
@@ -188,6 +250,7 @@ export function MatchHud({
       <div className="phase-guide" aria-label="本阶段说明">
         <h3>{guide.title}</h3>
         <p>{thinking ? `${thinking}正在用 LLM 思考，服务端会校验它的选择。` : guide.text}</p>
+        {tip && <p className="hud-tip">💡 {tip}</p>}
       </div>
       {onGuess && <GuessPanel game={game} onGuess={onGuess} />}
       {action && (

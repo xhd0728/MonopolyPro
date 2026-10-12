@@ -948,3 +948,9 @@
 [data-reduced-motion='true'] .pawn-emote {
   animation: none;
 }
+
+.phase-guide .hud-tip {
+  margin-top: calc(var(--u) * 0.1);
+  color: #ffe2a3;
+  font-weight: 700;
+}
