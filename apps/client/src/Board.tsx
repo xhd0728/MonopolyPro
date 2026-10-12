@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
+  BOARD,
   characterById,
   countryFlag,
   shortCountryName,
@@ -46,7 +47,7 @@ const sideOf = (t: TileDefinition) =>
 function tileCaption(t: TileDefinition, game: GameView | null | undefined) {
   switch (t.kind) {
     case 'start':
-      return '经过 +300';
+      return `经过 +${BOARD.salary}`;
     case 'jail':
       return '探访 / 拘留';
     case 'parking':
@@ -326,7 +327,7 @@ export function Board({
                       ? '虚线是丝路商路，偶数轮开放'
                       : map.mechanic === 'metro'
                         ? '虚线是国际快线，抵达岔路时自选'
-                        : '顺时针前进，经过起点领取 300'}
+                        : `顺时针前进，经过起点领取 ${BOARD.salary}`}
                 </small>
               </div>
             )}

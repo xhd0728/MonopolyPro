@@ -69,7 +69,7 @@ export const BOARD = {
   jail: 9,
   parking: 18,
   goToJail: 27,
-  salary: 300,
+  salary: 500,
   bail: 100,
   jailEscapeFace: 6,
 } as const;
@@ -380,7 +380,16 @@ export const CARDS: CardDefinition[] = [
   card('step', '轻巧一步', 'move', 'move', 1, 'self', '立即前进 1 格，并结算落点。', '👟'),
   card('sprint', '城市快跑', 'move', 'move', 3, 'self', '立即前进 3 格，并结算落点。', '🛵'),
   card('express', '快线通行', 'move', 'move', 6, 'self', '立即前进 6 格，并结算落点。', '🚆'),
-  card('home', '回到起点', 'move', 'teleport', 0, 'self', '回到起点并领取 300 薪水。', '🏠'),
+  card(
+    'home',
+    '回到起点',
+    'move',
+    'teleport',
+    0,
+    'self',
+    `回到起点并领取 ${BOARD.salary} 薪水。`,
+    '🏠',
+  ),
   card('remote', '遥控骰子', 'move', 'dice', 0, 'self', '指定下一次掷骰的点数为 1–6。', '🎲'),
   card(
     'swap',

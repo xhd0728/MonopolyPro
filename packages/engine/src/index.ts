@@ -800,7 +800,7 @@ export function applyAction(
       );
       const pending = g.pendingPath!;
       p.position = action.tile;
-      if (p.position === 0) reward(g, p, 300, env, '经过起点');
+      if (p.position === BOARD.start) reward(g, p, BOARD.salary, env, '经过起点');
       move(g, pending.remaining - 1, env, [...pending.path, p.position]);
       break;
     }

@@ -2,6 +2,7 @@ import './style.css';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
+  BOARD,
   MAPS,
   CHARACTERS,
   CARDS,
@@ -39,7 +40,7 @@ const phaseNames = {
   finished: '旅程结算',
 };
 const kindNames = {
-  start: '起点 · 经过领取 300',
+  start: `起点 · 经过领取 ${BOARD.salary}`,
   property: '可购买的地产',
   bank: '银行 · 每轮利息 3%',
   shop: '卡牌商店 · 最多 8 张',
@@ -1812,8 +1813,9 @@ function App() {
               </p>
               <h3>02 / 四个角落与拘留所</h3>
               <p>
-                棋盘一圈 36 格，四角依次是起点、海关拘留所、免费停车场和海关遣返。经过起点领取
-                300。停在遣返或抽到「护照过期」会直接进入拘留所，不经过起点、不领薪水；只是路过拘留所算作探访。被拘留后的下一回合可以缴纳
+                棋盘一圈 36 格，四角依次是起点、海关拘留所、免费停车场和海关遣返。经过起点领取{' '}
+                {BOARD.salary}
+                。停在遣返或抽到「护照过期」会直接进入拘留所，不经过起点、不领薪水；只是路过拘留所算作探访。被拘留后的下一回合可以缴纳
                 100 保释金、使用「自由通行」卡（探险家天赋也可以），或掷骰碰运气：掷出 6
                 点当场出狱并前进，否则留下一回合，之后自由出发。拘留期间仍可收租、建设和交易，但不能使用移动类卡牌。税费、维护费和保释金都会进入免费停车场奖池，下一位停车的玩家全部领走。
               </p>

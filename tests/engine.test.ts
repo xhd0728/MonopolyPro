@@ -402,3 +402,12 @@ test('views carry a bounded recent log plus each player’s latest action from t
   assert.equal(g.settings.minutes, DEFAULT_SETTINGS.minutes);
   assert.equal(tickGame(g, env), null, 'idle ticks return without copying');
 });
+test('passing the start square pays the configured salary', () => {
+  let g = game();
+  g.players[0].position = BOARD.tiles - 2;
+  g.players[0].nextDice = 4;
+  g = act(g, { type: 'roll' });
+  assert.equal(g.players[0].position, 2);
+  assert.equal(g.players[0].cash, 3000 + BOARD.salary);
+  assert.equal(BOARD.salary, 500, 'single-die laps take ~10 turns; salary is scaled up to match');
+});
