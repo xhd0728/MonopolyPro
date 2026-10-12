@@ -102,8 +102,8 @@ test('trade validates all assets before atomic exchange and freezes turn', () =>
     to: 'p1',
     giveCash: 100,
     wantCash: 20,
-    giveTile: 1,
-    wantTile: 2,
+    giveTiles: [1],
+    wantTiles: [2],
   });
   assert.throws(() => act(g, { type: 'roll' }));
   g.players[1].cash = 0;
@@ -683,4 +683,87 @@ test('review fixes: hidden decks, lucky-day debt, shared payments, fixed rolls',
   g = act(g, { type: 'roll' });
   assert.equal(g.players[1].cash, 3000);
   assert.equal(g.players[1].prophet, 0);
+});
+test('free trading: any player proposes, several squares per side, counter-offers and a cooldown', () => {
+  let g = game('town', 3);
+  propertyAt(g, 1)!.owner = 'p1';
+  propertyAt(g, 2)!.owner = 'p1';
+  propertyAt(g, 4)!.owner = 'p2';
+  // p1 proposes although it is p0's turn.
+  g = act(
+    g,
+    { type: 'tradeOffer', to: 'p2', giveCash: 0, wantCash: 0, giveTiles: [1, 2], wantTiles: [4] },
+    'p1',
+  );
+  assert.deepEqual(g.trade!.giveTiles, [1, 2]);
+  assert.ok(g.events.some((e) => e.spot === 'offer'));
+  assert.throws(() => act(g, { type: 'roll' }), /交易/);
+  // p2 counters: keeps square 4, asks for both squares plus 100.
+  g = act(
+    g,
+    { type: 'tradeCounter', giveCash: 0, wantCash: 100, giveTiles: [], wantTiles: [1, 2] },
+    'p2',
+  );
+  assert.equal(g.trade!.from, 'p2');
+  assert.equal(g.trade!.to, 'p1');
+  assert.equal(g.trade!.counter, true);
+  g = act(g, { type: 'tradeAccept' }, 'p1');
+  assert.equal(propertyAt(g, 1)!.owner, 'p2');
+  assert.equal(propertyAt(g, 2)!.owner, 'p2');
+  assert.equal(g.players[1].cash, 2900, 'p1 pays the 100 p2 asked for');
+  assert.equal(g.players[2].cash, 3100);
+  // A rejected proposer waits before proposing again.
+  g = act(
+    g,
+    { type: 'tradeOffer', to: 'p0', giveCash: 10, wantCash: 0, giveTiles: [], wantTiles: [] },
+    'p1',
+  );
+  g = act(g, { type: 'tradeReject' }, 'p0');
+  assert.throws(
+    () =>
+      act(
+        g,
+        { type: 'tradeOffer', to: 'p0', giveCash: 10, wantCash: 0, giveTiles: [], wantTiles: [] },
+        'p1',
+      ),
+    /稍等/,
+  );
+  // Buildings and mortgages block a square from trading.
+  propertyAt(g, 4)!.level = 1;
+  assert.throws(
+    () =>
+      act(
+        g,
+        { type: 'tradeOffer', to: 'p0', giveCash: 0, wantCash: 0, giveTiles: [4], wantTiles: [] },
+        'p2',
+      ),
+    /建筑/,
+  );
+});
+test('bots value colour groups: they buy the last square they need and refuse cheap completions', () => {
+  let g = game('town', 2);
+  // p0 owns two of group 0 (squares 1, 2, 4); p1 owns the third.
+  propertyAt(g, 1)!.owner = 'p0';
+  propertyAt(g, 2)!.owner = 'p0';
+  propertyAt(g, 4)!.owner = 'p1';
+  g.phase = 'manage';
+  g.players[0].cash = 5000;
+  // Isolate the trade decision from the bot's talent and hand cards.
+  g.players[0].abilityRound = g.round;
+  g.players[0].cards = [];
+  const offer = botAction(g, 'p0');
+  assert.equal(offer?.type, 'tradeOffer');
+  assert.deepEqual(offer?.type === 'tradeOffer' && offer.wantTiles, [4]);
+  // A cheap offer that completes the proposer's group is refused; a generous one is taken.
+  g = act(g, {
+    type: 'tradeOffer',
+    to: 'p1',
+    giveCash: 300,
+    wantCash: 0,
+    giveTiles: [],
+    wantTiles: [4],
+  });
+  assert.equal(botAction(g, 'p1')?.type, 'tradeReject');
+  g.trade!.giveCash = 1000;
+  assert.equal(botAction(g, 'p1')?.type, 'tradeAccept');
 });

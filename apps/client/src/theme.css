@@ -751,3 +751,139 @@ label {
 .rename-row label {
   flex: 1;
 }
+
+/* ---------- Trading ---------- */
+.trade-steps {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+  font-size: 12px;
+  color: var(--muted);
+}
+.trade-steps li {
+  flex: 1;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #f4f7fa;
+  counter-increment: step;
+}
+.trade-steps li::before {
+  content: counter(step) ' ';
+  font-weight: 800;
+  color: var(--ocean);
+}
+.trade-dialog .trade-grid section {
+  min-width: 0;
+}
+.trade-cash span {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0 10px;
+}
+.trade-cash span button {
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.trade-squares {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 210px;
+  overflow: auto;
+}
+.trade-squares label {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--group);
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.trade-squares label.picked {
+  background: #eef5fb;
+  border-color: var(--ocean);
+  border-left-color: var(--group);
+}
+.trade-squares input {
+  width: auto;
+  margin: 0;
+}
+.trade-squares small {
+  color: var(--muted);
+  font-family: var(--num);
+}
+.trade-verdict {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f4f7fa;
+  font-size: 13px;
+}
+.trade-verdict em {
+  font-style: normal;
+  color: var(--muted);
+}
+.trade-verdict .good {
+  color: #15855a;
+  font-weight: 700;
+}
+.trade-verdict .warn {
+  color: #b05a00;
+  font-weight: 700;
+}
+.trade-offer {
+  margin: 8px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+.trade-offer.incoming {
+  border-color: var(--saffron);
+  box-shadow: 0 0 0 3px #f5b62e55;
+}
+.trade-offer header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+.trade-offer-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 8px 0;
+}
+.trade-offer-sides h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.trade-offer-sides ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.trade-offer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.trade-offer-actions button {
+  flex: 1;
+  min-height: 40px;
+}

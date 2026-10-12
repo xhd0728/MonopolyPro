@@ -35,8 +35,9 @@ import {
   type HudAction,
 } from './GameHud.tsx';
 import { api, Connection, type Credentials } from './network.ts';
-import { Clock, setServerOffset } from './clock.tsx';
+import { Clock, serverTime, setServerOffset } from './clock.tsx';
 import { EmoteBar, Headlines, useLiveEmotes, useTurnAttention } from './Feedback.tsx';
+import { TradeDialog, TradeOfferCard, tradeBlock, type TradeDraft } from './Trade.tsx';
 import './theme.css';
 const phaseNames = {
   roll: '掷骰出发',
@@ -169,11 +170,7 @@ function App() {
     [hints, setHints] = useState(localStorage.getItem('mp-hints') !== 'false'),
     [tutorial, setTutorial] = useState<number | null>(null),
     [tutorialGame, setTutorialGame] = useState(false);
-  const [tradeTo, setTradeTo] = useState(''),
-    [giveCash, setGiveCash] = useState(0),
-    [wantCash, setWantCash] = useState(0),
-    [giveTile, setGiveTile] = useState(''),
-    [wantTile, setWantTile] = useState('');
+  const [tradeDraft, setTradeDraft] = useState<TradeDraft | null>(null);
   const roomRef = useRef(room);
   roomRef.current = room;
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined),
@@ -196,7 +193,10 @@ function App() {
       notify,
       (result) => {
         setPending(false);
-        if (result?.ok && ['playCard', 'tradeOffer'].includes(pendingAction.current?.type ?? '')) {
+        if (
+          result?.ok &&
+          ['playCard', 'tradeOffer', 'tradeCounter'].includes(pendingAction.current?.type ?? '')
+        ) {
           setDialog(null);
         }
         pendingAction.current = null;
@@ -403,15 +403,11 @@ function App() {
       : bid > (me?.cash ?? 0)
         ? '竞价不能超过可用现金'
         : '';
-  const tradeTarget = g?.players.find((p) => p.id === tradeTo);
-  const tradeReason =
-    !validMoney(giveCash) || !validMoney(wantCash)
-      ? '现金必须是非负整数'
-      : giveCash > (me?.cash ?? 0)
-        ? '给出的现金超过你的余额'
-        : wantCash > (tradeTarget?.cash ?? 0)
-          ? '希望获得的现金超过对方余额'
-          : '';
+  const tradeWhy = g ? tradeBlock(g, me, serverTime()) : '对局尚未开始';
+  const openTrade = (to: string, extra: Partial<TradeDraft> = {}) => {
+    setTradeDraft({ to, giveCash: 0, wantCash: 0, giveTiles: [], wantTiles: [], ...extra });
+    setDialog('trade');
+  };
   const inspected = g?.players.find((p) => p.id === inspectedPlayer);
   const lobbyPlayers = room?.seats.filter((s) => !s.spectator) ?? [];
   const startReason =
@@ -1102,33 +1098,20 @@ function App() {
                               )}
                             </div>
                             {g.trade && (
-                              <div className="tip-box">
-                                {g.players.find((p) => p.id === g.trade!.from)?.name}给出{' '}
-                                {g.trade.giveCash}
-                                {g.trade.giveTile !== null
-                                  ? ` + ${map.tiles[g.trade.giveTile].name}`
-                                  : ''}
-                                ，换取 {g.trade.wantCash}
-                                {g.trade.wantTile !== null
-                                  ? ` + ${map.tiles[g.trade.wantTile].name}`
-                                  : ''}
-                                <br />
-                                有效期剩余{' '}
-                                <Clock>
-                                  {(now) =>
-                                    Math.max(0, Math.ceil((g.trade!.expiresAt - now) / 1000))
-                                  }
-                                </Clock>{' '}
-                                秒
-                              </div>
+                              <TradeOfferCard
+                                game={g}
+                                map={map}
+                                disabled={disabled}
+                                command={command}
+                                counter={(draft) => {
+                                  setTradeDraft(draft);
+                                  setDialog('trade');
+                                }}
+                              />
                             )}
                             <div className="actions">
                               {g.actions
-                                .filter(
-                                  (a) =>
-                                    a.primary ||
-                                    ['tradeAccept', 'tradeReject', 'ferry'].includes(a.action.type),
-                                )
+                                .filter((a) => a.primary || a.action.type === 'ferry')
                                 .map((a, i) => (
                                   <div key={i}>
                                     <button
@@ -1227,23 +1210,16 @@ function App() {
                                     ▤ 管理资产
                                   </button>
                                   <button
-                                    disabled={!canManage || disabled}
+                                    disabled={!!tradeWhy || disabled}
                                     title={
-                                      canManage
-                                        ? '现金和无建筑地产可交易'
-                                        : '在自己的掷骰或经营阶段发起'
+                                      tradeWhy || '任何时候都可以和其他玩家交换现金与无建筑的地产'
                                     }
-                                    onClick={() => {
-                                      setTradeTo(
+                                    onClick={() =>
+                                      openTrade(
                                         g.players.find((p) => p.id !== me.id && !p.bankrupt)?.id ??
                                           '',
-                                      );
-                                      setGiveCash(0);
-                                      setWantCash(0);
-                                      setGiveTile('');
-                                      setWantTile('');
-                                      setDialog('trade');
-                                    }}
+                                      )
+                                    }
                                   >
                                     ⇄ 发起交易
                                   </button>
@@ -1504,17 +1480,14 @@ function App() {
                 交给机器人代打（房主）
               </button>
             )}
-          {inspected.id !== me?.id && canManage && !inspected.bankrupt && (
+          {inspected.id !== me?.id && me && !inspected.bankrupt && (
             <button
               className="primary full"
+              disabled={!!tradeWhy}
+              title={tradeWhy}
               onClick={() => {
                 setInspectedPlayer(null);
-                setTradeTo(inspected.id);
-                setGiveCash(0);
-                setWantCash(0);
-                setGiveTile('');
-                setWantTile('');
-                setDialog('trade');
+                openTrade(inspected.id);
               }}
             >
               与这位玩家交易
@@ -1581,6 +1554,38 @@ function App() {
                 同色国家组成地产组，独占一组租金 +30%。建筑 0–3 级的租金倍率为 1 / 2.5 / 5 /
                 9；地产及建筑按回收价值计入净资产。
               </p>
+              {owner && me && owner.id !== me.id && !property?.level && !property?.mortgaged && (
+                <button
+                  className="secondary full"
+                  disabled={!!tradeWhy}
+                  title={tradeWhy || `向${owner.name}提出购买这处地产`}
+                  onClick={() => {
+                    setSelectedTile(null);
+                    openTrade(owner.id, {
+                      wantTiles: [selected.index],
+                      giveCash: Math.round((selected.price * 1.2) / 10) * 10,
+                    });
+                  }}
+                >
+                  向{owner.name}求购这块地
+                </button>
+              )}
+              {owner?.id === me?.id && !property?.level && !property?.mortgaged && (
+                <button
+                  className="secondary full"
+                  disabled={!!tradeWhy}
+                  title={tradeWhy || '把这处地产卖给其他玩家'}
+                  onClick={() => {
+                    setSelectedTile(null);
+                    openTrade(g!.players.find((p) => p.id !== me!.id && !p.bankrupt)?.id ?? '', {
+                      giveTiles: [selected.index],
+                      wantCash: Math.round((selected.price * 1.2) / 10) * 10,
+                    });
+                  }}
+                >
+                  出售给其他玩家
+                </button>
+              )}
               {owner?.id === me?.id && (
                 <button
                   className="secondary full"
@@ -1784,111 +1789,18 @@ function App() {
           </button>
         </Modal>
       )}
-      {dialog === 'trade' && g && me && (
-        <Modal title="提出一笔交易" close={() => setDialog(null)}>
-          <label>
-            交易伙伴
-            <select
-              value={tradeTo}
-              onChange={(e) => {
-                setTradeTo(e.target.value);
-                setWantTile('');
-              }}
-            >
-              {g.players
-                .filter((p) => p.id !== me.id && !p.bankrupt)
-                .map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} · 现金 {p.cash}
-                  </option>
-                ))}
-            </select>
-          </label>
-          <div className="trade-grid">
-            <div>
-              <h3>我给出</h3>
-              <label>
-                现金
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  step={1}
-                  min={0}
-                  max={me.cash}
-                  value={giveCash}
-                  onChange={(e) => setGiveCash(Number(e.target.value))}
-                />
-              </label>
-              <label>
-                地产
-                <select value={giveTile} onChange={(e) => setGiveTile(e.target.value)}>
-                  <option value="">不含地产</option>
-                  {g.properties
-                    .filter((p) => p.owner === me.id && !p.level && !p.mortgaged)
-                    .map((p) => (
-                      <option key={p.tile} value={p.tile}>
-                        {map.tiles[p.tile].name}
-                      </option>
-                    ))}
-                </select>
-              </label>
-            </div>
-            <div>
-              <h3>我希望获得</h3>
-              <label>
-                现金
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  step={1}
-                  min={0}
-                  value={wantCash}
-                  onChange={(e) => setWantCash(Number(e.target.value))}
-                />
-              </label>
-              <label>
-                地产
-                <select value={wantTile} onChange={(e) => setWantTile(e.target.value)}>
-                  <option value="">不含地产</option>
-                  {g.properties
-                    .filter((p) => p.owner === tradeTo && !p.level && !p.mortgaged)
-                    .map((p) => (
-                      <option key={p.tile} value={p.tile}>
-                        {map.tiles[p.tile].name}
-                      </option>
-                    ))}
-                </select>
-              </label>
-            </div>
-          </div>
-          <p className="hint">
-            双方现金与地产同时交换。仅可交易无建筑、未抵押地产；提案等待期间暂停本回合操作，30
-            秒后自动撤回。
-          </p>
-          <button
-            className="primary full"
-            disabled={
-              disabled ||
-              !canManage ||
-              !!tradeReason ||
-              !tradeTo ||
-              (giveCash + wantCash === 0 && !giveTile && !wantTile)
-            }
-            title={tradeReason || '双方确认后同时交换'}
-            onClick={() => {
-              command({
-                type: 'tradeOffer',
-                to: tradeTo,
-                giveCash,
-                wantCash,
-                giveTile: giveTile === '' ? null : Number(giveTile),
-                wantTile: wantTile === '' ? null : Number(wantTile),
-              });
-            }}
-          >
-            发出提案
-          </button>
-          {tradeReason && <p className="field-error">{tradeReason}</p>}
+      {dialog === 'trade' && g && me && tradeDraft && (
+        <Modal title={tradeDraft.counter ? '还价' : '提出一笔交易'} close={() => setDialog(null)}>
+          <TradeDialog
+            key={`${tradeDraft.to}-${tradeDraft.giveTiles.join()}-${tradeDraft.wantTiles.join()}`}
+            game={g}
+            map={map}
+            me={me}
+            draft={tradeDraft}
+            disabled={disabled || (!tradeDraft.counter && !!tradeWhy)}
+            send={command}
+          />
+          {!tradeDraft.counter && tradeWhy && <p className="field-error">{tradeWhy}</p>}
         </Modal>
       )}
       {dialog === 'shop' && (
@@ -1954,7 +1866,11 @@ function App() {
               <h3>04 / 卡牌、银行与交易</h3>
               <p>
                 手牌最多 8 张，每个角色有被动与每 3 轮一次的天赋。银行可存取现金，存款每轮带来 3%
-                现金利息。没钱付租金或税费时，先取款、卖建筑或抵押；无法筹齐可破产，将资产清算给债权人或银行。交易经接收人同意后原子交换。
+                现金利息。没钱付租金或税费时，先取款、卖建筑或抵押；无法筹齐可破产，将资产清算给债权人或银行。交易随时可以发起（购买、拍卖、选路和筹款时除外）：点「⇄
+                发起交易」、玩家资料或国家详情里的「求购 /
+                出售」，勾选双方的现金和任意多处无建筑、未抵押的地产。对方 60
+                秒内可以接受、拒绝或还价；被拒绝后需等 15
+                秒才能再发起。交易进行时其他操作暂停，接受后双方资产同时交换。
               </p>
               <h3>05 / 世界新闻与追赶机制</h3>
               <p>

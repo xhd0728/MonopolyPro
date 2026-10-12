@@ -198,6 +198,7 @@ export type SpotKind =
   | 'bankrupt'
   | 'pot'
   | 'trade'
+  | 'offer'
   | 'card'
   | 'chance'
   | 'fate'
@@ -244,8 +245,11 @@ export interface TradeOffer {
   to: string;
   giveCash: number;
   wantCash: number;
-  giveTile: number | null;
-  wantTile: number | null;
+  /** Squares the proposer hands over / asks for (unbuilt, unmortgaged). */
+  giveTiles: number[];
+  wantTiles: number[];
+  /** True when this offer answers an earlier one (还价). */
+  counter?: boolean;
   expiresAt: number;
 }
 export interface GameState {
@@ -273,6 +277,8 @@ export interface GameState {
   news: NewsState | null;
   /** Waiting players' free guesses on the current player's next roll. */
   guesses: Record<string, 'high' | 'low'>;
+  /** Per player: no new offers before `until` (after a rejection); last round a bot offered. */
+  tradeMemo: Record<string, { until: number; round: number }>;
   events: GameEvent[];
   nextEvent: number;
   lastDice: number[];
@@ -427,8 +433,18 @@ export const actionSchema = z.discriminatedUnion('type', [
     to: z.string().max(50),
     giveCash: amount,
     wantCash: amount,
-    giveTile: tile.nullable(),
-    wantTile: tile.nullable(),
+    giveTiles: z.array(tile).max(16).default([]),
+    wantTiles: z.array(tile).max(16).default([]),
+    // Older clients sent a single square per side.
+    giveTile: tile.nullable().optional(),
+    wantTile: tile.nullable().optional(),
+  }),
+  z.object({
+    type: z.literal('tradeCounter'),
+    giveCash: amount,
+    wantCash: amount,
+    giveTiles: z.array(tile).max(16).default([]),
+    wantTiles: z.array(tile).max(16).default([]),
   }),
 ]);
 export type GameAction = z.infer<typeof actionSchema>;

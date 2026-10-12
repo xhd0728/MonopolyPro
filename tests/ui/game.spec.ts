@@ -204,8 +204,15 @@ test('mobile country express map: real fork selection and auction input advance 
     auction = false;
   for (let turn = 0; turn < 12 && (!fork || !auction); turn++) {
     await openPanel(page);
-    // A jailed player rolls for a six instead of rolling to move.
+    // A jailed player rolls for a six instead of rolling to move. Bots may also offer to buy
+    // a square they need; this flow declines such offers.
     const start = page.locator('.actions').getByRole('button', { name: /^掷骰出(发|狱)$/ });
+    const decline = page.getByRole('button', { name: '拒绝交易' });
+    await expect(start.or(decline)).toBeVisible({ timeout: 12000 });
+    if (await decline.isVisible()) {
+      await accepted(page, decline);
+      await openPanel(page);
+    }
     await expect(start).toBeEnabled({ timeout: 12000 });
     await accepted(page, start);
     await expect(page.locator('.turn-prompt h2')).not.toHaveText('掷骰出发');

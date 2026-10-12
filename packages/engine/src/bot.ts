@@ -1,5 +1,5 @@
-import { cardById } from '../../content/src/index.ts';
-import type { GameAction, GameState } from '../../shared/src/index.ts';
+import { cardById, mapById } from '../../content/src/index.ts';
+import type { GameAction, GameState, PlayerState } from '../../shared/src/index.ts';
 import { actionsFor, actingPlayerId, assetsOf, bailOf, propertyAt } from './index.ts';
 
 /** Uses only public opponent information and this seat's own cards. No network/LLM calls. */
@@ -7,15 +7,11 @@ export function botAction(g: GameState, id: string): GameAction | null {
   const p = g.players.find((x) => x.id === id);
   if (!p || p.bankrupt || g.phase === 'finished') return null;
   if (g.trade?.to === id) {
-    const trade = g.trade;
-    const value = (index: number | null) =>
-      index === null ? 0 : g.properties.find((x) => x.tile === index) ? 250 : 0;
-    return {
-      type:
-        trade.giveCash + value(trade.giveTile) >= trade.wantCash + value(trade.wantTile)
-          ? 'tradeAccept'
-          : 'tradeReject',
-    };
+    const t = g.trade;
+    // What the bot receives versus what it gives, valuing colour-group effects.
+    const gets = t.giveCash + t.giveTiles.reduce((n, x) => n + squareValue(g, x, id, true), 0);
+    const pays = t.wantCash + t.wantTiles.reduce((n, x) => n + squareValue(g, x, t.from, true), 0);
+    return { type: gets >= pays * 1.08 + 20 ? 'tradeAccept' : 'tradeReject' };
   }
   if (actingPlayerId(g) !== id) return null;
   const options = actionsFor(g, id);
@@ -92,9 +88,50 @@ export function botAction(g: GameState, id: string): GameAction | null {
         return { type: 'playCard', cardId: id, targetId: opponent.id };
     }
   }
+  const offer = groupOffer(g, p);
+  if (offer) return offer;
   const build = options.find(
     (x) => x.action.type === 'build' && p.cash > 1000 && propertyAt(g, x.action.tile)!.level < 2,
   );
   if (build) return build.action;
   return options.find((x) => x.primary)?.action ?? null;
+}
+
+const groupOf = (g: GameState, tile: number) => mapById(g.settings.mapId).tiles[tile].group;
+/**
+ * Worth of a square to `receiver`: its price, much more if it completes the receiver's colour
+ * group (rent +30% on the whole set and cheap building from then on).
+ */
+export function squareValue(g: GameState, tile: number, receiver: string, gaining: boolean) {
+  const price = mapById(g.settings.mapId).tiles[tile].price;
+  const group = g.properties.filter((x) => groupOf(g, x.tile) === groupOf(g, tile));
+  const completes = group.every((x) => x.tile === tile || x.owner === receiver);
+  return Math.round(price * (gaining && completes ? 1.8 : 1));
+}
+/** Occasionally offer cash for the last square a bot needs to complete a colour group. */
+function groupOffer(g: GameState, p: PlayerState): GameAction | null {
+  if (g.phase !== 'manage' || g.trade) return null;
+  const memo = g.tradeMemo[p.id];
+  // At most one offer every three rounds, and never inside the post-rejection cooldown
+  // (decisionAt is a lower bound for the current time).
+  if (memo && (g.round - memo.round < 3 || memo.until > g.decisionAt)) return null;
+  for (const prop of g.properties) {
+    if (!prop.owner || prop.owner === p.id || prop.level || prop.mortgaged) continue;
+    const owner = g.players.find((x) => x.id === prop.owner)!;
+    if (owner.bankrupt || (g.settings.mode === 'team' && owner.team === p.team)) continue;
+    const group = g.properties.filter((x) => groupOf(g, x.tile) === groupOf(g, prop.tile));
+    if (!group.every((x) => x.tile === prop.tile || x.owner === p.id)) continue;
+    const price = mapById(g.settings.mapId).tiles[prop.tile].price;
+    const cash = Math.round((price * 1.7) / 10) * 10;
+    if (p.cash < cash + 500) continue;
+    return {
+      type: 'tradeOffer',
+      to: owner.id,
+      giveCash: cash,
+      wantCash: 0,
+      giveTiles: [],
+      wantTiles: [prop.tile],
+    };
+  }
+  return null;
 }

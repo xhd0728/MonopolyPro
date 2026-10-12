@@ -84,8 +84,8 @@ test('restart restores trade, auction and path decisions with resume credentials
           to: other,
           giveCash: 50,
           wantCash: 0,
-          giveTile: null,
-          wantTile: null,
+          giveTiles: [],
+          wantTiles: [],
         },
       });
     } else if (phase === 'auction') {

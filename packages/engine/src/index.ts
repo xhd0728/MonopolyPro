@@ -206,6 +206,13 @@ export function migrateGame(state: GameState, randomInt?: (max: number) => numbe
   };
   g.news ??= null;
   g.guesses ??= {};
+  (g as Partial<GameState>).tradeMemo ??= {};
+  // Offers saved before multi-square trades carried one square per side.
+  if (g.trade) {
+    const old = g.trade as unknown as { giveTile?: number | null; wantTile?: number | null };
+    g.trade.giveTiles ??= old.giveTile != null ? [old.giveTile] : [];
+    g.trade.wantTiles ??= old.wantTile != null ? [old.wantTile] : [];
+  }
   for (const p of g.players) (p as Partial<PlayerState>).prophet ??= 0;
   return g as GameState;
 }
@@ -289,6 +296,7 @@ export function createGame(
     },
     news: null,
     guesses: {},
+    tradeMemo: {},
     events: [],
     nextEvent: 1,
     lastDice: [],
@@ -1118,6 +1126,57 @@ function cardAction(
   );
 }
 
+export const TRADE_COOLDOWN_MS = 15000,
+  TRADE_OFFER_MS = 60000;
+function tradeSquares(list: number[] = [], single?: number | null): number[] {
+  return [...new Set([...list, ...(single !== undefined && single !== null ? [single] : [])])];
+}
+function checkTradeSquares(g: GameState, owner: PlayerState, tiles: number[], message: string) {
+  for (const t of tiles) {
+    const prop = ownProperty(g, owner, t);
+    requireRule(prop.level === 0 && !prop.mortgaged, message);
+  }
+}
+function proposeTrade(
+  g: GameState,
+  p: PlayerState,
+  target: PlayerState,
+  giveCash: number,
+  wantCash: number,
+  giveTiles: number[],
+  wantTiles: number[],
+  counter: boolean,
+  env: EngineEnvironment,
+) {
+  requireRule(p.cash >= giveCash, '给出的现金超过你的余额');
+  requireRule(target.cash >= wantCash, '希望获得的现金超过对方余额');
+  requireRule(giveCash + wantCash > 0 || giveTiles.length + wantTiles.length > 0, '请填写交易内容');
+  const rule = '仅可交易没有建筑、未抵押的地产；先出售建筑或赎回';
+  checkTradeSquares(g, p, giveTiles, rule);
+  checkTradeSquares(g, target, wantTiles, rule);
+  g.trade = {
+    id: `${g.id}-${g.revision}`,
+    from: p.id,
+    to: target.id,
+    giveCash,
+    wantCash,
+    giveTiles,
+    wantTiles,
+    ...(counter ? { counter: true } : {}),
+    expiresAt: env.now + TRADE_OFFER_MS,
+  };
+  g.tradeMemo[p.id] = { until: g.tradeMemo[p.id]?.until ?? 0, round: g.round };
+  log(
+    g,
+    env,
+    'trade',
+    `${p.name}${counter ? '还价给' : '向'}${target.name}${counter ? '' : '提出交易'}，60 秒内有效`,
+    p.id,
+    undefined,
+    undefined,
+    { spot: 'offer' },
+  );
+}
 export function applyAction(
   state: GameState,
   playerId: string,
@@ -1142,7 +1201,7 @@ export function applyAction(
   }
   if (g.trade && env.now >= g.trade.expiresAt) g.trade = null;
   requireRule(
-    !g.trade || ['tradeAccept', 'tradeReject', 'surrender'].includes(action.type),
+    !g.trade || ['tradeAccept', 'tradeReject', 'tradeCounter', 'surrender'].includes(action.type),
     '请先完成或撤回交易提案',
   );
   if (action.type === 'surrender') {
@@ -1395,42 +1454,33 @@ export function applyAction(
       cardAction(g, p, action, env);
       break;
     case 'tradeOffer': {
-      manageAllowed(g, p);
+      // Anyone still playing may propose, not only the player whose turn it is.
       requireRule(!g.trade, '已有交易等待处理');
+      requireRule(MANAGE_PHASES.includes(g.phase), '请在掷骰、拘留或经营阶段发起交易');
+      requireRule((g.tradeMemo[p.id]?.until ?? 0) <= env.now, '刚被拒绝或撤回，请稍等十几秒再发起');
       const target = playerById(g, action.to);
-      requireRule(
-        target &&
-          target.id !== p.id &&
-          !target.bankrupt &&
-          p.cash >= action.giveCash &&
-          target.cash >= action.wantCash,
-        '交易对象或资金无效',
+      requireRule(target && target.id !== p.id && !target.bankrupt, '请选择一位仍在经营的玩家');
+      const give = tradeSquares(action.giveTiles, action.giveTile),
+        want = tradeSquares(action.wantTiles, action.wantTile);
+      proposeTrade(g, p, target, action.giveCash, action.wantCash, give, want, false, env);
+      break;
+    }
+    case 'tradeCounter': {
+      const offer = g.trade;
+      requireRule(offer && offer.to === p.id, '没有可以还价的提案');
+      const target = playerById(g, offer.from)!;
+      g.trade = null;
+      proposeTrade(
+        g,
+        p,
+        target,
+        action.giveCash,
+        action.wantCash,
+        tradeSquares(action.giveTiles),
+        tradeSquares(action.wantTiles),
+        true,
+        env,
       );
-      requireRule(
-        action.giveCash + action.wantCash > 0 ||
-          action.giveTile !== null ||
-          action.wantTile !== null,
-        '请填写交易内容',
-      );
-      if (action.giveTile !== null) {
-        const prop = ownProperty(g, p, action.giveTile);
-        requireRule(prop.level === 0 && !prop.mortgaged, '仅可交易没有建筑、未抵押的地产');
-      }
-      if (action.wantTile !== null) {
-        const prop = ownProperty(g, target, action.wantTile);
-        requireRule(prop.level === 0 && !prop.mortgaged, '仅可交易没有建筑、未抵押的地产');
-      }
-      g.trade = {
-        id: `${g.id}-${g.revision}`,
-        from: p.id,
-        to: target.id,
-        giveCash: action.giveCash,
-        wantCash: action.wantCash,
-        giveTile: action.giveTile,
-        wantTile: action.wantTile,
-        expiresAt: env.now + 60000,
-      };
-      log(g, env, 'trade', `${p.name}向${target.name}发起交易，60 秒内有效。`, p.id);
       break;
     }
     case 'tradeAccept':
@@ -1448,18 +1498,12 @@ export function applyAction(
           !from.bankrupt && from.cash >= offer.giveCash && p.cash >= offer.wantCash,
           '交易资金已发生变化',
         );
-        if (offer.giveTile !== null) {
-          const prop = ownProperty(g, from, offer.giveTile);
-          requireRule(prop.level === 0 && !prop.mortgaged, '地产状态已变化');
-        }
-        if (offer.wantTile !== null) {
-          const prop = ownProperty(g, p, offer.wantTile);
-          requireRule(prop.level === 0 && !prop.mortgaged, '地产状态已变化');
-        }
+        checkTradeSquares(g, from, offer.giveTiles, '地产状态已变化');
+        checkTradeSquares(g, p, offer.wantTiles, '地产状态已变化');
         from.cash += offer.wantCash - offer.giveCash;
         p.cash += offer.giveCash - offer.wantCash;
-        if (offer.giveTile !== null) propertyAt(g, offer.giveTile)!.owner = p.id;
-        if (offer.wantTile !== null) propertyAt(g, offer.wantTile)!.owner = from.id;
+        for (const t of offer.giveTiles) propertyAt(g, t)!.owner = p.id;
+        for (const t of offer.wantTiles) propertyAt(g, t)!.owner = from.id;
         log(
           g,
           env,
@@ -1472,7 +1516,20 @@ export function applyAction(
             spot: 'trade',
           },
         );
-      } else log(g, env, 'trade', `${p.name}结束了交易提案`, p.id);
+      } else {
+        log(
+          g,
+          env,
+          'trade',
+          offer.from === p.id ? `${p.name}撤回了交易提案` : `${p.name}拒绝了交易提案`,
+          p.id,
+        );
+        // A short pause before the same player can propose again keeps offers from piling up.
+        g.tradeMemo[offer.from] = {
+          ...(g.tradeMemo[offer.from] ?? { round: 0 }),
+          until: env.now + TRADE_COOLDOWN_MS,
+        };
+      }
       g.trade = null;
       break;
     }
