@@ -137,3 +137,35 @@ test('full spectator gallery does not block remaining player seats', () => {
     store.close();
   }
 });
+test('inactive offline seats announce takeover at the grace boundary without changing the game', () => {
+  const store = new Store(':memory:');
+  let now = 1000;
+  const service = new GameService(store, { now: () => now });
+  const host = service.create({ name: '在线房主' });
+  const guest = service.join(host.code, { name: '等候玩家' });
+  for (const seat of [host, guest]) {
+    service.connected(host.code, seat.seatId);
+    service.lobby(host.code, seat.seatId, { type: 'ready' });
+  }
+  service.lobby(host.code, host.seatId, { type: 'start' });
+  service.disconnected(host.code, guest.seatId);
+  now = 15999;
+  assert.equal(service.tick(host.code), false);
+  now = 16000;
+  assert.equal(service.tick(host.code), true);
+  assert.equal(
+    service.view(host.code, host.seatId).seats.find((s) => s.id === guest.seatId)!.takeover,
+    true,
+  );
+  assert.equal(service.record(host.code).game!.revision, 0);
+  now = 16001;
+  assert.equal(service.tick(host.code), false);
+  service.connected(host.code, guest.seatId);
+  assert.equal(service.tick(host.code), true);
+  assert.equal(
+    service.view(host.code, host.seatId).seats.find((s) => s.id === guest.seatId)!.takeover,
+    false,
+  );
+  service.dispose();
+  store.close();
+});

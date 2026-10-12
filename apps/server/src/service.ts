@@ -69,6 +69,7 @@ export class GameService {
   >();
   private aiActivity = new Map<string, NonNullable<RoomView['aiActivity']>>();
   private dirtyRooms = new Set<string>();
+  private takeoverSignatures = new Map<string, string>();
   private grants = new Map<string, { code: string; seatId: string; expires: number }>();
   readonly options: ServiceOptions;
   constructor(
@@ -460,6 +461,23 @@ export class GameService {
     const r = this.record(code);
     let changed = false,
       feedback = this.dirtyRooms.delete(code);
+    const takeoverSignature =
+      r.game && r.game.phase !== 'finished'
+        ? r.seats
+            .filter(
+              (s) =>
+                !s.bot &&
+                !s.spectator &&
+                !s.connected &&
+                s.disconnectedAt !== null &&
+                this.now() - s.disconnectedAt >= this.options.takeoverMs,
+            )
+            .map((s) => s.id)
+            .sort()
+            .join(',')
+        : '';
+    if ((this.takeoverSignatures.get(code) ?? '') !== takeoverSignature) feedback = true;
+    this.takeoverSignatures.set(code, takeoverSignature);
     if (r.game) {
       const ticked = tickGame(r.game, this.env());
       if (ticked) {
@@ -615,6 +633,7 @@ export class GameService {
   dispose() {
     for (const job of this.botJobs.values()) job.controller.abort();
     this.botJobs.clear();
+    this.takeoverSignatures.clear();
   }
   private timeoutAction(g: NonNullable<RoomRecord['game']>, id: string): GameAction | null {
     if (actingPlayerId(g) !== id) return null;
@@ -635,6 +654,7 @@ export class GameService {
         (this.now() - r.createdAt > 60000 && !r.game && !r.seats.some((s) => s.connected || s.bot))
       ) {
         this.store.remove(r.code);
+        this.takeoverSignatures.delete(r.code);
         this.botJobs.get(r.code)?.controller.abort();
         this.botJobs.delete(r.code);
         this.aiActivity.delete(r.code);
