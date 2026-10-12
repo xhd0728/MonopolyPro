@@ -37,6 +37,8 @@ import {
 import { api, Connection, type Credentials } from './network.ts';
 import { Clock, serverTime, setServerOffset } from './clock.tsx';
 import { EmoteBar, Headlines, useLiveEmotes, useTurnAttention } from './Feedback.tsx';
+import { setSoundEnabled, soundEnabled, unlockSound } from './sound.ts';
+import { useShortcuts } from './shortcuts.ts';
 import { TradeDialog, TradeOfferCard, tradeBlock, type TradeDraft } from './Trade.tsx';
 import './theme.css';
 const phaseNames = {
@@ -222,6 +224,7 @@ function App() {
   const automaticSheet = useRef(false),
     pendingAction = useRef<GameAction | null>(null);
   const [emotesOn, setEmotesOn] = useState(localStorage.getItem('mp-emotes') !== 'false'),
+    [soundOn, setSoundOn] = useState(soundEnabled()),
     [reduced, setReduced] = useState(localStorage.getItem('mp-reduced') === 'true'),
     [hints, setHints] = useState(localStorage.getItem('mp-hints') !== 'false'),
     [tutorial, setTutorial] = useState<number | null>(null),
@@ -484,6 +487,33 @@ function App() {
   const needsMe = !!g && g.phase !== 'finished' && (myTurn || g.trade?.to === room?.viewerId);
   useTurnAttention(needsMe);
   const liveEmotes = useLiveEmotes(room?.emotes ?? NO_EMOTES, emotesOn);
+  // Audio may only start after a user gesture.
+  useEffect(() => {
+    const unlock = () => unlockSound();
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, []);
+  useShortcuts({
+    enabled: !!g && !dialog && !inspectedPlayer && selectedTile === null && !disabled,
+    actions: g?.actions ?? [],
+    run: command,
+    trade: () => {
+      if (g && me && !tradeWhy)
+        openTrade(g.players.find((p) => p.id !== me.id && !p.bankrupt)?.id ?? '');
+    },
+    guess:
+      g && me && !me.bankrupt && g.phase === 'roll' && g.activeId !== me.id && !g.trade
+        ? (pick) => command({ type: 'guess', pick })
+        : undefined,
+    help: () =>
+      notify(
+        '快捷键：空格/回车 主操作 · B 购买 · P 拍卖/退出竞拍 · E 结束回合 · T 交易 · 1–3 选择岔路 · ↑/↓ 猜大/猜小',
+      ),
+  });
   const canGuess =
     !!g && !!me && !me.bankrupt && g.phase === 'roll' && g.activeId !== me.id && !g.trade;
   const hudAction: HudAction | null =
@@ -2073,6 +2103,16 @@ function App() {
           {[
             { label: '减少移动动画', value: reduced, key: 'mp-reduced', set: setReduced },
             { label: '显示表情互动', value: emotesOn, key: 'mp-emotes', set: setEmotesOn },
+            {
+              label: '音效',
+              value: soundOn,
+              key: 'mp-sound',
+              set: (on: boolean) => {
+                setSoundOn(on);
+                setSoundEnabled(on);
+                if (on) unlockSound();
+              },
+            },
             { label: '显示操作情境提示', value: hints, key: 'mp-hints', set: setHints },
           ].map((s) => (
             <label className="toggle-row" key={s.key}>

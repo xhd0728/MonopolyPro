@@ -11,6 +11,41 @@ import {
   type SpotKind,
 } from '../../../packages/shared/src/index.ts';
 import { serverTime } from './clock.tsx';
+import { play, type Cue } from './sound.ts';
+/**
+ * Sound for an event: everything that involves the viewer, plus a few table-wide moments
+ * (purchases, card draws, news) so six-player games do not turn into noise.
+ */
+function cueFor(e: GameEvent, game: GameView): Cue | null {
+  const mine = e.actor === game.viewerId;
+  const ownsSquare =
+    e.tile !== undefined && game.properties.find((p) => p.tile === e.tile)?.owner === game.viewerId;
+  switch (e.spot) {
+    case 'purchase':
+      return 'buy';
+    case 'build':
+      return mine ? 'build' : null;
+    case 'rent':
+      return mine ? 'pay' : ownsSquare ? 'earn' : null;
+    case 'jail':
+    case 'bankrupt':
+      return mine ? 'jail' : null;
+    case 'pot':
+      return mine ? 'earn' : null;
+    case 'chance':
+    case 'fate':
+    case 'card':
+      return 'card';
+    case 'news':
+      return 'news';
+    case 'offer':
+      return game.trade?.to === game.viewerId ? 'offer' : null;
+    case 'trade':
+      return 'buy';
+    default:
+      return e.kind === 'finish' ? 'win' : null;
+  }
+}
 import { money, playerColor } from './game-ui.ts';
 
 /** Events added since the previous revision this component saw (empty after a new match). */
@@ -141,6 +176,11 @@ export function Headlines({
       });
     }
     turnKey.current = key;
+    for (const e of fresh.events) {
+      const cue = cueFor(e, game);
+      if (cue) play(cue);
+    }
+    if (next.some((n) => n.tone === 'myturn')) play('myturn');
     if (!next.length) return;
     // The viewer's own turn matters more than anything still waiting: show it right away.
     const mine = next.find((n) => n.tone === 'myturn');

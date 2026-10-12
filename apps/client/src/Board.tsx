@@ -12,6 +12,7 @@ import type {
 } from '../../../packages/shared/src/index.ts';
 import { groupColor, playerColor } from './game-ui.ts';
 import './board.css';
+import { play } from './sound.ts';
 
 /** Seal characters for corners and special squares, read like stamps in a passport. */
 const SEALS: Partial<Record<TileDefinition['kind'], string>> = {
@@ -258,6 +259,7 @@ function TokenLayer({
         return;
       }
       setShown((s) => ({ ...s, [id]: next }));
+      play('hop');
       // Long routes speed up so a whole move stays around two seconds.
       lane.timer = setTimeout(() => step(id), Math.min(190, 2000 / (lane.queue.length + 1)));
     };

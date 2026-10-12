@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { play } from './sound.ts';
 import type { GameView, MapDefinition, RoomView } from '../../../packages/shared/src/index.ts';
 import { money, playerColor } from './game-ui.ts';
 import { BOARD, CARDS, countryFlag, newsById } from '../../../packages/content/src/index.ts';
@@ -27,6 +28,14 @@ export function DiceView({ game, rolling = false }: { game: GameView; rolling?: 
     return () => clearInterval(timer);
   }, [rolling]);
   const face = rolling ? spin : value;
+  useEffect(() => {
+    if (rolling) play('roll');
+  }, [rolling]);
+  const landed = useRef(event?.id);
+  useEffect(() => {
+    if (event && landed.current !== undefined && event.id !== landed.current) play('land');
+    landed.current = event?.id ?? -1;
+  }, [event?.id]);
   return (
     <div
       className={`dice-stage ${rolling ? 'rolling' : ''}`}

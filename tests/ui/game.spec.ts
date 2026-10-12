@@ -434,6 +434,12 @@ test('the 44-square board fits the screen on desktop and phones', async ({ page 
   await page.getByRole('button', { name: '我准备好了' }).click();
   await page.getByRole('button', { name: '开始旅程' }).click();
   await expect(page.locator('.country-tile')).toHaveCount(44);
+  // Keyboard play: Space presses the main action (roll).
+  const revision = await page.locator('.board-meta').getAttribute('data-revision');
+  await page.locator('body').click({ position: { x: 5, y: 300 } });
+  await page.keyboard.press('Space');
+  await expect(page.locator('.board-meta')).not.toHaveAttribute('data-revision', revision!);
+  await expect(page.locator('.dice-stage')).toContainText('掷出');
   for (const [width, height] of [
     [1440, 900],
     [1280, 720],
