@@ -27,6 +27,7 @@ function connectionName(
         : seat.botMode === 'llm'
           ? 'LLM 机器人'
           : '规则机器人';
+  if (seat?.afk) return '挂机托管中';
   if (seat?.connected) return '在线';
   return seat &&
     (seat.takeover ||

@@ -201,6 +201,14 @@ function App() {
         }
         pendingAction.current = null;
       },
+      (message) => {
+        localStorage.removeItem('mp-seat');
+        setRoom(null);
+        setDialog(null);
+        history.replaceState({}, '', '/');
+        notify(message);
+        void refresh();
+      },
     );
   useEffect(() => {
     const raw = localStorage.getItem('mp-seat');
@@ -416,6 +424,7 @@ function App() {
               lobbyPlayers.filter((s) => s.team === 0).length !== lobbyPlayers.length / 2)
           ? '团队需均分为 2v2 或 3v3，请补齐人数并调整队伍'
           : '';
+  const mySeat = room?.seats.find((s) => s.id === room.viewerId);
   const quickAction = g?.actions.find((a) => a.primary);
   // This seat must decide something now: its own turn, an auction bid or an incoming trade.
   const needsMe = !!g && g.phase !== 'finished' && (myTurn || g.trade?.to === room?.viewerId);
@@ -682,6 +691,16 @@ function App() {
                                 ×
                               </button>
                             )}
+                            {!s.bot && room.isHost && s.id !== room.viewerId && (
+                              <button
+                                className="icon-button"
+                                aria-label={`移出${s.name}`}
+                                title="把这位玩家移出房间"
+                                onClick={() => lobby('kick', { seatId: s.id })}
+                              >
+                                ×
+                              </button>
+                            )}
                           </article>
                         );
                       })}
@@ -930,6 +949,17 @@ function App() {
                           </span>
                         </span>
                         <span className="meta-phase">{phaseNames[g.phase]}</span>
+                        {me && !me.bankrupt && g.phase !== 'finished' && (
+                          <button
+                            className={`meta-afk ${mySeat?.afk ? 'on' : ''}`}
+                            aria-pressed={!!mySeat?.afk}
+                            title="挂机托管：规则机器人替你操作；你一操作就自动恢复"
+                            disabled={!connected}
+                            onClick={() => lobby('afk', { afk: !mySeat?.afk })}
+                          >
+                            {mySeat?.afk ? '挂机托管中 · 回来继续' : '🛋 挂机'}
+                          </button>
+                        )}
                         <span className="meta-clock">
                           <Clock>
                             {(now) =>
@@ -1456,6 +1486,24 @@ function App() {
               管理我的资产
             </button>
           )}
+          {room?.isHost &&
+            inspected.id !== me?.id &&
+            !inspected.bankrupt &&
+            g.phase !== 'finished' &&
+            !room.seats.find((s) => s.id === inspected.id)?.bot && (
+              <button
+                className="secondary full"
+                title="适合长时间挂机或掉线的玩家：席位交给规则机器人，这位玩家会被移出房间"
+                onClick={() => {
+                  if (confirm(`把${inspected.name}的席位交给机器人代打，并把他移出房间？`)) {
+                    lobby('kick', { seatId: inspected.id });
+                    setInspectedPlayer(null);
+                  }
+                }}
+              >
+                交给机器人代打（房主）
+              </button>
+            )}
           {inspected.id !== me?.id && canManage && !inspected.bankrupt && (
             <button
               className="primary full"
@@ -1997,6 +2045,27 @@ function App() {
       )}
       {dialog === 'settings' && (
         <Modal title="让旅程更合心意" close={() => setDialog(null)}>
+          {room && (
+            <form
+              className="rename-row"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const next = name.trim();
+                if (!next) return;
+                localStorage.setItem('mp-name', next);
+                lobby('rename', { name: next });
+                notify(`昵称已改为「${next}」`);
+              }}
+            >
+              <label>
+                我的昵称
+                <input maxLength={16} value={name} onChange={(e) => setName(e.target.value)} />
+              </label>
+              <button className="secondary" disabled={!name.trim() || disabled}>
+                保存昵称
+              </button>
+            </form>
+          )}
           {[
             { label: '减少移动动画', value: reduced, key: 'mp-reduced', set: setReduced },
             { label: '显示表情互动', value: emotesOn, key: 'mp-emotes', set: setEmotesOn },

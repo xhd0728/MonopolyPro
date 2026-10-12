@@ -44,6 +44,8 @@ export class Connection {
     private status: (status: string, latency?: number) => void,
     private error: (message: string) => void,
     private acknowledged: (result?: CommandResult) => void,
+    /** The host removed this seat or handed it to a bot. */
+    private removed?: (message: string) => void,
   ) {}
   async connect(credentials: Credentials, resume = false) {
     clearTimeout(this.reconnectTimer);
@@ -115,6 +117,13 @@ export class Connection {
       );
       room.onLeave((code) => {
         if (generation !== this.generation || this.stopped) return;
+        if (code === 4002) {
+          clearInterval(this.heartbeat);
+          this.stopped = true;
+          this.status('已被房主移出');
+          this.removed?.('房主已把你移出房间，或把你的席位交给了机器人代打。');
+          return;
+        }
         if (code === 4001) {
           clearInterval(this.heartbeat);
           this.rejectLeave('席位已在其他窗口恢复');

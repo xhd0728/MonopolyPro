@@ -712,3 +712,42 @@ label {
   font-size: 13px;
   line-height: 1.6;
 }
+
+/* Auto-play and renaming */
+.afk-toggle {
+  width: 100%;
+  min-height: 38px;
+  margin: 6px 0;
+  font-size: 13px;
+  color: var(--navy);
+  background: #f4f7fa;
+}
+.afk-toggle.on {
+  background: #fff4d6;
+  border-color: var(--saffron);
+  font-weight: 700;
+}
+.meta-afk {
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--navy);
+  font-size: 12px;
+  font-weight: 700;
+}
+.meta-afk.on {
+  border-color: var(--saffron);
+  background: var(--saffron);
+  font-weight: 800;
+}
+.rename-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.rename-row label {
+  flex: 1;
+}

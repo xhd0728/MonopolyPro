@@ -341,7 +341,12 @@ export class GameService {
           'start',
           'newMatch',
           'leave',
+          'afk',
+          'rename',
+          'kick',
         ]),
+        afk: z.boolean().optional(),
+        name: nameSchema.optional(),
         ready: z.boolean().optional(),
         characterId: z.string().optional(),
         team: z.number().int().min(0).max(1).optional(),
@@ -385,6 +390,42 @@ export class GameService {
       }
       this.save(r);
       return;
+    }
+    if (data.type === 'afk') {
+      ensure(r.game && r.game.phase !== 'finished' && !seat.spectator, '对局进行中才能挂机托管');
+      seat.afk = data.afk ?? !seat.afk;
+      this.save(r);
+      return;
+    }
+    if (data.type === 'rename') {
+      ensure(data.name, '请输入新昵称');
+      seat.name = data.name;
+      const player = r.game?.players.find((p) => p.id === id);
+      if (player) player.name = data.name;
+      this.save(r);
+      return;
+    }
+    if (data.type === 'kick') {
+      const target = r.seats.find((s) => s.id === data.seatId);
+      ensure(host && target && target.id !== id && !target.bot, '只有房主能移出其他真人玩家');
+      const playing =
+        r.game &&
+        r.game.phase !== 'finished' &&
+        !target.spectator &&
+        !r.game.players.find((p) => p.id === target.id)?.bankrupt;
+      if (playing) {
+        // Mid-match the seat is handed to a rule bot so the game keeps going for everyone.
+        target.bot = true;
+        target.botMode = 'rule';
+        target.afk = false;
+        target.tokenHash = '';
+        target.connected = true;
+        target.disconnectedAt = null;
+        target.controlEpoch++;
+        log(r.game!, this.env(), 'room', `房主把${target.name}的席位交给机器人代打`);
+      } else r.seats = r.seats.filter((s) => s.id !== target.id);
+      this.save(r);
+      return target.id;
     }
     ensure(!r.game, '对局开始后不能修改房间设置');
     if (data.type === 'ready') {
@@ -457,6 +498,8 @@ export class GameService {
       r = this.record(code),
       seat = r.seats.find((s) => s.id === id);
     ensure(seat && !seat.spectator, '观众不能执行游戏动作', 403);
+    // A player who acts is back at the table.
+    if (seat.afk && cmd.action.type !== 'guess') seat.afk = false;
     ensure(r.game, '对局尚未开始');
     const fingerprint = tokenHash(JSON.stringify(cmd));
     const old = this.store.command(code, id, cmd.id);
@@ -517,6 +560,7 @@ export class GameService {
     if (!seat) return false;
     return (
       seat.bot ||
+      !!seat.afk ||
       (!seat.connected &&
         seat.disconnectedAt !== null &&
         this.now() - seat.disconnectedAt >= this.options.takeoverMs) ||
@@ -582,9 +626,9 @@ export class GameService {
           seat.disconnectedAt !== null &&
           this.now() - seat.disconnectedAt >= this.options.takeoverMs;
         const timeout = this.humanTimedOut(r);
-        if (seat && (seat.bot || takeover || timeout)) {
+        if (seat && (seat.bot || seat.afk || takeover || timeout)) {
           const action =
-            timeout && !seat.bot && !takeover
+            timeout && !seat.bot && !seat.afk && !takeover
               ? this.timeoutAction(r.game, seat.id)
               : botAction(r.game, seat.id);
           if (action) {

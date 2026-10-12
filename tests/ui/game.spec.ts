@@ -265,6 +265,17 @@ test('six player finances remain readable on desktop and mobile; a second window
   await page.getByRole('menuitem', { name: '发送🎉' }).click();
   await expect(page.locator('.player-card[data-self="true"] .card-emote')).toHaveText('🎉');
   await expect(page.locator('.pawn-emote')).toHaveText('🎉');
+  // Rename mid-match from settings; everyone's roster updates.
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByLabel('我的昵称').fill('新名字');
+  await page.getByRole('button', { name: '保存昵称' }).click();
+  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await expect(page.locator('.player-card[data-self="true"]')).toContainText('新名字');
+  // Auto-play on and off.
+  await page.getByRole('button', { name: '🛋 挂机' }).click();
+  await expect(page.locator('.player-card[data-self="true"]')).toContainText('挂机托管中');
+  await page.locator('.meta-afk').click();
+  await expect(page.locator('.player-card[data-self="true"]')).not.toContainText('挂机托管中');
   await page.screenshot({ path: 'artifacts/ui/desktop-six-players.png', fullPage: true });
   const clipped = await page
     .locator('.country-tile')
@@ -289,7 +300,7 @@ test('six player finances remain readable on desktop and mobile; a second window
     expect(layout.body).toBeLessThanOrEqual(layout.width + 1);
     expect(layout.baseFont).toBeGreaterThanOrEqual(15);
   }
-  await page.getByRole('button', { name: /查看1号玩家资产玩家的资产/ }).click();
+  await page.getByRole('button', { name: /查看1号玩家新名字的资产/ }).click();
   await page.getByRole('button', { name: '管理我的资产' }).click();
   await expect(page.getByLabel('存取金额')).toBeVisible();
   await page.getByLabel('存取金额').fill('-1');

@@ -119,7 +119,13 @@ class MonopolyRoom extends Room {
     );
     this.onMessage('lobby', (c, data) =>
       guard(c, () => {
-        service.lobby(this.code, c.auth, data);
+        const removed = service.lobby(this.code, c.auth, data);
+        // A removed player's connection is closed with an explanation.
+        if (removed) {
+          const target = this.occupants.get(removed);
+          this.occupants.delete(removed);
+          target?.leave(4002, '你已被房主移出或交给机器人代打');
+        }
         if (data.type === 'leave') c.send('left');
         this.views();
       }),

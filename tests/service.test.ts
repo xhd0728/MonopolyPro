@@ -267,3 +267,53 @@ test('human decisions are untimed by default; a host-set limit plays a safe defa
     store.close();
   }
 });
+test('auto-play, renaming mid-match, and the host handing an idle seat to a bot', () => {
+  const store = new Store(':memory:');
+  let now = 1000;
+  const service = new GameService(store, { now: () => now });
+  const c = service.create({ name: '甲' });
+  const b = service.join(c.code, { name: '乙' });
+  service.connected(c.code, c.seatId);
+  service.connected(c.code, b.seatId);
+  service.lobby(c.code, c.seatId, { type: 'ready' });
+  service.lobby(c.code, b.seatId, { type: 'ready' });
+  service.lobby(c.code, c.seatId, { type: 'start' });
+  // Rename at any time; the match uses the new name.
+  service.lobby(c.code, b.seatId, { type: 'rename', name: '乙乙' });
+  assert.equal(service.record(c.code).game!.players[1].name, '乙乙');
+  // Auto-play: the rule bot acts for the seat even though it is connected and untimed.
+  service.lobby(c.code, c.seatId, { type: 'afk', afk: true });
+  assert.equal(service.view(c.code, b.seatId).seats[0].afk, true);
+  const before = service.record(c.code).game!.revision;
+  service.tick(c.code);
+  assert.ok(service.record(c.code).game!.revision > before);
+  // Acting again switches auto-play off.
+  const g = service.record(c.code).game!;
+  const mine = g.players[g.turn].id === c.seatId;
+  service.command(c.code, mine ? c.seatId : b.seatId, {
+    id: 'back-at-table',
+    revision: g.revision,
+    action: { type: 'surrender' },
+  });
+  if (mine) assert.equal(service.record(c.code).seats[0].afk, false);
+  store.close();
+  // Host controls: in the lobby a player is removed; mid-match the seat goes to a bot.
+  const s2 = new Store(':memory:');
+  const svc = new GameService(s2, { now: () => now });
+  const h = svc.create({ name: '房主' });
+  const x = svc.join(h.code, { name: '挂机的人' });
+  assert.throws(() => svc.lobby(h.code, x.seatId, { type: 'kick', seatId: h.seatId }), /房主/);
+  assert.equal(svc.lobby(h.code, h.seatId, { type: 'kick', seatId: x.seatId }), x.seatId);
+  assert.equal(svc.record(h.code).seats.length, 1);
+  const y = svc.join(h.code, { name: '玩家二' });
+  svc.connected(h.code, h.seatId);
+  svc.connected(h.code, y.seatId);
+  svc.lobby(h.code, h.seatId, { type: 'ready' });
+  svc.lobby(h.code, y.seatId, { type: 'ready' });
+  svc.lobby(h.code, h.seatId, { type: 'start' });
+  svc.lobby(h.code, h.seatId, { type: 'kick', seatId: y.seatId });
+  const seat = svc.record(h.code).seats.find((s) => s.id === y.seatId)!;
+  assert.equal(seat.bot, true);
+  assert.throws(() => svc.authenticate(h.code, y.token), /无法恢复/);
+  s2.close();
+});

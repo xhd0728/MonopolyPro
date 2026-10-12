@@ -326,6 +326,8 @@ export interface Seat {
   connected: boolean;
   disconnectedAt: number | null;
   controlEpoch: number;
+  /** The player switched on auto-play: the rule bot plays this seat until they act again. */
+  afk?: boolean;
 }
 export interface RoomRecord {
   version: 1;
