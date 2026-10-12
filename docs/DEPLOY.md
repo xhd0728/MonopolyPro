@@ -115,3 +115,7 @@ sudo -u monopolypro /usr/bin/node /opt/monopolypro/current/scripts/backup.mjs \
 - [ ] 备份恢复和同 schema 版本回滚演练成功。
 
 当前实现无公开匹配、账号、支付或多实例调度。它作为原创策略派对游戏发布，不含商业 Monopoly / 大富翁的官方地图、角色或素材。
+
+## 可选 LLM 机器人
+
+本机 `.env` 不包含在发布包内。需要模型机器人时，参照 [AI 配置](AI.md) 将 `MONOPOLY_AI_*` 字段填写到 `/etc/monopolypro.env`（权限 600），然后重启 systemd 服务。原有 KatanPro 的 API 可复用，但不要把端口、数据目录和公共域名设置直接搬到新服务。模型暂不可用时规则机器人继续推进；API 密钥只保留在服务端。

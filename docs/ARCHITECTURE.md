@@ -9,6 +9,8 @@
 - SQLite WAL stores room identity, seats, state snapshots, events and command results. A command transaction commits before publishing state or acknowledgment.
 - Synchronous room handlers and SQLite transactions serialize mutations; command IDs prevent duplicate retries. Socket identity and connection generations reject replaced clients; each synchronous bot tick checks the current seat and decision before acting.
 - Node.js + systemd deployment, Caddy HTTPS/WSS proxy, persistent data outside the release directory, backups and explicit schema compatibility checks.
-- Single instance in v1. No Redis, hosted Sites registration, account service or third-party AI dependency.
+- Single instance in v1. No Redis, hosted Sites registration or account service. Optional server-only LLM decisions use filtered views and legal candidate indices; gameplay continues through rule-based fallback when the provider is unavailable.
 
 Public player views include server-calculated cash, savings, net assets, property recovery value, building totals and debt. Property views include actual rent, viewer-specific payable rent and construction cost. Private hands and predetermined dice remain viewer-only. Decision and takeover durations come from the server configuration.
+
+LLM requests are outside the pure engine. An asynchronous decision is bound to game identity, revision, seat and control epoch; the room rechecks them before applying and persisting the action. Concurrency, request time and response size are bounded; shutdown cancels pending requests. Public AI status contains configuration readiness and fixed status text only.
