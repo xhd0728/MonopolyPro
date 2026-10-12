@@ -25,6 +25,7 @@ import {
 import type {
   CommandResult,
   GameAction,
+  GameView,
   RoomListing,
   RoomRecord,
   RoomView,
@@ -100,8 +101,15 @@ export class GameService {
   env() {
     return { now: this.now(), randomInt };
   }
+  /** Mutable copy for a transaction; save() commits it. */
   record(code: string) {
     const record = this.store.get(code.toUpperCase());
+    ensure(record, '房间不存在或已解散', 404);
+    return record;
+  }
+  /** Read-only committed record for views and checks. */
+  private peek(code: string): Readonly<RoomRecord> {
+    const record = this.store.peek(code.toUpperCase());
     ensure(record, '房间不存在或已解散', 404);
     return record;
   }
@@ -145,7 +153,7 @@ export class GameService {
         settings: settingsSchema.default(settingsSchema.parse(DEFAULT_SETTINGS)),
       })
       .parse(input);
-    ensure(this.store.all().length < this.options.maxRooms, '房间数量达到上限，请稍后再试', 503);
+    ensure(this.store.size < this.options.maxRooms, '房间数量达到上限，请稍后再试', 503);
     let code: string;
     do {
       code = Array.from(randomBytes(6))
@@ -249,7 +257,7 @@ export class GameService {
     this.save(record);
   }
   list(): RoomListing[] {
-    return this.store.all().map((r) => ({
+    return [...this.store.peekAll()].map((r) => ({
       code: r.code,
       mapId: r.settings.mapId,
       mode: r.settings.mode,
@@ -262,11 +270,22 @@ export class GameService {
       status: !r.game ? 'waiting' : r.game.phase === 'finished' ? 'finished' : 'playing',
     }));
   }
-  view(code: string, id: string): RoomView {
-    const r = this.record(code);
+  /**
+   * Room view for one seat. Pass the same cache map while broadcasting one revision so
+   * spectators (who all see the public game) share a single computed game view.
+   */
+  view(code: string, id: string, cache?: Map<string, GameView | null>): RoomView {
+    const r = this.peek(code);
+    const viewer = r.seats.find((s) => s.id === id)?.spectator ? null : id;
+    const key = viewer ?? '\u0000spectator';
+    let game = cache?.get(key);
+    if (game === undefined) {
+      game = r.game ? viewFor(r.game, viewer) : null;
+      cache?.set(key, game);
+    }
     return {
       code: r.code,
-      settings: r.settings,
+      settings: { ...r.settings },
       hostId: r.hostId,
       viewerId: id,
       isHost: r.hostId === id,
@@ -283,10 +302,8 @@ export class GameService {
             this.now() - s.disconnectedAt >= this.options.takeoverMs,
         };
       }),
-      game: r.game
-        ? viewFor(r.game, r.seats.find((s) => s.id === id)?.spectator ? null : id)
-        : null,
-      chat: r.chat,
+      game,
+      chat: [...r.chat],
       locked: !!r.passwordHash,
       serverNow: this.now(),
       takeoverAfterMs: this.options.takeoverMs,
@@ -457,13 +474,28 @@ export class GameService {
     r.chat = r.chat.slice(-40);
     this.save(r);
   }
+  /** Whether a tick has real work: expiry/finish, or a seat the server must act for. */
+  private tickWork(r: Readonly<RoomRecord>): boolean {
+    const g = r.game;
+    if (!g || g.phase === 'finished') return false;
+    if (tickGame(g, this.env()) !== null) return true;
+    const actorId = g.trade ? g.trade.to : actingPlayerId(g);
+    const seat = r.seats.find((s) => s.id === actorId);
+    if (!seat) return false;
+    return (
+      seat.bot ||
+      (!seat.connected &&
+        seat.disconnectedAt !== null &&
+        this.now() - seat.disconnectedAt >= this.options.takeoverMs) ||
+      this.now() - g.decisionAt >= this.options.decisionTimeoutMs
+    );
+  }
   tick(code: string): boolean {
-    const r = this.record(code);
-    let changed = false,
-      feedback = this.dirtyRooms.delete(code);
+    const committed = this.peek(code);
+    let feedback = this.dirtyRooms.delete(code);
     const takeoverSignature =
-      r.game && r.game.phase !== 'finished'
-        ? r.seats
+      committed.game && committed.game.phase !== 'finished'
+        ? committed.seats
             .filter(
               (s) =>
                 !s.bot &&
@@ -478,6 +510,17 @@ export class GameService {
         : '';
     if ((this.takeoverSignatures.get(code) ?? '') !== takeoverSignature) feedback = true;
     this.takeoverSignatures.set(code, takeoverSignature);
+    const pending = this.botJobs.get(code);
+    if (pending && !this.validJob(committed, pending)) {
+      pending.controller.abort();
+      this.botJobs.delete(code);
+      this.aiActivity.delete(code);
+      feedback = true;
+    }
+    // Idle rooms (a human is thinking) skip the deep copy entirely.
+    if (!this.tickWork(committed)) return feedback;
+    const r = this.record(code);
+    let changed = false;
     if (r.game) {
       const ticked = tickGame(r.game, this.env());
       if (ticked) {
@@ -553,7 +596,7 @@ export class GameService {
     return changed || feedback;
   }
   private validJob(
-    r: RoomRecord,
+    r: Readonly<RoomRecord>,
     job: { gameId: string; revision: number; seatId: string; epoch: number },
   ) {
     const seat = r.seats.find((s) => s.id === job.seatId);
@@ -648,7 +691,7 @@ export class GameService {
   cleanup(): string[] {
     for (const [key, grant] of this.grants) if (grant.expires < this.now()) this.grants.delete(key);
     const removed: string[] = [];
-    for (const r of this.store.all()) {
+    for (const r of [...this.store.peekAll()]) {
       if (r.seats.some((s) => s.connected && !s.bot)) continue;
       if (
         this.now() - r.updatedAt > this.options.roomIdleMs ||

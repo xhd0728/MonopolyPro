@@ -12,6 +12,8 @@ import {
   viewFor,
   tickGame,
   assetsOf,
+  log,
+  VIEW_EVENTS,
 } from '../packages/engine/src/index.ts';
 import { botAction } from '../packages/engine/src/bot.ts';
 import { BOARD, CARDS, CHARACTERS, MAPS, mapById } from '../packages/content/src/index.ts';
@@ -381,4 +383,22 @@ test('complete seeded bot matches across maps, seat counts and modes', () => {
         matches++;
       }
   console.log(`Simulated ${matches} complete matches, ${commands} commands`);
+});
+test('views carry a bounded recent log plus each player’s latest action from the full log', () => {
+  let g = game('town', 4);
+  for (let i = 0; i < 200; i++) log(g, env, 'bank', `玩家0存入 ${i}`, 'p0');
+  log(g, env, 'purchase', '玩家1买下中国', 'p1');
+  for (let i = 0; i < 100; i++) log(g, env, 'turn', `轮到玩家2`, 'p2');
+  const v = viewFor(g, 'p0');
+  assert.equal(v.events.length, VIEW_EVENTS);
+  assert.deepEqual(v.events, g.events.slice(-VIEW_EVENTS));
+  assert.equal(v.players[0].lastAction, '玩家0存入 199');
+  assert.equal(v.players[1].lastAction, '玩家1买下中国', 'older than the view window');
+  assert.equal(v.players[2].lastAction, null, 'turn notices are not actions');
+  // The view must not alias mutable authority state.
+  v.players[0].cards!.push('bonus');
+  v.settings.minutes = 1;
+  assert.notEqual(g.players[0].cards.length, v.players[0].cards!.length);
+  assert.equal(g.settings.minutes, DEFAULT_SETTINGS.minutes);
+  assert.equal(tickGame(g, env), null, 'idle ticks return without copying');
 });

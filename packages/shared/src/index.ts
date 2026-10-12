@@ -195,6 +195,8 @@ export type PlayerView = Omit<PlayerState, 'cards' | 'nextDice'> & {
   propertyCount: number;
   buildingCount: number;
   debt: number;
+  /** Most recent notable action text, computed from the full authoritative log. */
+  lastAction: string | null;
 };
 export interface PropertyView extends PropertyState {
   rent: number;

@@ -1,4 +1,5 @@
-import { useEffect, useRef, type CSSProperties } from 'react';
+import { memo, useEffect, useRef, type CSSProperties } from 'react';
+import { serverTime, useServerNow } from './clock.tsx';
 import type {
   GameView,
   MapDefinition,
@@ -32,13 +33,14 @@ function connectionName(
     ? '断线 · 机器人托管'
     : '断线 · 等待恢复';
 }
-export function PlayerRoster({
+function OfflineClock({ children }: { children: (now: number) => string }) {
+  return <>{children(useServerNow())}</>;
+}
+export const PlayerRoster = memo(function PlayerRoster({
   room,
-  now,
   inspect,
 }: {
   room: RoomView;
-  now: number;
   inspect: (id: string) => void;
 }) {
   const g = room.game!;
@@ -97,7 +99,11 @@ export function PlayerRoster({
               </div>
               <div className="player-state">
                 <i />
-                {connectionName(p, seat, room, now)}
+                {seat && !seat.bot && !seat.connected ? (
+                  <OfflineClock>{(now) => connectionName(p, seat, room, now)}</OfflineClock>
+                ) : (
+                  connectionName(p, seat, room, serverTime())
+                )}
                 {g.settings.mode === 'team' && <span> · {p.team === 0 ? '青' : '橙'}队</span>}
                 {g.activeId === p.id && <b>{g.phase === 'auction' ? '正在竞拍' : '当前回合'}</b>}
               </div>
@@ -121,23 +127,8 @@ export function PlayerRoster({
                 </span>
                 {p.debt > 0 && <span className="debt-label">待付 {money(p.debt)}</span>}
               </div>
-              <span
-                className="player-last-action"
-                title={
-                  [...g.events]
-                    .reverse()
-                    .find(
-                      (e) => e.actor === p.id && !['turn', 'move', 'start', 'ai'].includes(e.kind),
-                    )?.text ?? '尚未行动'
-                }
-              >
-                {[...g.events]
-                  .reverse()
-                  .find(
-                    (e) => e.actor === p.id && !['turn', 'move', 'start', 'ai'].includes(e.kind),
-                  )
-                  ?.text.replace(p.name, '')
-                  .trim() ?? '等待出发'}
+              <span className="player-last-action" title={p.lastAction ?? '尚未行动'}>
+                {p.lastAction?.replace(p.name, '').trim() || '等待出发'}
               </span>
               <span className="player-character">
                 {character.icon} {character.name}
@@ -148,7 +139,7 @@ export function PlayerRoster({
       </div>
     </section>
   );
-}
+});
 export function PlayerDetails({
   player,
   game,

@@ -52,9 +52,21 @@ export class Store {
       this.records.set(record.code, record);
     }
   }
+  /** Mutable copy for transactional updates; pass the result back to save(). */
   get(code: string): RoomRecord | undefined {
     const r = this.records.get(code);
     return r && structuredClone(r);
+  }
+  /** Read-only view of the committed record. Never mutate the result. */
+  peek(code: string): Readonly<RoomRecord> | undefined {
+    return this.records.get(code);
+  }
+  /** Read-only iteration over committed records. Never mutate the results. */
+  peekAll(): IterableIterator<Readonly<RoomRecord>> {
+    return this.records.values();
+  }
+  get size() {
+    return this.records.size;
   }
   all(): RoomRecord[] {
     return [...this.records.values()].map((r) => structuredClone(r));

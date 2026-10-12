@@ -173,7 +173,9 @@ class MonopolyRoom extends Room {
     client.send('view', service.view(this.code, client.auth));
   }
   views() {
-    for (const client of this.occupants.values()) this.sendView(client);
+    const cache = new Map();
+    for (const client of this.occupants.values())
+      client.send('view', service.view(this.code, client.auth, cache));
   }
 }
 const transport = new WebSocketTransport({
@@ -212,7 +214,7 @@ app.get('/healthz', (_req, res) => {
   res.json({
     ok: true,
     version: '0.1.0',
-    rooms: store.all().length,
+    rooms: store.size,
     uptime: Math.floor(process.uptime()),
   });
 });
@@ -302,6 +304,6 @@ console.log(
     host,
     port,
     node: process.version,
-    restoredRooms: store.all().length,
+    restoredRooms: store.size,
   }),
 );

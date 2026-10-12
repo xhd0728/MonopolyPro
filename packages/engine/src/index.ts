@@ -1033,9 +1033,19 @@ export function applyAction(
   return g;
 }
 
+/** Whether the match must end now: one side left, or the clock ran out. No mutation. */
+function winnerDue(g: GameState, env: EngineEnvironment) {
+  if (env.now >= g.endsAt) return true;
+  const alive = g.players.filter((p) => !p.bankrupt);
+  return g.settings.mode === 'team'
+    ? new Set(alive.map((p) => p.team)).size <= 1
+    : alive.length <= 1;
+}
 export function tickGame(state: GameState, env: EngineEnvironment): GameState | null {
+  if (state.phase === 'finished') return null;
+  // Most ticks change nothing; decide before paying for a deep copy.
+  if (!(state.trade && env.now >= state.trade.expiresAt) && !winnerDue(state, env)) return null;
   const g = structuredClone(state);
-  if (g.phase === 'finished') return null;
   let changed = false;
   if (g.trade && env.now >= g.trade.expiresAt) {
     g.trade = null;
@@ -1195,15 +1205,28 @@ export function actionsFor(g: GameState, id: string): ActionOption[] {
     add({ type: 'ability' }, '使用角色天赋', characterById(p.characterId).ability);
   return options;
 }
+/** Recent events sent to clients; the authoritative log keeps more for persistence. */
+export const VIEW_EVENTS = 48;
+const QUIET_EVENTS = new Set(['turn', 'start', 'move', 'ai']);
 export function viewFor(g: GameState, viewerId: string | null): GameView {
-  const { players, traps, ...publicState } = structuredClone(g);
+  // Views are serialized immediately. Copy only the small mutable parts instead of the whole
+  // state; event objects are append-only and safe to share.
+  const { players, traps, properties, events, ...rest } = g;
+  const publicState = structuredClone(rest);
   const viewer = playerById(g, viewerId ?? '');
+  const lastAction = new Map<string, string>();
+  for (let i = events.length - 1; i >= 0 && lastAction.size < players.length; i--) {
+    const e = events[i];
+    if (e.actor && !QUIET_EVENTS.has(e.kind) && !lastAction.has(e.actor))
+      lastAction.set(e.actor, e.text);
+  }
   return {
     ...publicState,
+    events: events.slice(-VIEW_EVENTS),
     viewerId,
     activeId: actingPlayerId(g),
     actions: viewerId ? actionsFor(g, viewerId) : [],
-    properties: g.properties.map((property) => {
+    properties: properties.map((property) => {
       const owner = property.owner ? playerById(g, property.owner) : undefined;
       return {
         ...property,
@@ -1224,18 +1247,19 @@ export function viewFor(g: GameState, viewerId: string | null): GameView {
     }),
     players: players.map((p) => {
       const { cards, nextDice, ...pub } = p;
+      const assets = assetsOf(g, p),
+        debt = g.debt?.playerId === p.id ? g.debt.amount : 0;
+      const owned = properties.filter((x) => x.owner === p.id);
       return {
         ...pub,
         cardCount: cards.length,
-        ...(p.id === viewerId ? { cards, nextDice } : {}),
-        assets: assetsOf(g, p),
-        propertyValue:
-          assetsOf(g, p) - p.cash - p.deposit + (g.debt?.playerId === p.id ? g.debt.amount : 0),
-        propertyCount: g.properties.filter((x) => x.owner === p.id).length,
-        buildingCount: g.properties
-          .filter((x) => x.owner === p.id)
-          .reduce((n, x) => n + x.level, 0),
-        debt: g.debt?.playerId === p.id ? g.debt.amount : 0,
+        ...(p.id === viewerId ? { cards: [...cards], nextDice } : {}),
+        assets,
+        propertyValue: assets - p.cash - p.deposit + debt,
+        propertyCount: owned.length,
+        buildingCount: owned.reduce((n, x) => n + x.level, 0),
+        debt,
+        lastAction: lastAction.get(p.id) ?? null,
       };
     }),
     traps: Object.fromEntries(

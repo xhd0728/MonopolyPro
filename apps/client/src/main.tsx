@@ -1,5 +1,5 @@
 import './style.css';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   MAPS,
@@ -26,6 +26,7 @@ import { PlayerRoster, PlayerDetails } from './Players.tsx';
 import { money, cardTargetReason, validMoney } from './game-ui.ts';
 import { MatchHud, ActionAnnouncements, phaseGuide } from './GameHud.tsx';
 import { api, Connection, type Credentials } from './network.ts';
+import { Clock, setServerOffset } from './clock.tsx';
 const phaseNames = {
   roll: '掷骰出发',
   jail: '拘留所',
@@ -143,13 +144,16 @@ function App() {
     [panel, setPanel] = useState('操作'),
     [sheetOpen, setSheetOpen] = useState(false);
   const [inspectedPlayer, setInspectedPlayer] = useState<string | null>(null);
+  const inspectPlayer = useCallback((id: string) => {
+    setSelectedTile(null);
+    setInspectedPlayer(id);
+  }, []);
   const [botMode, setBotMode] = useState<'rule' | 'llm'>('llm');
   const automaticSheet = useRef(false),
     pendingAction = useRef<GameAction | null>(null);
   const [follow, setFollow] = useState(localStorage.getItem('mp-follow') !== 'false'),
     [reduced, setReduced] = useState(localStorage.getItem('mp-reduced') === 'true'),
     [hints, setHints] = useState(localStorage.getItem('mp-hints') !== 'false'),
-    [now, setNow] = useState(Date.now()),
     [tutorial, setTutorial] = useState<number | null>(null),
     [tutorialGame, setTutorialGame] = useState(false);
   const [tradeTo, setTradeTo] = useState(''),
@@ -157,8 +161,6 @@ function App() {
     [wantCash, setWantCash] = useState(0),
     [giveTile, setGiveTile] = useState(''),
     [wantTile, setWantTile] = useState('');
-  const offset = useRef(0);
-  const serverNow = now + offset.current;
   const roomRef = useRef(room);
   roomRef.current = room;
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined),
@@ -171,9 +173,7 @@ function App() {
   if (!connection.current)
     connection.current = new Connection(
       (v) => {
-        const receivedAt = Date.now();
-        offset.current = v.serverNow - receivedAt;
-        setNow(receivedAt);
+        setServerOffset(v.serverNow - Date.now());
         setRoom(v);
       },
       (s, l) => {
@@ -200,9 +200,7 @@ function App() {
       }
     }
     void refresh();
-    const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => {
-      clearInterval(tick);
       connection.current?.stop();
     };
   }, []);
@@ -853,14 +851,7 @@ function App() {
             ) : (
               <>
                 <div className="match-workspace">
-                  <PlayerRoster
-                    room={room}
-                    now={serverNow}
-                    inspect={(id) => {
-                      setSelectedTile(null);
-                      setInspectedPlayer(id);
-                    }}
-                  />
+                  <PlayerRoster room={room} inspect={inspectPlayer} />
                   <div className="game-layout">
                     <section className="board-wrap">
                       <div className="board-meta" data-revision={g.revision}>
@@ -868,10 +859,14 @@ function App() {
                           第 <b>{g.round}</b> 轮 <i>·</i> {phaseNames[g.phase]}
                         </span>
                         <span>
-                          {Math.max(
-                            0,
-                            Math.min(g.settings.minutes, Math.ceil((g.endsAt - serverNow) / 60000)),
-                          )}{' '}
+                          <Clock>
+                            {(now) =>
+                              Math.max(
+                                0,
+                                Math.min(g.settings.minutes, Math.ceil((g.endsAt - now) / 60000)),
+                              )
+                            }
+                          </Clock>{' '}
                           分钟剩余{' '}
                           <button className="text-button" onClick={() => setFollow(!follow)}>
                             {follow ? '◎ 跟随回合' : '○ 自由视角'}
@@ -963,16 +958,19 @@ function App() {
                               {g.phase !== 'finished' && !g.trade && (
                                 <span className="decision-timer">
                                   本次决定还剩{' '}
-                                  {Math.max(
-                                    0,
-                                    Math.min(
-                                      Math.ceil(room.decisionTimeoutMs / 1000),
-                                      Math.ceil(
-                                        (room.decisionTimeoutMs - (serverNow - g.decisionAt)) /
-                                          1000,
-                                      ),
-                                    ),
-                                  )}{' '}
+                                  <Clock>
+                                    {(now) =>
+                                      Math.max(
+                                        0,
+                                        Math.min(
+                                          Math.ceil(room.decisionTimeoutMs / 1000),
+                                          Math.ceil(
+                                            (room.decisionTimeoutMs - (now - g.decisionAt)) / 1000,
+                                          ),
+                                        ),
+                                      )
+                                    }
+                                  </Clock>{' '}
                                   秒 · 超时由系统继续推进
                                 </span>
                               )}
@@ -990,7 +988,12 @@ function App() {
                                   : ''}
                                 <br />
                                 有效期剩余{' '}
-                                {Math.max(0, Math.ceil((g.trade.expiresAt - serverNow) / 1000))} 秒
+                                <Clock>
+                                  {(now) =>
+                                    Math.max(0, Math.ceil((g.trade!.expiresAt - now) / 1000))
+                                  }
+                                </Clock>{' '}
+                                秒
                               </div>
                             )}
                             <div className="actions">
