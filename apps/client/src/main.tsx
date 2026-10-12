@@ -24,6 +24,7 @@ import { Board } from './Board.tsx';
 import { Assets } from './Assets.tsx';
 import { PlayerRoster, PlayerDetails } from './Players.tsx';
 import { money, cardTargetReason, validMoney } from './game-ui.ts';
+import { MatchHud, ActionAnnouncements, phaseGuide } from './GameHud.tsx';
 import { api, Connection, type Credentials } from './network.ts';
 const phaseNames = {
   roll: '掷骰出发',
@@ -139,6 +140,7 @@ function App() {
     [panel, setPanel] = useState('操作'),
     [sheetOpen, setSheetOpen] = useState(false);
   const [inspectedPlayer, setInspectedPlayer] = useState<string | null>(null);
+  const [botMode, setBotMode] = useState<'rule' | 'llm'>('llm');
   const automaticSheet = useRef(false),
     pendingAction = useRef<GameAction | null>(null);
   const [follow, setFollow] = useState(localStorage.getItem('mp-follow') !== 'false'),
@@ -393,7 +395,7 @@ function App() {
   };
   return (
     <>
-      <div className="app-shell">
+      <div className={`app-shell ${g ? 'in-match' : ''}`} data-reduced-motion={reduced}>
         <header className="topbar">
           <a
             className="brand"
@@ -556,7 +558,7 @@ function App() {
             </footer>
           </main>
         ) : (
-          <main className="room-page">
+          <main className={`room-page ${g ? 'match-page' : ''}`}>
             <div className="room-heading">
               <div>
                 <div className="eyebrow">{g ? '环球旅程 · 资产与路线同步' : '好友专属的起点'}</div>
@@ -613,7 +615,7 @@ function App() {
                               </p>
                               <span className={`seat-status ${s.ready ? 'ready' : ''}`}>
                                 {s.bot
-                                  ? '机器人 · 已准备'
+                                  ? `${s.botMode === 'llm' ? 'LLM' : '规则'}机器人 · 已准备`
                                   : !s.connected
                                     ? '连接已断开'
                                     : s.ready
@@ -647,7 +649,11 @@ function App() {
                         key={i}
                         disabled={!room.isHost || disabled}
                         title={!room.isHost ? '由房主添加机器人' : '添加一个准备好的机器人席位'}
-                        onClick={() => lobby('addBot')}
+                        onClick={() =>
+                          lobby('addBot', {
+                            botMode: tutorialGame || !room.ai.configured ? 'rule' : botMode,
+                          })
+                        }
                       >
                         ＋<span>{room.isHost ? '添加机器人' : '等待朋友加入'}</span>
                       </button>
@@ -806,6 +812,29 @@ function App() {
                     <br />
                     断线 {Math.ceil(room.takeoverAfterMs / 1000)} 秒后机器人临时托管，回来即可接手。
                   </div>
+                  <section className="bot-config" aria-label="AI 设置">
+                    <label>
+                      机器人策略
+                      <select
+                        aria-label="机器人策略"
+                        disabled={!room.isHost || disabled}
+                        value={room.ai.configured && !tutorialGame ? botMode : 'rule'}
+                        onChange={(e) => setBotMode(e.target.value as 'rule' | 'llm')}
+                      >
+                        <option value="rule">规则机器人 · 即时决策</option>
+                        <option value="llm" disabled={!room.ai.configured || tutorialGame}>
+                          LLM 机器人 · 模型策略
+                        </option>
+                      </select>
+                    </label>
+                    <p>
+                      {tutorialGame
+                        ? '教学使用规则机器人，便于逐步练习。'
+                        : room.ai.configured
+                          ? `模型已配置：${room.ai.model}。超时自动由规则策略继续。`
+                          : '模型尚未配置，当前使用规则机器人。API 由服务端部署者配置。'}
+                    </p>
+                  </section>
                   <Chat
                     room={room}
                     chat={chat}
@@ -820,378 +849,369 @@ function App() {
               </div>
             ) : (
               <>
-                <PlayerRoster
-                  room={room}
-                  now={serverNow}
-                  inspect={(id) => {
-                    setSelectedTile(null);
-                    setInspectedPlayer(id);
-                  }}
-                />
-                <div className="game-layout">
-                  <section className="board-wrap">
-                    <div className="board-meta" data-revision={g.revision}>
-                      <span>
-                        第 <b>{g.round}</b> 轮 <i>·</i> {phaseNames[g.phase]}
-                      </span>
-                      <span>
-                        {Math.max(
-                          0,
-                          Math.min(g.settings.minutes, Math.ceil((g.endsAt - serverNow) / 60000)),
-                        )}{' '}
-                        分钟剩余{' '}
-                        <button className="text-button" onClick={() => setFollow(!follow)}>
-                          {follow ? '◎ 跟随回合' : '○ 自由视角'}
-                        </button>
-                      </span>
-                    </div>
-                    <Board
-                      map={map}
-                      game={g}
-                      highlight={
-                        dialog === 'card' && selectedCard
-                          ? selectedCard.target === 'player'
-                            ? g.players
-                                .filter((p) => cardTargets.some((t) => t.id === p.id && !t.reason))
-                                .map((p) => p.position)
-                            : cardTargets.filter((t) => !t.reason).map((t) => Number(t.id))
-                          : (g.pendingPath?.choices ??
-                            (selectedTile === null ? [] : [selectedTile]))
-                      }
-                      onTile={setSelectedTile}
-                      follow={follow}
-                      reduced={reduced}
-                    />
-                    {hints &&
-                      g.events
-                        .filter((e) => !['turn', 'dice', 'move', 'start'].includes(e.kind))
-                        .slice(-1)
-                        .map(
-                          (e) =>
-                            serverNow - e.at < 10000 && (
-                              <div className={`board-feedback ${e.kind}`} key={e.id} role="status">
-                                {e.text}
-                              </div>
-                            ),
-                        )}
-                    <div className="dice-display">
-                      {g.lastDice.length ? (
-                        g.lastDice.map((d, i) => (
-                          <span key={i}>{['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'][d]}</span>
-                        ))
-                      ) : (
-                        <span>⚄</span>
-                      )}
-                      <small>
-                        {active ? `${active.name}的${phaseNames[g.phase]}` : '旅程结束'}
-                      </small>
-                    </div>
-                  </section>
-                  <aside className="game-sidebar">
-                    <section className={`paper action-panel ${sheetOpen ? 'sheet-open' : ''}`}>
-                      <button
-                        className="drawer-close icon-button"
-                        aria-label="关闭详情抽屉"
-                        onClick={() => {
-                          setSheetOpen(false);
-                          automaticSheet.current = false;
-                        }}
-                      >
-                        ×
-                      </button>
-                      <div className="panel-tabs">
-                        {['操作', '资产', '动态'].map((p) => (
-                          <button
-                            className={panel === p ? 'selected' : ''}
-                            key={p}
-                            onClick={() => setPanel(p)}
-                          >
-                            {p}
+                <div className="match-workspace">
+                  <PlayerRoster
+                    room={room}
+                    now={serverNow}
+                    inspect={(id) => {
+                      setSelectedTile(null);
+                      setInspectedPlayer(id);
+                    }}
+                  />
+                  <div className="game-layout">
+                    <section className="board-wrap">
+                      <div className="board-meta" data-revision={g.revision}>
+                        <span>
+                          第 <b>{g.round}</b> 轮 <i>·</i> {phaseNames[g.phase]}
+                        </span>
+                        <span>
+                          {Math.max(
+                            0,
+                            Math.min(g.settings.minutes, Math.ceil((g.endsAt - serverNow) / 60000)),
+                          )}{' '}
+                          分钟剩余{' '}
+                          <button className="text-button" onClick={() => setFollow(!follow)}>
+                            {follow ? '◎ 跟随回合' : '○ 自由视角'}
                           </button>
-                        ))}
+                        </span>
                       </div>
-                      {panel === '操作' ? (
-                        <>
-                          <div className="turn-prompt">
-                            <span className="eyebrow">
-                              {myTurn
-                                ? '轮到你了'
-                                : me?.bankrupt
-                                  ? '继续观战'
-                                  : '等待时也能查看地图'}
-                            </span>
-                            <h2>
-                              {g.phase === 'finished'
-                                ? '这段旅程，圆满落幕'
-                                : g.trade
-                                  ? '交易提案待处理'
-                                  : myTurn
-                                    ? phaseNames[g.phase]
-                                    : `${active?.name ?? '伙伴'}正在操作`}
-                            </h2>
-                            <p>
-                              {g.debt
-                                ? `${g.players.find((p) => p.id === g.debt!.playerId)?.name}需支付 ${g.debt.amount}，可取款、出售建筑或抵押。`
-                                : g.auction
-                                  ? `${map.tiles[g.auction.tile].name}，最高出价 ${g.auction.highBid}。退出后不能再次参与。`
-                                  : g.pendingPath
-                                    ? '点选道路后继续走完剩余步数。'
-                                    : myTurn
-                                      ? g.phase === 'purchase'
-                                        ? `抵达${map.tiles[me!.position].name}，地价 ${money(map.tiles[me!.position].price)}。可直接购买或公开拍卖。`
-                                        : '先安排资产与卡牌，再完成本回合操作。'
-                                      : '你可以浏览地产、手牌、图鉴，或与朋友聊天。'}
-                            </p>
-                            {g.phase !== 'finished' && !g.trade && (
-                              <span className="decision-timer">
-                                本次决定还剩{' '}
-                                {Math.max(
-                                  0,
-                                  Math.min(
-                                    Math.ceil(room.decisionTimeoutMs / 1000),
-                                    Math.ceil(
-                                      (room.decisionTimeoutMs - (serverNow - g.decisionAt)) / 1000,
-                                    ),
-                                  ),
-                                )}{' '}
-                                秒 · 超时由系统继续推进
+                      <Board
+                        compactCenter={
+                          <MatchHud
+                            room={room}
+                            map={map}
+                            rolling={pending && pendingAction.current?.type === 'roll'}
+                            compact
+                          />
+                        }
+                        center={
+                          <MatchHud
+                            room={room}
+                            map={map}
+                            rolling={pending && pendingAction.current?.type === 'roll'}
+                          />
+                        }
+                        map={map}
+                        game={g}
+                        highlight={
+                          dialog === 'card' && selectedCard
+                            ? selectedCard.target === 'player'
+                              ? g.players
+                                  .filter((p) =>
+                                    cardTargets.some((t) => t.id === p.id && !t.reason),
+                                  )
+                                  .map((p) => p.position)
+                              : cardTargets.filter((t) => !t.reason).map((t) => Number(t.id))
+                            : (g.pendingPath?.choices ??
+                              (selectedTile === null ? [] : [selectedTile]))
+                        }
+                        onTile={setSelectedTile}
+                        follow={follow}
+                        reduced={reduced}
+                      />
+                      <ActionAnnouncements game={g} enabled={hints} />
+                    </section>
+                    <aside className="game-sidebar">
+                      <section className={`paper action-panel ${sheetOpen ? 'sheet-open' : ''}`}>
+                        <button
+                          className="drawer-close icon-button"
+                          aria-label="关闭详情抽屉"
+                          onClick={() => {
+                            setSheetOpen(false);
+                            automaticSheet.current = false;
+                          }}
+                        >
+                          ×
+                        </button>
+                        <div className="panel-tabs">
+                          {['操作', '资产', '动态', '聊天'].map((p) => (
+                            <button
+                              className={panel === p ? 'selected' : ''}
+                              key={p}
+                              onClick={() => {
+                                setPanel(p);
+                                automaticSheet.current = false;
+                              }}
+                            >
+                              {p}
+                            </button>
+                          ))}
+                        </div>
+                        {panel === '操作' ? (
+                          <>
+                            <div className="turn-prompt">
+                              <span className="eyebrow">
+                                {myTurn
+                                  ? '轮到你了'
+                                  : me?.bankrupt
+                                    ? '继续观战'
+                                    : '等待时也能查看地图'}
                               </span>
-                            )}
-                          </div>
-                          {g.trade && (
-                            <div className="tip-box">
-                              {g.players.find((p) => p.id === g.trade!.from)?.name}给出{' '}
-                              {g.trade.giveCash}
-                              {g.trade.giveTile !== null
-                                ? ` + ${map.tiles[g.trade.giveTile].name}`
-                                : ''}
-                              ，换取 {g.trade.wantCash}
-                              {g.trade.wantTile !== null
-                                ? ` + ${map.tiles[g.trade.wantTile].name}`
-                                : ''}
-                              <br />
-                              有效期剩余{' '}
-                              {Math.max(0, Math.ceil((g.trade.expiresAt - serverNow) / 1000))} 秒
+                              <h2>
+                                {g.phase === 'finished'
+                                  ? '这段旅程，圆满落幕'
+                                  : g.trade
+                                    ? '交易提案待处理'
+                                    : myTurn
+                                      ? phaseNames[g.phase]
+                                      : `${active?.name ?? '伙伴'}正在操作`}
+                              </h2>
+                              <p>{phaseGuide(g, map).text}</p>
+                              {g.phase !== 'finished' && !g.trade && (
+                                <span className="decision-timer">
+                                  本次决定还剩{' '}
+                                  {Math.max(
+                                    0,
+                                    Math.min(
+                                      Math.ceil(room.decisionTimeoutMs / 1000),
+                                      Math.ceil(
+                                        (room.decisionTimeoutMs - (serverNow - g.decisionAt)) /
+                                          1000,
+                                      ),
+                                    ),
+                                  )}{' '}
+                                  秒 · 超时由系统继续推进
+                                </span>
+                              )}
                             </div>
-                          )}
-                          <div className="actions">
+                            {g.trade && (
+                              <div className="tip-box">
+                                {g.players.find((p) => p.id === g.trade!.from)?.name}给出{' '}
+                                {g.trade.giveCash}
+                                {g.trade.giveTile !== null
+                                  ? ` + ${map.tiles[g.trade.giveTile].name}`
+                                  : ''}
+                                ，换取 {g.trade.wantCash}
+                                {g.trade.wantTile !== null
+                                  ? ` + ${map.tiles[g.trade.wantTile].name}`
+                                  : ''}
+                                <br />
+                                有效期剩余{' '}
+                                {Math.max(0, Math.ceil((g.trade.expiresAt - serverNow) / 1000))} 秒
+                              </div>
+                            )}
+                            <div className="actions">
+                              {g.actions
+                                .filter(
+                                  (a) =>
+                                    a.primary ||
+                                    ['tradeAccept', 'tradeReject', 'ferry'].includes(a.action.type),
+                                )
+                                .map((a, i) => (
+                                  <div key={i}>
+                                    <button
+                                      className={a.primary ? 'primary' : 'secondary'}
+                                      disabled={
+                                        disabled ||
+                                        !!a.disabled ||
+                                        (a.action.type === 'bid' && !!bidReason)
+                                      }
+                                      title={
+                                        a.disabled ??
+                                        (a.action.type === 'bid' ? bidReason || a.hint : a.hint)
+                                      }
+                                      onClick={() =>
+                                        command(
+                                          a.action.type === 'bid'
+                                            ? { type: 'bid', amount: bid }
+                                            : a.action,
+                                        )
+                                      }
+                                    >
+                                      {pending ? '等待确认…' : a.label}
+                                    </button>
+                                    {hints && <small>{a.hint}</small>}
+                                  </div>
+                                ))}
+                            </div>
+                            {myTurn && g.phase === 'auction' && (
+                              <label>
+                                我的竞价
+                                <input
+                                  aria-label="竞价金额"
+                                  type="number"
+                                  min={g.auction!.highBid + 10}
+                                  max={me?.cash}
+                                  step={10}
+                                  value={bid}
+                                  inputMode="numeric"
+                                  onChange={(e) => setBid(Number(e.target.value))}
+                                />
+                                {bidReason && <span className="field-error">{bidReason}</span>}
+                              </label>
+                            )}
+                            {me && (
+                              <div className="wallet">
+                                <div>
+                                  <small>可用现金</small>
+                                  <b>{money(me.cash)}</b>
+                                </div>
+                                <div>
+                                  <small>银行存款</small>
+                                  <b>{money(me.deposit)}</b>
+                                </div>
+                                <div>
+                                  <small>租金护盾</small>
+                                  <b>{me.shield}</b>
+                                </div>
+                              </div>
+                            )}
                             {g.actions
                               .filter(
                                 (a) =>
-                                  a.primary ||
-                                  ['tradeAccept', 'tradeReject', 'ferry'].includes(a.action.type),
+                                  !a.primary &&
+                                  ![
+                                    'tradeAccept',
+                                    'tradeReject',
+                                    'ferry',
+                                    'build',
+                                    'downgrade',
+                                    'mortgage',
+                                    'redeem',
+                                  ].includes(a.action.type),
                               )
                               .map((a, i) => (
-                                <div key={i}>
+                                <button
+                                  key={i}
+                                  className="secondary full"
+                                  disabled={disabled}
+                                  title={a.hint}
+                                  onClick={() => command(a.action)}
+                                >
+                                  {a.label}
+                                  <small>{a.hint}</small>
+                                </button>
+                              ))}
+                            {me && !me.bankrupt && g.phase !== 'finished' && (
+                              <>
+                                <div className="inline-actions">
                                   <button
-                                    className={a.primary ? 'primary' : 'secondary'}
+                                    onClick={() => {
+                                      setPanel('资产');
+                                      if (window.matchMedia('(max-width: 800px)').matches)
+                                        setSheetOpen(true);
+                                    }}
+                                  >
+                                    ▤ 管理资产
+                                  </button>
+                                  <button
+                                    disabled={!canManage || disabled}
+                                    title={
+                                      canManage
+                                        ? '现金和无建筑地产可交易'
+                                        : '在自己的掷骰或经营阶段发起'
+                                    }
+                                    onClick={() => {
+                                      setTradeTo(
+                                        g.players.find((p) => p.id !== me.id && !p.bankrupt)?.id ??
+                                          '',
+                                      );
+                                      setGiveCash(0);
+                                      setWantCash(0);
+                                      setGiveTile('');
+                                      setWantTile('');
+                                      setDialog('trade');
+                                    }}
+                                  >
+                                    ⇄ 发起交易
+                                  </button>
+                                  <button
                                     disabled={
+                                      !canManage ||
                                       disabled ||
-                                      !!a.disabled ||
-                                      (a.action.type === 'bid' && !!bidReason)
+                                      map.tiles[me.position].kind !== 'shop'
                                     }
                                     title={
-                                      a.disabled ??
-                                      (a.action.type === 'bid' ? bidReason || a.hint : a.hint)
+                                      map.tiles[me.position].kind !== 'shop'
+                                        ? '抵达卡牌商店后可购买'
+                                        : '购买指定卡牌'
                                     }
-                                    onClick={() =>
-                                      command(
-                                        a.action.type === 'bid'
-                                          ? { type: 'bid', amount: bid }
-                                          : a.action,
-                                      )
-                                    }
+                                    onClick={() => setDialog('shop')}
                                   >
-                                    {pending ? '等待确认…' : a.label}
+                                    ♧ 卡牌商店
                                   </button>
-                                  {hints && <small>{a.hint}</small>}
+                                </div>
+                                <div className="hand-heading">
+                                  <b>
+                                    我的手牌 <small>{me.cardCount}/8</small>
+                                  </b>
+                                  <small>
+                                    {canManage ? '点击选择目标' : '自己的可操作阶段可使用'}
+                                  </small>
+                                </div>
+                                <div className="hand">
+                                  {me.cards?.map((id, i) => {
+                                    const c = cardById(id)!;
+                                    return (
+                                      <button
+                                        key={`${id}-${i}`}
+                                        className={`card-mini ${c.category}`}
+                                        onClick={() => openCard(id)}
+                                        title={`${c.description}；${!canManage ? '等待自己的掷骰或经营阶段' : '点击查看目标与效果'}`}
+                                      >
+                                        <span>{c.icon}</span>
+                                        <b>{c.name}</b>
+                                        <small>{CATEGORY_NAMES[c.category]}</small>
+                                      </button>
+                                    );
+                                  })}
+                                  {!me.cardCount && (
+                                    <p className="hint">
+                                      手牌用完了，可在商店补充，或通过奇遇获得。
+                                    </p>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                            {!me && (
+                              <div className="tip-box">
+                                你正在观战。手牌仅本人可见，观众不能进行操作。
+                              </div>
+                            )}
+                          </>
+                        ) : panel === '资产' ? (
+                          <>
+                            <Assets
+                              game={g}
+                              me={me}
+                              map={map}
+                              disabled={disabled}
+                              command={command}
+                              select={setSelectedTile}
+                            />
+                          </>
+                        ) : panel === '聊天' ? (
+                          <Chat
+                            room={room}
+                            chat={chat}
+                            setChat={setChat}
+                            send={() => {
+                              connection.current!.send('chat', chat);
+                              setChat('');
+                            }}
+                            disabled={disabled}
+                          />
+                        ) : (
+                          <div className="event-feed" aria-live="polite">
+                            {[...g.events]
+                              .reverse()
+                              .slice(0, 30)
+                              .map((e) => (
+                                <div className={`event ${e.kind}`} key={e.id}>
+                                  <small>
+                                    {new Date(e.at).toLocaleTimeString('zh-CN', {
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })}
+                                  </small>
+                                  <span>{e.text}</span>
                                 </div>
                               ))}
                           </div>
-                          {myTurn && g.phase === 'auction' && (
-                            <label>
-                              我的竞价
-                              <input
-                                aria-label="竞价金额"
-                                type="number"
-                                min={g.auction!.highBid + 10}
-                                max={me?.cash}
-                                step={10}
-                                value={bid}
-                                inputMode="numeric"
-                                onChange={(e) => setBid(Number(e.target.value))}
-                              />
-                              {bidReason && <span className="field-error">{bidReason}</span>}
-                            </label>
-                          )}
-                          {me && (
-                            <div className="wallet">
-                              <div>
-                                <small>可用现金</small>
-                                <b>{money(me.cash)}</b>
-                              </div>
-                              <div>
-                                <small>银行存款</small>
-                                <b>{money(me.deposit)}</b>
-                              </div>
-                              <div>
-                                <small>租金护盾</small>
-                                <b>{me.shield}</b>
-                              </div>
-                            </div>
-                          )}
-                          {g.actions
-                            .filter(
-                              (a) =>
-                                !a.primary &&
-                                ![
-                                  'tradeAccept',
-                                  'tradeReject',
-                                  'ferry',
-                                  'build',
-                                  'downgrade',
-                                  'mortgage',
-                                  'redeem',
-                                ].includes(a.action.type),
-                            )
-                            .map((a, i) => (
-                              <button
-                                key={i}
-                                className="secondary full"
-                                disabled={disabled}
-                                title={a.hint}
-                                onClick={() => command(a.action)}
-                              >
-                                {a.label}
-                                <small>{a.hint}</small>
-                              </button>
-                            ))}
-                          {me && !me.bankrupt && g.phase !== 'finished' && (
-                            <>
-                              <div className="inline-actions">
-                                <button
-                                  onClick={() => {
-                                    setPanel('资产');
-                                    if (window.matchMedia('(max-width: 800px)').matches)
-                                      setSheetOpen(true);
-                                  }}
-                                >
-                                  ▤ 管理资产
-                                </button>
-                                <button
-                                  disabled={!canManage || disabled}
-                                  title={
-                                    canManage
-                                      ? '现金和无建筑地产可交易'
-                                      : '在自己的掷骰或经营阶段发起'
-                                  }
-                                  onClick={() => {
-                                    setTradeTo(
-                                      g.players.find((p) => p.id !== me.id && !p.bankrupt)?.id ??
-                                        '',
-                                    );
-                                    setGiveCash(0);
-                                    setWantCash(0);
-                                    setGiveTile('');
-                                    setWantTile('');
-                                    setDialog('trade');
-                                  }}
-                                >
-                                  ⇄ 发起交易
-                                </button>
-                                <button
-                                  disabled={
-                                    !canManage || disabled || map.tiles[me.position].kind !== 'shop'
-                                  }
-                                  title={
-                                    map.tiles[me.position].kind !== 'shop'
-                                      ? '抵达卡牌商店后可购买'
-                                      : '购买指定卡牌'
-                                  }
-                                  onClick={() => setDialog('shop')}
-                                >
-                                  ♧ 卡牌商店
-                                </button>
-                              </div>
-                              <div className="hand-heading">
-                                <b>
-                                  我的手牌 <small>{me.cardCount}/8</small>
-                                </b>
-                                <small>
-                                  {canManage ? '点击选择目标' : '自己的可操作阶段可使用'}
-                                </small>
-                              </div>
-                              <div className="hand">
-                                {me.cards?.map((id, i) => {
-                                  const c = cardById(id)!;
-                                  return (
-                                    <button
-                                      key={`${id}-${i}`}
-                                      className={`card-mini ${c.category}`}
-                                      onClick={() => openCard(id)}
-                                      title={`${c.description}；${!canManage ? '等待自己的掷骰或经营阶段' : '点击查看目标与效果'}`}
-                                    >
-                                      <span>{c.icon}</span>
-                                      <b>{c.name}</b>
-                                      <small>{CATEGORY_NAMES[c.category]}</small>
-                                    </button>
-                                  );
-                                })}
-                                {!me.cardCount && (
-                                  <p className="hint">手牌用完了，可在商店补充，或通过奇遇获得。</p>
-                                )}
-                              </div>
-                            </>
-                          )}
-                          {!me && (
-                            <div className="tip-box">
-                              你正在观战。手牌仅本人可见，观众不能进行操作。
-                            </div>
-                          )}
-                        </>
-                      ) : panel === '资产' ? (
-                        <>
-                          <Assets
-                            game={g}
-                            me={me}
-                            map={map}
-                            disabled={disabled}
-                            command={command}
-                            select={setSelectedTile}
-                          />
-                        </>
-                      ) : (
-                        <div className="event-feed" aria-live="polite">
-                          {[...g.events]
-                            .reverse()
-                            .slice(0, 30)
-                            .map((e) => (
-                              <div className={`event ${e.kind}`} key={e.id}>
-                                <small>
-                                  {new Date(e.at).toLocaleTimeString('zh-CN', {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                  })}
-                                </small>
-                                <span>{e.text}</span>
-                              </div>
-                            ))}
-                        </div>
-                      )}
-                    </section>
-                    <section className="paper">
-                      <Chat
-                        room={room}
-                        chat={chat}
-                        setChat={setChat}
-                        send={() => {
-                          connection.current!.send('chat', chat);
-                          setChat('');
-                        }}
-                        disabled={disabled}
-                      />
-                    </section>
-                  </aside>
+                        )}
+                      </section>
+                    </aside>
+                  </div>
                 </div>
                 {g.phase === 'finished' && (
                   <section className="settlement paper">
@@ -1274,7 +1294,7 @@ function App() {
                     </button>
                   </div>
                   <div className="mobile-panel-links">
-                    {['操作', '资产', '动态'].map((p) => (
+                    {['操作', '资产', '动态', '聊天'].map((p) => (
                       <button
                         key={p}
                         aria-expanded={sheetOpen && panel === p}
@@ -1865,7 +1885,7 @@ function App() {
             {
               [
                 '组建你的第一场比赛',
-                '掷骰，探索城市',
+                '掷骰，探索世界',
                 '拥有第一处地产',
                 '把资产变成收入',
                 '旅程由你来决定',

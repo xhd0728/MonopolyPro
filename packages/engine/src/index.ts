@@ -1000,7 +1000,7 @@ export function actionsFor(g: GameState, id: string): ActionOption[] {
       add(
         { type: 'buy' },
         `购买 · ${tile.price}`,
-        `基础租金 ${tile.rent}，建设费用 ${tile.buildCost}`,
+        `基础租金 ${tile.rent}，标准建设费 ${tile.buildCost}`,
         true,
       );
     add({ type: 'pass' }, '进入拍卖', '让所有玩家公开竞价');

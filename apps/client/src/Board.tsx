@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { countryFlag } from '../../../packages/content/src/index.ts';
 import type { GameView, MapDefinition } from '../../../packages/shared/src/index.ts';
 import { playerColor } from './game-ui.ts';
@@ -21,6 +21,8 @@ export function Board({
   follow,
   reduced,
   highlight = [],
+  center,
+  compactCenter,
 }: {
   map: MapDefinition;
   game?: GameView | null;
@@ -28,11 +30,18 @@ export function Board({
   follow: boolean;
   reduced: boolean;
   highlight?: number[];
+  center?: ReactNode;
+  compactCenter?: ReactNode;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
   useEffect(() => {
-    const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 620));
+    const observer = new ResizeObserver(([entry]) =>
+      setCompact(
+        entry.contentRect.width < 620 ||
+          (!!game && window.matchMedia('(max-width: 800px)').matches),
+      ),
+    );
     observer.observe(root.current!);
     return () => observer.disconnect();
   }, []);
@@ -79,6 +88,7 @@ export function Board({
       role="group"
       aria-label={`${map.name}二维国家棋盘`}
     >
+      {compact && compactCenter && <div className="compact-board-center">{compactCenter}</div>}
       <div
         className="country-board"
         style={{ '--columns': columns, '--rows': rows } as CSSProperties}
@@ -132,36 +142,40 @@ export function Board({
         </svg>
         {!compact && (
           <div className="board-center">
-            <span className="board-compass" aria-hidden="true">
-              ✥
-            </span>
-            <small>MONOPOLY PRO</small>
-            <h2>{map.name}</h2>
-            <p>{map.subtitle}</p>
-            <div className="board-legend">
-              <span>
-                <i style={{ background: groupColors[0] }} />
-                同色国家组成地产组
-              </span>
-              <span>⌂ 建筑 0–3 级 · 点击查看详情</span>
-            </div>
-            {shortcuts.length > 0 && (
-              <div className="route-guide">
-                <b>
-                  {map.mechanic === 'ferry'
-                    ? '轮渡 · 80 金币'
-                    : map.mechanic === 'gates'
-                      ? `商路${open ? '开放' : '关闭'} · 偶数轮开放`
-                      : '国际快线 · 自选岔路'}
-                </b>
-                {shortcuts.map(([from, to]) => (
-                  <span key={from}>
-                    {map.tiles[from].name} ⇢ {map.tiles[to].name}
+            {center ?? (
+              <>
+                <span className="board-compass" aria-hidden="true">
+                  ✥
+                </span>
+                <small>MONOPOLY PRO</small>
+                <h2>{map.name}</h2>
+                <p>{map.subtitle}</p>
+                <div className="board-legend">
+                  <span>
+                    <i style={{ background: groupColors[0] }} />
+                    同色国家组成地产组
                   </span>
-                ))}
-              </div>
+                  <span>⌂ 建筑 0–3 级 · 点击查看详情</span>
+                </div>
+                {shortcuts.length > 0 && (
+                  <div className="route-guide">
+                    <b>
+                      {map.mechanic === 'ferry'
+                        ? '轮渡 · 80 金币'
+                        : map.mechanic === 'gates'
+                          ? `商路${open ? '开放' : '关闭'} · 偶数轮开放`
+                          : '国际快线 · 自选岔路'}
+                    </b>
+                    {shortcuts.map(([from, to]) => (
+                      <span key={from}>
+                        {map.tiles[from].name} ⇢ {map.tiles[to].name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <span className="board-center-note">经过起点 +300 · 最后经营者 / 限时资产胜出</span>
+              </>
             )}
-            <span className="board-center-note">经过起点 +300 · 最后经营者 / 限时资产胜出</span>
           </div>
         )}
         {map.tiles.map((t) => {

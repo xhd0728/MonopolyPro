@@ -15,6 +15,17 @@ async function create(page: Page, name: string, seats = 2) {
   await expect(page.getByRole('heading', { name: '准备出发' })).toBeVisible();
   return new URL(page.url()).searchParams.get('room')!;
 }
+async function openPanel(page: Page, panel = '操作') {
+  const quick = page.getByRole('button', { name: `打开${panel}`, exact: true });
+  await expect(page.locator('.board-meta')).toBeVisible();
+  if ((page.viewportSize()?.width ?? 1440) <= 800) await quick.click();
+  else
+    await page.locator('.action-panel').getByRole('button', { name: panel, exact: true }).click();
+}
+async function closePanel(page: Page) {
+  const close = page.getByRole('button', { name: '关闭详情抽屉' });
+  if (await close.isVisible()) await close.click();
+}
 test('desktop and mobile multiplayer journey: invite, ready, card, purchase, build, trade, refresh, reconnect, atlas and settlement', async ({
   browser,
 }) => {
@@ -41,7 +52,7 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
   await expect(host.getByRole('button', { name: '开始旅程' })).toBeEnabled();
   await host.getByRole('button', { name: '开始旅程' }).click();
   await expect(host.getByRole('button', { name: '掷骰出发', exact: true })).toBeVisible();
-  await expect(guest.getByText('小筑正在操作')).toBeVisible();
+  await expect(guest.locator('.mobile-primary-row')).toContainText('等待小筑的回合');
   // Named contextual hints, authority-supplied buttons and modal targets are exercised through the UI.
   const ownCard = host.locator('.hand button:not([disabled])').first();
   await ownCard.click();
@@ -59,6 +70,7 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
   await expect(host.locator('.actions button').first()).toBeEnabled();
   for (let turn = 0; turn < 10; turn++) {
     const p = (await host.locator('.turn-prompt').innerText()).includes('轮到你了') ? host : guest;
+    await openPanel(p);
     await expect(p.locator('.actions button').first()).toBeEnabled();
     const roll = p.getByRole('button', { name: '掷骰出发', exact: true });
     if (await roll.isVisible()) {
@@ -68,20 +80,21 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
     const buy = p.getByRole('button', { name: /^购买 ·/ });
     if (await buy.isVisible()) {
       await buy.click();
-      await p.getByRole('button', { name: '资产', exact: true }).click();
+      await openPanel(p, '资产');
       const build = p.getByRole('button', { name: /^升级建筑/ }).first();
       if (await build.isVisible()) await build.click();
-      await p.getByRole('button', { name: '操作', exact: true }).click();
+      await openPanel(p);
       break;
     }
     const end = p.getByRole('button', { name: '结束回合', exact: true });
     if (await end.isVisible()) await end.click();
-    await expect(p.getByText(/正在操作/)).toBeVisible();
+    await expect(p.locator('.player-card[data-self="true"]')).not.toHaveClass(/active/);
   }
   const current = (await host.locator('.turn-prompt').innerText()).includes('轮到你了')
       ? host
       : guest,
     other = current === host ? guest : host;
+  await closePanel(current);
   await current.locator('.player-card[data-self="true"]').click();
   const financials = await current.getByLabel('资产明细').locator('strong').allTextContents();
   const [net, cash, savings, property, debt] = financials.map((v) => Number(v.replaceAll(',', '')));
@@ -89,6 +102,7 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
   expect(await current.locator('.public-property-list button').count()).toBeGreaterThan(0);
   await current.screenshot({ path: 'artifacts/ui/player-assets.png', fullPage: true });
   await current.getByRole('button', { name: '关闭玩家资料' }).click();
+  await openPanel(current);
   await current.getByRole('button', { name: '发起交易' }).click();
   await current
     .getByRole('dialog', { name: '提出一笔交易' })
@@ -107,9 +121,9 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
   await expect(other.getByRole('button', { name: '接受交易' })).toBeVisible();
   await other.getByRole('button', { name: '接受交易' }).click();
   await expect(current.getByRole('button', { name: '结束回合', exact: true })).toBeVisible();
-  await host.getByRole('button', { name: '动态', exact: true }).click();
+  await openPanel(host, '动态');
   await expect(host.locator('.event-feed').getByText(/完成交易，资产同时结算/)).toBeVisible();
-  await host.getByRole('button', { name: '操作', exact: true }).click();
+  await openPanel(host);
   await host.reload();
   await expect(host.locator('.connection')).toContainText('已同步');
   await expect(host.getByRole('button', { name: /查看1号玩家小筑的资产/ })).toContainText('我');
@@ -160,7 +174,7 @@ test('interactive tutorial can be skipped and restarted, settings and map previe
   await page.getByRole('button', { name: '添加机器人' }).click();
   await page.getByRole('button', { name: '我准备好了' }).click();
   await page.getByRole('button', { name: '开始旅程' }).click();
-  await expect(page.getByRole('region', { name: '互动教学' })).toContainText('掷骰，探索城市');
+  await expect(page.getByRole('region', { name: '互动教学' })).toContainText('掷骰，探索世界');
   await page.getByRole('button', { name: '跳过教学' }).click();
   await expect(page.getByRole('region', { name: '互动教学' })).toHaveCount(0);
   await page.getByRole('button', { name: '设置', exact: true }).click();
@@ -182,6 +196,7 @@ test('mobile country express map: real fork selection and auction input advance 
   let fork = false,
     auction = false;
   for (let turn = 0; turn < 12 && (!fork || !auction); turn++) {
+    await openPanel(page);
     await expect(page.getByRole('button', { name: '掷骰出发', exact: true })).toBeEnabled({
       timeout: 12000,
     });
@@ -192,6 +207,7 @@ test('mobile country express map: real fork selection and auction input advance 
       await accepted(page, page.getByRole('button', { name: /^前往/ }).last());
       await expect(page.locator('.actions button').first()).toBeEnabled();
     }
+    await openPanel(page);
     if (await page.getByRole('button', { name: /^进入拍卖/ }).isVisible()) {
       if (!auction) {
         await accepted(page, page.getByRole('button', { name: /^进入拍卖/ }));
@@ -203,10 +219,12 @@ test('mobile country express map: real fork selection and auction input advance 
         await accepted(page, page.getByRole('button', { name: /^出价/ }));
         await expect(page.getByRole('button', { name: /^退出竞拍/ })).toBeEnabled();
         await accepted(page, page.getByRole('button', { name: /^退出竞拍/ }));
+        await openPanel(page);
         await expect(page.getByRole('button', { name: '结束回合', exact: true })).toBeVisible();
         auction = true;
       } else {
         await accepted(page, page.getByRole('button', { name: /^购买 ·/ }));
+        await openPanel(page);
         await expect(page.getByRole('button', { name: '结束回合', exact: true })).toBeVisible();
       }
     }
@@ -272,9 +290,95 @@ test('six player finances remain readable on desktop and mobile; a second window
   await expect(replacement.locator('.connection')).toContainText('已同步');
   await expect(page.locator('.connection')).toContainText('席位已在其他窗口恢复');
   await expect(page.getByRole('button', { name: '快捷掷骰出发' })).toBeDisabled();
+  await openPanel(replacement);
   await replacement.getByRole('button', { name: '掷骰出发', exact: true }).click();
   await expect(replacement.locator('.board-meta')).not.toHaveAttribute('data-revision', '0');
   await expect(page.locator('.connection')).toContainText('席位已在其他窗口恢复');
   expect(errors).toEqual([]);
   await replacement.close();
+});
+test('the complete board and all six players fit one screen; dice and opponent actions explain themselves', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await create(page, '一屏验收', 6);
+  await expect(page.getByLabel('机器人策略')).toHaveValue('rule');
+  for (let i = 0; i < 5; i++) {
+    await page.getByRole('button', { name: '添加机器人' }).first().click();
+    await expect(page.locator('.seat')).toHaveCount(i + 2);
+  }
+  await page.getByRole('button', { name: '我准备好了' }).click();
+  await page.getByRole('button', { name: '开始旅程' }).click();
+  await expect(page.locator('.country-tile')).toHaveCount(28);
+  for (const [width, height] of [
+    [1440, 900],
+    [1366, 768],
+    [1280, 720],
+    [1024, 768],
+    [900, 768],
+    [390, 844],
+    [360, 740],
+  ]) {
+    await page.setViewportSize({ width, height });
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(() => {
+            const tiles = [...document.querySelectorAll<HTMLElement>('.country-tile')];
+            const players = [...document.querySelectorAll<HTMLElement>('.player-card')];
+            const within = (e: HTMLElement) => {
+              const r = e.getBoundingClientRect();
+              return (
+                r.top >= 0 &&
+                r.left >= 0 &&
+                r.right <= innerWidth + 1 &&
+                r.bottom <= innerHeight + 1
+              );
+            };
+            return {
+              pageFits:
+                document.documentElement.scrollHeight <= innerHeight + 1 &&
+                document.documentElement.scrollWidth <= innerWidth + 1,
+              boardFits: tiles.length === 28 && tiles.every(within),
+              playersFit: players.length === 6 && players.every(within),
+              tileContentFits: tiles.every((t) => t.scrollHeight <= t.clientHeight + 1),
+              diceVisible: [...document.querySelectorAll<HTMLElement>('.dice-stage')].some(
+                (d) => d.getClientRects().length > 0 && within(d),
+              ),
+            };
+          }),
+        { message: `${width}x${height} must show the entire game` },
+      )
+      .toEqual({
+        pageFits: true,
+        boardFits: true,
+        playersFit: true,
+        tileContentFits: true,
+        diceVisible: true,
+      });
+    if (width === 1440 || width === 1366 || width === 390 || width === 360)
+      await page.screenshot({ path: `artifacts/ui/one-screen-${width}.png` });
+  }
+  await accepted(page, page.getByRole('button', { name: '快捷掷骰出发' }));
+  const cubes = page.locator('.dice-stage:visible .dice-cube');
+  for (const cube of await cubes.all()) {
+    const value = Number((await cube.getAttribute('aria-label'))!.split(' ')[0]);
+    expect(await cube.locator('.pip').count()).toBe(value);
+  }
+  await expect(page.locator('.dice-stage:visible')).toContainText('前进');
+  await expect(page.getByLabel('实时行动提示')).toBeVisible();
+  await openPanel(page);
+  const buy = page.getByRole('button', { name: /^购买 ·/ });
+  if (await buy.isVisible()) {
+    await accepted(page, buy);
+    await openPanel(page);
+  }
+  while (await page.getByRole('button', { name: /^前往/ }).count()) {
+    await accepted(page, page.getByRole('button', { name: /^前往/ }).first());
+    await openPanel(page);
+  }
+  await accepted(page, page.getByRole('button', { name: '结束回合', exact: true }));
+  await closePanel(page);
+  await expect(page.getByLabel('实时行动提示')).toContainText('对手行动');
+  await page.screenshot({ path: 'artifacts/ui/opponent-action.png' });
 });

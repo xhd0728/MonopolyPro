@@ -15,7 +15,16 @@ function connectionName(
   now: number,
 ) {
   if (player.bankrupt) return '已破产 · 观战';
-  if (seat?.bot) return '机器人';
+  if (seat?.bot)
+    return room.aiActivity?.playerId === player.id && room.aiActivity.state === 'thinking'
+      ? 'LLM 思考中'
+      : room.aiActivity?.playerId === player.id &&
+          room.aiActivity.state === 'fallback' &&
+          now - room.aiActivity.at < 30000
+        ? 'LLM · 规则回退'
+        : seat.botMode === 'llm'
+          ? 'LLM 机器人'
+          : '规则机器人';
   if (seat?.connected) return '在线';
   return seat &&
     (seat.takeover ||
@@ -112,6 +121,24 @@ export function PlayerRoster({
                 </span>
                 {p.debt > 0 && <span className="debt-label">待付 {money(p.debt)}</span>}
               </div>
+              <span
+                className="player-last-action"
+                title={
+                  [...g.events]
+                    .reverse()
+                    .find(
+                      (e) => e.actor === p.id && !['turn', 'move', 'start', 'ai'].includes(e.kind),
+                    )?.text ?? '尚未行动'
+                }
+              >
+                {[...g.events]
+                  .reverse()
+                  .find(
+                    (e) => e.actor === p.id && !['turn', 'move', 'start', 'ai'].includes(e.kind),
+                  )
+                  ?.text.replace(p.name, '')
+                  .trim() ?? '等待出发'}
+              </span>
               <span className="player-character">
                 {character.icon} {character.name}
               </span>
@@ -160,6 +187,16 @@ export function PlayerDetails({
         <span>
           {owned.length} 处 · {player.cardCount} 张手牌 · {player.shield} 次护盾
         </span>
+      </div>
+      <div className="player-action-history">
+        <h3>最近行动</h3>
+        {[...game.events]
+          .reverse()
+          .filter((e) => e.actor === player.id && !['turn', 'start', 'move', 'ai'].includes(e.kind))
+          .slice(0, 4)
+          .map((e) => (
+            <p key={e.id}>{e.text}</p>
+          ))}
       </div>
       <div className="public-property-list">
         {owned.map((p) => (
