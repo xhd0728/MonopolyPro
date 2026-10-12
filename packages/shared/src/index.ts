@@ -207,6 +207,7 @@ export interface Seat {
   characterId: string;
   team: number;
   bot: boolean;
+  botMode?: 'rule' | 'llm';
   ready: boolean;
   spectator: boolean;
   tokenHash: string;
@@ -243,6 +244,13 @@ export interface RoomView {
   serverNow: number;
   takeoverAfterMs: number;
   decisionTimeoutMs: number;
+  ai: { configured: boolean; model: string | null };
+  aiActivity: {
+    playerId: string;
+    state: 'thinking' | 'ready' | 'fallback';
+    message: string;
+    at: number;
+  } | null;
 }
 export interface RoomListing {
   code: string;

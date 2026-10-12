@@ -7,6 +7,10 @@ import { WebSocketTransport } from '@colyseus/ws-transport';
 import { ZodError } from 'zod';
 import { GameService, RequestError } from './service.ts';
 import { Store } from './store.ts';
+import { readAiConfig, createBotBrain } from './ai.ts';
+
+if (process.env.NODE_ENV !== 'test' && existsSync('.env')) process.loadEnvFile('.env');
+const aiConfig = readAiConfig(process.env);
 
 const numberEnv = (key: string, fallback: number, min = 1) => {
   const value = Number(process.env[key] ?? fallback);
@@ -22,6 +26,8 @@ const service = new GameService(store, {
   decisionTimeoutMs: numberEnv('DECISION_TIMEOUT_MS', 45000),
   maxRooms: numberEnv('MAX_ROOMS', 200),
   roomIdleMs: numberEnv('ROOM_IDLE_MS', 86400000),
+  brain: aiConfig ? createBotBrain(aiConfig) : undefined,
+  aiMaxConcurrent: numberEnv('MONOPOLY_AI_MAX_CONCURRENT', 4),
 });
 const app = express();
 app.disable('x-powered-by');
@@ -279,6 +285,7 @@ async function shutdown() {
   stopping = true;
   clearInterval(cleanup);
   console.log(JSON.stringify({ level: 'info', event: 'shutdown' }));
+  service.dispose();
   await gameServer.gracefullyShutdown(false);
   store.close();
   process.exit(0);

@@ -14,6 +14,7 @@ import {
   createGame,
   tickGame,
   viewFor,
+  log,
 } from '../../../packages/engine/src/index.ts';
 import { botAction } from '../../../packages/engine/src/bot.ts';
 import {
@@ -30,6 +31,8 @@ import type {
   Seat,
 } from '../../../packages/shared/src/index.ts';
 import { Store } from './store.ts';
+import type { BotBrain, AiDecision } from './ai.ts';
+import { botChoices } from './bot-choices.ts';
 
 export const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 const nameSchema = z
@@ -56,8 +59,16 @@ export interface ServiceOptions {
   maxRooms: number;
   roomIdleMs: number;
   now?: () => number;
+  brain?: BotBrain;
+  aiMaxConcurrent?: number;
 }
 export class GameService {
+  private botJobs = new Map<
+    string,
+    { controller: AbortController; gameId: string; revision: number; seatId: string; epoch: number }
+  >();
+  private aiActivity = new Map<string, NonNullable<RoomView['aiActivity']>>();
+  private dirtyRooms = new Set<string>();
   private grants = new Map<string, { code: string; seatId: string; expires: number }>();
   readonly options: ServiceOptions;
   constructor(
@@ -279,6 +290,8 @@ export class GameService {
       serverNow: this.now(),
       takeoverAfterMs: this.options.takeoverMs,
       decisionTimeoutMs: this.options.decisionTimeoutMs,
+      ai: { configured: !!this.options.brain, model: this.options.brain?.model ?? null },
+      aiActivity: this.aiActivity.get(code) ?? null,
     };
   }
   lobby(code: string, id: string, input: unknown) {
@@ -298,6 +311,7 @@ export class GameService {
         ready: z.boolean().optional(),
         characterId: z.string().optional(),
         team: z.number().int().min(0).max(1).optional(),
+        botMode: z.enum(['rule', 'llm']).optional(),
         settings: settingsSchema.optional(),
         seatId: z.string().optional(),
       })
@@ -366,6 +380,8 @@ export class GameService {
       for (const s of r.seats) s.ready = s.bot;
     }
     if (data.type === 'addBot') {
+      const botMode = data.botMode ?? (this.options.brain ? 'llm' : 'rule');
+      ensure(botMode !== 'llm' || this.options.brain, '服务端尚未配置 LLM API，可选择规则机器人');
       ensure(
         host && r.seats.filter((s) => !s.spectator).length < r.settings.maxPlayers,
         '只有房主能在空位添加机器人',
@@ -377,6 +393,7 @@ export class GameService {
         characterId: CHARACTERS[index % 6].id,
         team: index % 2,
         bot: true,
+        botMode,
         ready: true,
         spectator: false,
         tokenHash: '',
@@ -441,12 +458,20 @@ export class GameService {
   }
   tick(code: string): boolean {
     const r = this.record(code);
-    let changed = false;
+    let changed = false,
+      feedback = this.dirtyRooms.delete(code);
     if (r.game) {
       const ticked = tickGame(r.game, this.env());
       if (ticked) {
         r.game = ticked;
         changed = true;
+      }
+      const job = this.botJobs.get(code);
+      if (job && !this.validJob(r, job)) {
+        job.controller.abort();
+        this.botJobs.delete(code);
+        this.aiActivity.delete(code);
+        feedback = true;
       }
       if (r.game.phase !== 'finished') {
         const offerTarget = r.game.trade && r.seats.find((s) => s.id === r.game!.trade!.to);
@@ -464,6 +489,30 @@ export class GameService {
               ? this.timeoutAction(r.game, seat.id)
               : botAction(r.game, seat.id);
           if (action) {
+            if (seat.bot && seat.botMode === 'llm' && this.options.brain) {
+              if (!this.botJobs.has(code)) {
+                if (this.botJobs.size < (this.options.aiMaxConcurrent ?? 4)) {
+                  const choices = botChoices(r.game, seat.id);
+                  if (choices.length > 1) {
+                    this.startBotJob(r, seat, choices, action);
+                    feedback = true;
+                    if (changed) this.save(r);
+                    return changed || feedback;
+                  }
+                } else {
+                  this.aiActivity.set(code, {
+                    playerId: seat.id,
+                    state: 'fallback',
+                    message: '模型忙，规则机器人继续',
+                    at: this.now(),
+                  });
+                  feedback = true;
+                }
+              } else {
+                if (changed) this.save(r);
+                return changed || feedback;
+              }
+            }
             try {
               r.game = applyAction(r.game, seat.id, action, this.env());
               changed = true;
@@ -483,7 +532,89 @@ export class GameService {
       }
     }
     if (changed) this.save(r);
-    return changed;
+    return changed || feedback;
+  }
+  private validJob(
+    r: RoomRecord,
+    job: { gameId: string; revision: number; seatId: string; epoch: number },
+  ) {
+    const seat = r.seats.find((s) => s.id === job.seatId);
+    return (
+      r.game?.id === job.gameId &&
+      r.game.revision === job.revision &&
+      r.game.phase !== 'finished' &&
+      !!seat?.bot &&
+      seat.botMode === 'llm' &&
+      seat.controlEpoch === job.epoch &&
+      (r.game.trade?.to ?? actingPlayerId(r.game)) === seat.id
+    );
+  }
+  private startBotJob(r: RoomRecord, seat: Seat, choices: GameAction[], fallback: GameAction) {
+    const game = r.game!,
+      code = r.code;
+    const job = {
+      controller: new AbortController(),
+      gameId: game.id,
+      revision: game.revision,
+      seatId: seat.id,
+      epoch: seat.controlEpoch,
+    };
+    this.botJobs.set(code, job);
+    this.aiActivity.set(code, {
+      playerId: seat.id,
+      state: 'thinking',
+      message: 'LLM 正在思考，服务端会校验操作',
+      at: this.now(),
+    });
+    const finish = (decision: AiDecision) => {
+      if (this.botJobs.get(code) !== job) return;
+      this.botJobs.delete(code);
+      const latest = this.store.get(code);
+      if (!latest || !this.validJob(latest, job) || job.controller.signal.aborted) {
+        this.aiActivity.delete(code);
+        this.dirtyRooms.add(code);
+        return;
+      }
+      try {
+        try {
+          latest.game = applyAction(latest.game!, seat.id, decision.action, this.env());
+        } catch {
+          latest.game = applyAction(latest.game!, seat.id, fallback, this.env());
+          decision = { action: fallback, source: 'rule', message: '模型操作无效，规则机器人继续' };
+        }
+        log(
+          latest.game,
+          this.env(),
+          'ai',
+          `${seat.name}：${decision.source === 'llm' ? 'LLM 已完成决策' : '规则机器人接管本次决策'}`,
+          seat.id,
+        );
+        this.save(latest);
+        this.aiActivity.set(code, {
+          playerId: seat.id,
+          state: decision.source === 'llm' ? 'ready' : 'fallback',
+          message: decision.message,
+          at: this.now(),
+        });
+      } catch {
+        this.aiActivity.set(code, {
+          playerId: seat.id,
+          state: 'fallback',
+          message: '操作尚未确认，将按最新局面重试',
+          at: this.now(),
+        });
+      }
+      this.dirtyRooms.add(code);
+    };
+    void this.options
+      .brain!.choose(viewFor(game, seat.id), choices, fallback, job.controller.signal)
+      .then(finish, () =>
+        finish({ action: fallback, source: 'rule', message: '模型暂不可用，规则机器人继续' }),
+      );
+  }
+  dispose() {
+    for (const job of this.botJobs.values()) job.controller.abort();
+    this.botJobs.clear();
   }
   private timeoutAction(g: NonNullable<RoomRecord['game']>, id: string): GameAction | null {
     if (actingPlayerId(g) !== id) return null;
@@ -504,6 +635,9 @@ export class GameService {
         (this.now() - r.createdAt > 60000 && !r.game && !r.seats.some((s) => s.connected || s.bot))
       ) {
         this.store.remove(r.code);
+        this.botJobs.get(r.code)?.controller.abort();
+        this.botJobs.delete(r.code);
+        this.aiActivity.delete(r.code);
         removed.push(r.code);
       }
     }
