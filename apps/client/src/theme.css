@@ -474,3 +474,109 @@ label {
     border: 1px solid var(--line);
   }
 }
+
+/* ---------- Roster feedback: whose turn, and money moving ---------- */
+.match-page .player-card {
+  position: relative;
+  transition:
+    box-shadow 0.2s,
+    transform 0.2s;
+}
+.match-page .player-card.active {
+  border-color: var(--saffron);
+  background: #fffaf0;
+  box-shadow:
+    0 0 0 3px var(--saffron),
+    0 6px 16px #f5b62e40;
+  transform: translateX(3px);
+}
+.match-page .player-card.active .player-card-top > b::before {
+  content: '▶ ';
+  color: var(--saffron);
+}
+.match-page .player-card.gain {
+  animation: card-gain 0.9s ease-out;
+}
+.match-page .player-card.loss {
+  animation: card-loss 0.9s ease-out;
+}
+@keyframes card-gain {
+  20% {
+    background: #dff5e9;
+  }
+}
+@keyframes card-loss {
+  20% {
+    background: #fbe3df;
+  }
+}
+.cash-delta {
+  position: absolute;
+  top: -9px;
+  right: 10px;
+  z-index: 2;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--num);
+  font-size: 15px;
+  font-weight: 800;
+  color: #fff;
+  pointer-events: none;
+  animation: delta-float 1.9s ease-out forwards;
+}
+.cash-delta.up {
+  background: #15855a;
+}
+.cash-delta.down {
+  background: #c2412f;
+}
+@keyframes delta-float {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.8);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(0) scale(1.1);
+  }
+  25% {
+    transform: scale(1);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+}
+@media (max-width: 800px) {
+  .cash-delta {
+    top: -6px;
+    right: 4px;
+    font-size: 12px;
+    padding: 1px 6px;
+  }
+  .match-page .player-card.active {
+    transform: none;
+  }
+}
+[data-reduced-motion='true'] .player-card,
+[data-reduced-motion='true'] .cash-delta {
+  animation: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .match-page .player-card,
+  .cash-delta {
+    animation: none !important;
+  }
+}
+/* Room for the floating chips and the active ring inside the scrolling roster. */
+.match-page .player-cards {
+  padding: 10px 6px 4px 2px;
+}
+@media (max-width: 800px) {
+  .match-page .player-cards {
+    padding: 7px 2px 2px;
+  }
+}

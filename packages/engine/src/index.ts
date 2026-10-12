@@ -1,6 +1,7 @@
 import { BOARD, CARDS, cardById, characterById, mapById } from '../../content/src/index.ts';
 import type {
   ActionOption,
+  GameEvent,
   GameAction,
   GameState,
   GameView,
@@ -33,6 +34,7 @@ export function log(
   actor?: string,
   amount?: number,
   path?: number[],
+  meta?: Pick<GameEvent, 'spot' | 'tile' | 'card'>,
 ) {
   g.events.push({
     id: g.nextEvent++,
@@ -42,6 +44,7 @@ export function log(
     ...(actor !== undefined ? { actor } : {}),
     ...(amount !== undefined ? { amount } : {}),
     ...(path !== undefined ? { path } : {}),
+    ...meta,
   });
   if (g.events.length > 120) g.events.splice(0, g.events.length - 120);
 }
@@ -182,12 +185,13 @@ function charge(
   creditorId: string | null,
   env: EngineEnvironment,
   reason: string,
+  meta?: Pick<GameEvent, 'spot' | 'tile' | 'card'>,
 ) {
   if (p.cash >= amount) {
     p.cash -= amount;
     if (creditorId) playerById(g, creditorId)!.cash += amount;
     else g.pot += amount;
-    log(g, env, 'payment', `${p.name}：${reason} −${amount}`, p.id, -amount);
+    log(g, env, 'payment', `${p.name}：${reason} −${amount}`, p.id, -amount, undefined, meta);
   } else {
     g.debt = { playerId: p.id, amount, creditorId, reason };
     setPhase(g, 'debt', env);
@@ -337,12 +341,25 @@ function sendToJail(g: GameState, p: PlayerState, env: EngineEnvironment, reason
     p.id,
     undefined,
     [BOARD.jail],
+    { spot: 'jail', tile: BOARD.jail },
   );
 }
 function releaseFromJail(g: GameState, p: PlayerState, env: EngineEnvironment, how: string) {
   p.jailTurns = 0;
   if (g.phase === 'jail') setPhase(g, 'roll', env);
-  log(g, env, 'jail', `${p.name}${how}，离开${tileAt(g, BOARD.jail).name}`, p.id);
+  log(
+    g,
+    env,
+    'jail',
+    `${p.name}${how}，离开${tileAt(g, BOARD.jail).name}`,
+    p.id,
+    undefined,
+    undefined,
+    {
+      spot: 'release',
+      tile: BOARD.jail,
+    },
+  );
 }
 function land(g: GameState, env: EngineEnvironment) {
   const p = currentPlayer(g),
@@ -370,7 +387,11 @@ function land(g: GameState, env: EngineEnvironment) {
       if (p.shield > 0) {
         p.shield--;
         log(g, env, 'shield', `${p.name}的护盾免除了本次租金`, p.id);
-      } else charge(g, p, rentOf(g, property, p), owner.id, env, `向${owner.name}支付租金`);
+      } else
+        charge(g, p, rentOf(g, property, p), owner.id, env, `向${owner.name}支付租金`, {
+          spot: 'rent',
+          tile: p.position,
+        });
     }
     return;
   }
@@ -428,7 +449,11 @@ function land(g: GameState, env: EngineEnvironment) {
     if (g.pot > 0) {
       const pot = g.pot;
       g.pot = 0;
-      reward(g, p, pot, env, '领取免费停车场奖池');
+      p.cash += pot;
+      log(g, env, 'money', `${p.name}领走免费停车场奖池 +${pot}`, p.id, pot, undefined, {
+        spot: 'pot',
+        tile: p.position,
+      });
     } else log(g, env, 'map', `${p.name}在免费停车场休息，奖池暂时为空`, p.id);
   } else if (tile.kind === 'jail') log(g, env, 'map', `${p.name}只是路过拘留所探访`, p.id);
   else if (tile.kind === 'transit')
@@ -482,6 +507,8 @@ function advanceAuction(g: GameState, env: EngineEnvironment, preserveBidder = f
         `${p.name}以 ${a.highBid} 竞得${tileAt(g, a.tile).name}`,
         p.id,
         -a.highBid,
+        undefined,
+        { spot: 'purchase', tile: a.tile },
       );
     } else log(g, env, 'auction', '无人出价，地产保留在市场中。');
     g.auction = null;
@@ -523,7 +550,9 @@ function bankrupt(g: GameState, p: PlayerState, env: EngineEnvironment) {
   for (const [tile, trap] of Object.entries(g.traps))
     if (trap.owner === p.id) delete g.traps[Number(tile)];
   if (g.trade && [g.trade.from, g.trade.to].includes(p.id)) g.trade = null;
-  log(g, env, 'bankrupt', `${p.name}结束经营，可继续观战`, p.id);
+  log(g, env, 'bankrupt', `${p.name}结束经营，可继续观战`, p.id, undefined, undefined, {
+    spot: 'bankrupt',
+  });
   if (g.debt?.playerId === p.id) g.debt = null;
   if (!checkWinner(g, env)) {
     if (g.auction) {
@@ -692,6 +721,12 @@ function cardAction(
     'card',
     `${p.name}使用「${card.name}」${target.id !== p.id ? `，目标：${target.name}` : property ? `，目标：${tileAt(g, property.tile).name}` : ''}`,
     p.id,
+    undefined,
+    undefined,
+    // Cards aimed at someone else are table-wide news; self cards stay in the ticker.
+    target.id !== p.id || (property && property.owner !== p.id)
+      ? { spot: 'card', card: card.id, ...(property ? { tile: property.tile } : {}) }
+      : { card: card.id },
   );
 }
 
@@ -813,7 +848,16 @@ export function applyAction(
       p.cash -= tile.price;
       property.owner = p.id;
       setPhase(g, 'manage', env);
-      log(g, env, 'purchase', `${p.name}买下${tile.name}，花费 ${tile.price}`, p.id, -tile.price);
+      log(
+        g,
+        env,
+        'purchase',
+        `${p.name}买下${tile.name}，花费 ${tile.price}`,
+        p.id,
+        -tile.price,
+        undefined,
+        { spot: 'purchase', tile: p.position },
+      );
       break;
     }
     case 'pass':
@@ -871,6 +915,8 @@ export function applyAction(
           `${p.name}升级${tile.name}至 ${property.level} 级，花费 ${cost}`,
           p.id,
           -cost,
+          undefined,
+          { spot: 'build', tile: action.tile },
         );
       } else if (action.type === 'downgrade') {
         requireRule(property.level > 0, '没有可出售的建筑');
@@ -1022,7 +1068,18 @@ export function applyAction(
         p.cash += offer.giveCash - offer.wantCash;
         if (offer.giveTile !== null) propertyAt(g, offer.giveTile)!.owner = p.id;
         if (offer.wantTile !== null) propertyAt(g, offer.wantTile)!.owner = from.id;
-        log(g, env, 'trade', `${p.name}与${from.name}完成交易，资产同时结算`, p.id);
+        log(
+          g,
+          env,
+          'trade',
+          `${p.name}与${from.name}完成交易，资产同时结算`,
+          p.id,
+          undefined,
+          undefined,
+          {
+            spot: 'trade',
+          },
+        );
       } else log(g, env, 'trade', `${p.name}结束了交易提案`, p.id);
       g.trade = null;
       break;

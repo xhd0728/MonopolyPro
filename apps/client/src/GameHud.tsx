@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { GameView, MapDefinition, RoomView } from '../../../packages/shared/src/index.ts';
 import { money, playerColor } from './game-ui.ts';
 import { CARDS } from '../../../packages/content/src/index.ts';
 import './match.css';
+import { ActionTicker } from './Feedback.tsx';
 const pips: Record<number, number[]> = {
   1: [4],
   2: [0, 8],
@@ -182,53 +183,5 @@ export function MatchHud({
   );
 }
 export function ActionAnnouncements({ game, enabled }: { game: GameView; enabled: boolean }) {
-  const seen = useRef({ gameId: game.id, event: game.nextEvent - 1 });
-  const [messages, setMessages] = useState<GameView['events']>([]);
-  useEffect(() => {
-    if (seen.current.gameId !== game.id) {
-      seen.current = { gameId: game.id, event: game.nextEvent - 1 };
-      setMessages([]);
-      return;
-    }
-    const added = game.events.filter(
-      (e) =>
-        e.id > seen.current.event && e.actor && !['turn', 'start', 'move', 'ai'].includes(e.kind),
-    );
-    seen.current.event = game.nextEvent - 1;
-    if (added.length) setMessages(added.slice(-2));
-  }, [game.id, game.revision]);
-  useEffect(() => {
-    if (!messages.length) return;
-    const timer = setTimeout(() => setMessages([]), 5500);
-    return () => clearTimeout(timer);
-  }, [messages]);
-  if (!enabled || !messages.length) return null;
-  return (
-    <div className="action-announcements" aria-live="polite" aria-label="实时行动提示">
-      {messages.map((e) => (
-        <div key={e.id}>
-          <span
-            style={{
-              background: playerColor(
-                Math.max(
-                  0,
-                  game.players.findIndex((p) => p.id === e.actor),
-                ),
-              ),
-            }}
-          >
-            {e.actor === game.viewerId ? '你的行动' : '对手行动'}
-          </span>
-          <b>{e.text}</b>
-          {e.amount !== undefined && (
-            <strong className={e.amount < 0 ? 'expense' : 'income'}>
-              {e.amount > 0 ? '+' : ''}
-              {money(e.amount)}
-            </strong>
-          )}
-          <p>{explainEvent(e)}</p>
-        </div>
-      ))}
-    </div>
-  );
+  return <ActionTicker game={game} enabled={enabled} explain={explainEvent} />;
 }

@@ -318,6 +318,9 @@ test('the complete board and all six players fit one screen; dice and opponent a
   await page.getByRole('button', { name: '开始旅程' }).click();
   await expect(page.locator('.country-tile')).toHaveCount(36);
   await expect(page.locator('.pawn')).toHaveCount(6);
+  // Every seat sees whose turn it is; the acting seat's board glows.
+  await expect(page.getByLabel('全场提示')).toContainText('轮到你了');
+  await expect(page.locator('.board-square.attention')).toBeVisible();
   await expect(page.getByRole('button', { name: '棋盘上掷骰出发' })).toBeVisible();
   for (const [width, height] of [
     [1440, 900],
@@ -386,6 +389,9 @@ test('the complete board and all six players fit one screen; dice and opponent a
   const buy = page.getByRole('button', { name: /^购买 ·/ });
   if (await buy.isVisible()) {
     await accepted(page, buy);
+    // Purchases are announced to the table and the buyer's card shows the cost.
+    await expect(page.getByLabel('全场提示')).toContainText('新地产');
+    await expect(page.locator('.player-card[data-self="true"] .cash-delta.down')).toBeVisible();
     await openPanel(page);
   }
   while (await page.getByRole('button', { name: /^前往/ }).count()) {

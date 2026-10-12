@@ -122,6 +122,21 @@ export interface PlayerState {
   abilityRound: number;
   bot: boolean;
 }
+/** Moments every seat should notice; the client spotlights them on the board. */
+export type SpotKind =
+  | 'purchase'
+  | 'build'
+  | 'rent'
+  | 'jail'
+  | 'release'
+  | 'bankrupt'
+  | 'pot'
+  | 'trade'
+  | 'card'
+  | 'chance'
+  | 'fate'
+  | 'news'
+  | 'guess';
 export interface GameEvent {
   id: number;
   at: number;
@@ -130,6 +145,11 @@ export interface GameEvent {
   actor?: string;
   amount?: number;
   path?: number[];
+  spot?: SpotKind;
+  /** Board square the moment happened on, for flags and highlights. */
+  tile?: number;
+  /** Deck or hand card id behind the moment. */
+  card?: string;
 }
 export interface DebtDecision {
   playerId: string;

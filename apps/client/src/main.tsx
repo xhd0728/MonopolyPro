@@ -28,6 +28,7 @@ import { money, cardTargetReason, validMoney, groupColor } from './game-ui.ts';
 import { MatchHud, ActionAnnouncements, phaseGuide, type HudAction } from './GameHud.tsx';
 import { api, Connection, type Credentials } from './network.ts';
 import { Clock, setServerOffset } from './clock.tsx';
+import { Headlines, useTurnAttention } from './Feedback.tsx';
 import './theme.css';
 const phaseNames = {
   roll: '掷骰出发',
@@ -403,6 +404,9 @@ function App() {
           ? '团队需均分为 2v2 或 3v3，请补齐人数并调整队伍'
           : '';
   const quickAction = g?.actions.find((a) => a.primary);
+  // This seat must decide something now: its own turn, an auction bid or an incoming trade.
+  const needsMe = !!g && g.phase !== 'finished' && (myTurn || g.trade?.to === room?.viewerId);
+  useTurnAttention(needsMe);
   const hudAction: HudAction | null =
     myTurn && quickAction && ['roll', 'jailRoll', 'buy', 'end'].includes(quickAction.action.type)
       ? {
@@ -922,6 +926,7 @@ function App() {
                               }
                               action={hudAction}
                             />
+                            <Headlines game={g} map={map} reduced={reduced} />
                             <ActionAnnouncements game={g} enabled={hints} />
                           </>
                         }
@@ -941,6 +946,7 @@ function App() {
                         }
                         onTile={clickTile}
                         reduced={reduced}
+                        attention={needsMe}
                       />
                     </section>
                     <aside className="game-sidebar">

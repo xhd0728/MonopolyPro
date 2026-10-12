@@ -325,6 +325,7 @@ export function Board({
   reduced,
   highlight = [],
   center,
+  attention = false,
 }: {
   map: MapDefinition;
   game?: GameView | null;
@@ -332,12 +333,14 @@ export function Board({
   reduced: boolean;
   highlight?: number[];
   center?: ReactNode;
+  /** The viewing seat must act: the board frame glows. */
+  attention?: boolean;
 }) {
   const gatesOpen = map.mechanic !== 'gates' || (game?.round ?? 1) % 2 === 0;
   const at = (i: number) => map.tiles[i];
   return (
     <div className="board-frame" role="group" aria-label={`${map.name}二维国家棋盘`}>
-      <div className="board-square" data-map={map.id}>
+      <div className={`board-square ${attention ? 'attention' : ''}`} data-map={map.id}>
         <div className="board-ocean">
           <div className="board-center">
             {center ?? (

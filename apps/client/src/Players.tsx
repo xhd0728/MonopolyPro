@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, type CSSProperties } from 'react';
+import { memo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { serverTime, useServerNow } from './clock.tsx';
 import type {
   GameView,
@@ -45,6 +45,30 @@ export const PlayerRoster = memo(function PlayerRoster({
 }) {
   const g = room.game!;
   const gallery = useRef<HTMLDivElement>(null);
+  // Floating +/− on every card whenever a player's cash and savings change.
+  const totals = useRef<{ gameId: string; by: Map<string, number> }>({ gameId: '', by: new Map() });
+  const [deltas, setDeltas] = useState<{ key: string; id: string; amount: number }[]>([]);
+  useEffect(() => {
+    const now = new Map(g.players.map((p) => [p.id, p.cash + p.deposit]));
+    const before = totals.current;
+    if (before.gameId === g.id) {
+      const added = g.players
+        .map((p) => ({
+          key: `${g.revision}-${p.id}`,
+          id: p.id,
+          amount: now.get(p.id)! - (before.by.get(p.id) ?? 0),
+        }))
+        .filter((d) => d.amount !== 0);
+      if (added.length)
+        setDeltas((list) => [...list.filter((d) => !added.some((a) => a.id === d.id)), ...added]);
+    }
+    totals.current = { gameId: g.id, by: now };
+  }, [g.id, g.revision]);
+  useEffect(() => {
+    if (!deltas.length) return;
+    const timer = setTimeout(() => setDeltas([]), 1900);
+    return () => clearTimeout(timer);
+  }, [deltas]);
   useEffect(() => {
     const media = window.matchMedia('(max-width: 800px)');
     const showSelf = () => {
@@ -76,16 +100,27 @@ export const PlayerRoster = memo(function PlayerRoster({
       >
         {g.players.map((p, index) => {
           const character = characterById(p.characterId),
-            seat = room.seats.find((s) => s.id === p.id);
+            seat = room.seats.find((s) => s.id === p.id),
+            delta = deltas.find((d) => d.id === p.id);
           return (
             <button
               key={p.id}
               data-self={p.id === room.viewerId}
-              className={`player-card ${g.activeId === p.id ? 'active' : ''} ${p.bankrupt ? 'bankrupt' : ''}`}
+              className={`player-card ${g.activeId === p.id ? 'active' : ''} ${p.bankrupt ? 'bankrupt' : ''} ${delta ? (delta.amount > 0 ? 'gain' : 'loss') : ''}`}
               style={{ '--player-color': playerColor(index) } as CSSProperties}
               onClick={() => inspect(p.id)}
               aria-label={`查看${index + 1}号玩家${p.name}的资产`}
             >
+              {delta && (
+                <span
+                  key={delta.key}
+                  className={`cash-delta ${delta.amount > 0 ? 'up' : 'down'}`}
+                  aria-label={`${p.name}资金${delta.amount > 0 ? '增加' : '减少'} ${money(Math.abs(delta.amount))}`}
+                >
+                  {delta.amount > 0 ? '+' : '−'}
+                  {money(Math.abs(delta.amount))}
+                </span>
+              )}
               <div className="player-card-top">
                 <span className="player-number">{index + 1}</span>
                 <b>

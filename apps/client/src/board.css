@@ -641,3 +641,161 @@
     animation: none !important;
   }
 }
+
+/* ---------- Attention: the viewing seat must act ---------- */
+.board-square.attention {
+  box-shadow:
+    0 0 0 calc(var(--u) * 0.08) #163a5c,
+    0 0 0 calc(var(--u) * 0.16) #f5b62e,
+    0 calc(var(--u) * 0.18) calc(var(--u) * 0.5) #0d2a4440;
+  animation: board-call 1.6s ease-in-out 3;
+}
+@keyframes board-call {
+  50% {
+    box-shadow:
+      0 0 0 calc(var(--u) * 0.08) #163a5c,
+      0 0 0 calc(var(--u) * 0.16) #f5b62e,
+      0 0 calc(var(--u) * 0.6) calc(var(--u) * 0.2) #f5b62e99;
+  }
+}
+.board-square.attention .hud-action:not(:disabled) {
+  animation: action-call 1.6s ease-in-out 3;
+}
+@keyframes action-call {
+  50% {
+    transform: scale(1.06);
+    box-shadow:
+      0 calc(var(--u) * 0.07) 0 #b9811a,
+      0 0 0 calc(var(--u) * 0.12) #f5b62e55;
+  }
+}
+
+/* ---------- Headline strip at the top of the ocean ---------- */
+.headline-slot {
+  position: absolute;
+  top: calc(var(--u) * 0.28);
+  left: 50%;
+  z-index: 3;
+  width: min(calc(var(--u) * 7.2), 100% - var(--u) * 0.4);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.headline {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(var(--u) * 0.18);
+  padding: calc(var(--u) * 0.12) calc(var(--u) * 0.22) calc(var(--u) * 0.12) calc(var(--u) * 0.12);
+  border-radius: calc(var(--u) * 0.18);
+  background: #fff;
+  color: var(--tile-ink);
+  box-shadow:
+    inset calc(var(--u) * 0.09) 0 0 var(--who),
+    0 calc(var(--u) * 0.1) calc(var(--u) * 0.3) #0b243b66;
+  text-align: left;
+}
+.headline.animate {
+  animation: headline-in 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.25);
+}
+@keyframes headline-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--u) * -0.4)) scale(0.92);
+  }
+}
+.headline-mark {
+  display: grid;
+  place-items: center;
+  width: calc(var(--u) * 0.72);
+  height: calc(var(--u) * 0.72);
+  margin-left: calc(var(--u) * 0.08);
+  border-radius: 50%;
+  background: #eef3f7;
+  font-size: calc(var(--u) * 0.4);
+  font-weight: 900;
+  line-height: 1;
+  color: var(--seal);
+}
+.headline-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.headline-copy b {
+  font-size: clamp(12px, calc(var(--u) * 0.24), 19px);
+  font-weight: 900;
+  color: #163a5c;
+}
+.headline-copy span {
+  font-size: clamp(11px, calc(var(--u) * 0.18), 14px);
+  color: #44525f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.headline strong {
+  font-family: 'DIN Alternate', Bahnschrift, sans-serif;
+  font-size: clamp(14px, calc(var(--u) * 0.3), 24px);
+}
+.headline strong.income {
+  color: #15855a;
+}
+.headline strong.expense {
+  color: #c2412f;
+}
+/* Turn changes use the player's colour; your own turn is the loudest headline. */
+.headline:is(.tone-turn, .tone-myturn) .headline-mark {
+  background: var(--who);
+  color: #fff;
+}
+.headline.tone-myturn {
+  background: #f5b62e;
+  box-shadow: 0 calc(var(--u) * 0.1) calc(var(--u) * 0.4) #f5b62e88;
+}
+.headline.tone-myturn .headline-copy b {
+  font-size: clamp(15px, calc(var(--u) * 0.32), 24px);
+}
+.headline.tone-myturn .headline-copy span {
+  color: #163a5c;
+}
+.headline:is(.tone-jail, .tone-bankrupt) .headline-mark {
+  background: #fbe3df;
+}
+.headline:is(.tone-chance, .tone-fate, .tone-news) .headline-mark {
+  background: #efe6fb;
+  color: #7a4fc4;
+}
+/* Ticker lines fade out on their own instead of blinking away together. */
+.action-announcements > div {
+  animation:
+    note-in 0.25s ease-out,
+    note-out 0.4s ease-in 5.6s forwards;
+}
+@keyframes note-out {
+  to {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+/* Small boards: one line. Turn changes keep their title; other moments show the sentence. */
+@container (max-width: 560px) {
+  .headline:is(.tone-turn, .tone-myturn) .headline-copy span,
+  .headline:not(.tone-turn, .tone-myturn) .headline-copy b {
+    display: none;
+  }
+  .headline:not(.tone-turn, .tone-myturn) .headline-copy span {
+    color: var(--tile-ink);
+    font-weight: 700;
+  }
+}
+[data-reduced-motion='true'] .board-square.attention,
+[data-reduced-motion='true'] .hud-action {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .board-square.attention,
+  .hud-action,
+  .headline.animate {
+    animation: none;
+  }
+}
