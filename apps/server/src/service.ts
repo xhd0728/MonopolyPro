@@ -20,10 +20,12 @@ import { botAction } from '../../../packages/engine/src/bot.ts';
 import {
   commandSchema,
   DEFAULT_SETTINGS,
+  EMOTES,
   settingsSchema,
 } from '../../../packages/shared/src/index.ts';
 import type {
   CommandResult,
+  EmoteView,
   GameAction,
   GameView,
   RoomListing,
@@ -42,6 +44,8 @@ const nameSchema = z
   .min(1)
   .max(16)
   .refine((s) => !/[\u0000-\u001f<>]/.test(s), '昵称包含无效字符');
+const EMOTE_COOLDOWN_MS = 2500,
+  EMOTE_SHOW_MS = 6000;
 export class RequestError extends Error {
   constructor(
     message: string,
@@ -72,6 +76,8 @@ export class GameService {
   private dirtyRooms = new Set<string>();
   private takeoverSignatures = new Map<string, string>();
   private grants = new Map<string, { code: string; seatId: string; expires: number }>();
+  private emotes = new Map<string, EmoteView[]>();
+  private emoteAt = new Map<string, number>();
   readonly options: ServiceOptions;
   constructor(
     readonly store: Store,
@@ -309,6 +315,7 @@ export class GameService {
       takeoverAfterMs: this.options.takeoverMs,
       decisionTimeoutMs: this.options.decisionTimeoutMs,
       ai: { configured: !!this.options.brain, model: this.options.brain?.model ?? null },
+      emotes: (this.emotes.get(r.code) ?? []).filter((e) => this.now() - e.at < EMOTE_SHOW_MS),
       aiActivity: this.aiActivity.get(code) ?? null,
     };
   }
@@ -450,7 +457,9 @@ export class GameService {
     }
     let result: CommandResult;
     try {
-      ensure(cmd.revision === r.game.revision, '局面已更新，请按最新提示重新操作', 409);
+      // Side guesses never change the revision, so they are accepted against any revision.
+      if (cmd.action.type !== 'guess')
+        ensure(cmd.revision === r.game.revision, '局面已更新，请按最新提示重新操作', 409);
       r.game = applyAction(r.game, id, cmd.action, this.env());
       result = { id: cmd.id, ok: true, revision: r.game.revision };
     } catch (error) {
@@ -464,6 +473,21 @@ export class GameService {
     r.updatedAt = this.now();
     this.store.save(r, { playerId: id, id: cmd.id, fingerprint, result });
     return result;
+  }
+  /** Rate-limited reactions; kept in memory for a few seconds and broadcast with views. */
+  emote(code: string, id: string, input: unknown) {
+    const emote = z.enum(EMOTES).parse(input);
+    const r = this.peek(code),
+      seat = r.seats.find((s) => s.id === id);
+    ensure(seat, '席位不存在');
+    const key = `${r.code}:${id}`,
+      now = this.now();
+    const last = this.emoteAt.get(key);
+    ensure(last === undefined || now - last >= EMOTE_COOLDOWN_MS, '表情发送太快，稍等一下');
+    this.emoteAt.set(key, now);
+    const list = (this.emotes.get(r.code) ?? []).filter((e) => now - e.at < EMOTE_SHOW_MS);
+    list.push({ id: randomUUID(), seatId: id, emote, at: now });
+    this.emotes.set(r.code, list.slice(-12));
   }
   chat(code: string, id: string, input: unknown) {
     const text = z.string().trim().min(1).max(200).parse(input),
@@ -702,6 +726,9 @@ export class GameService {
         this.botJobs.get(r.code)?.controller.abort();
         this.botJobs.delete(r.code);
         this.aiActivity.delete(r.code);
+        this.emotes.delete(r.code);
+        for (const key of this.emoteAt.keys())
+          if (key.startsWith(`${r.code}:`)) this.emoteAt.delete(key);
         removed.push(r.code);
       }
     }

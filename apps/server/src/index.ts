@@ -125,6 +125,12 @@ class MonopolyRoom extends Room {
         this.views();
       }),
     );
+    this.onMessage('emote', (c, data) =>
+      guard(c, () => {
+        service.emote(this.code, c.auth, data);
+        this.views();
+      }),
+    );
     this.onMessage('chat', (c, data) =>
       guard(c, () => {
         service.chat(this.code, c.auth, data);

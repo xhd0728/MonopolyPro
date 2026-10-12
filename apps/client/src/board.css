@@ -866,3 +866,85 @@
     display: none;
   }
 }
+
+/* ---------- Emotes and the guessing game ---------- */
+.pawn-emote {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  z-index: 2;
+  margin-bottom: calc(var(--u) * 0.06);
+  padding: calc(var(--u) * 0.04) calc(var(--u) * 0.08);
+  border-radius: calc(var(--u) * 0.2);
+  background: #fff;
+  box-shadow: 0 calc(var(--u) * 0.04) calc(var(--u) * 0.12) #0b243b55;
+  font-size: calc(var(--u) * 0.42);
+  line-height: 1;
+  transform: translateX(-50%);
+  animation: emote-pop 3.5s ease-out forwards;
+}
+@keyframes emote-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 6px) scale(0.6);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1.15);
+  }
+  18% {
+    transform: translate(-50%, 0) scale(1);
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+}
+.guess-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--u) * 0.1) calc(var(--u) * 0.2);
+  padding: calc(var(--u) * 0.1) calc(var(--u) * 0.2);
+  border-radius: calc(var(--u) * 0.16);
+  background: #0e2f4ccc;
+  color: #fff;
+  font-size: clamp(11px, calc(var(--u) * 0.19), 15px);
+}
+.guess-panel > span:first-child {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+.guess-panel small {
+  color: #b9d6ea;
+  font-size: clamp(10px, calc(var(--u) * 0.15), 12px);
+}
+.guess-buttons {
+  display: flex;
+  gap: calc(var(--u) * 0.1);
+}
+.guess-buttons button {
+  min-height: 34px;
+  padding: 0 calc(var(--u) * 0.2);
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  color: #163a5c;
+  font-weight: 800;
+}
+.guess-buttons button:hover:not(:disabled) {
+  background: #f5b62e;
+}
+@container (max-width: 560px) {
+  .guess-panel small {
+    display: none;
+  }
+}
+[data-reduced-motion='true'] .pawn-emote {
+  animation: none;
+}

@@ -353,12 +353,23 @@ export interface RoomView {
   takeoverAfterMs: number;
   decisionTimeoutMs: number;
   ai: { configured: boolean; model: string | null };
+  /** Reactions from the last few seconds (memory only, never persisted). */
+  emotes: EmoteView[];
   aiActivity: {
     playerId: string;
     state: 'thinking' | 'ready' | 'fallback';
     message: string;
     at: number;
   } | null;
+}
+/** Fixed, wordless reactions; nothing to moderate. */
+export const EMOTES = ['👍', '😂', '😮', '😭', '😤', '🎉', '🙏', '💸'] as const;
+export type Emote = (typeof EMOTES)[number];
+export interface EmoteView {
+  id: string;
+  seatId: string;
+  emote: Emote;
+  at: number;
 }
 export interface RoomListing {
   code: string;
@@ -393,6 +404,7 @@ export const actionSchema = z.discriminatedUnion('type', [
     ]),
   }),
   z.object({ type: z.literal('choosePath'), tile }),
+  z.object({ type: z.literal('guess'), pick: z.enum(['high', 'low']) }),
   z.object({ type: z.literal('bid'), amount }),
   z.object({ type: z.literal(['build', 'downgrade', 'mortgage', 'redeem']), tile }),
   z.object({ type: z.literal('bank'), amount, direction: z.enum(['deposit', 'withdraw']) }),

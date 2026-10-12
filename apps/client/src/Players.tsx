@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { serverTime, useServerNow } from './clock.tsx';
 import type {
+  EmoteView,
   GameView,
   MapDefinition,
   PlayerView,
@@ -39,9 +40,11 @@ function OfflineClock({ children }: { children: (now: number) => string }) {
 export const PlayerRoster = memo(function PlayerRoster({
   room,
   inspect,
+  emotes = {},
 }: {
   room: RoomView;
   inspect: (id: string) => void;
+  emotes?: Record<string, EmoteView>;
 }) {
   const g = room.game!;
   const gallery = useRef<HTMLDivElement>(null);
@@ -112,6 +115,15 @@ export const PlayerRoster = memo(function PlayerRoster({
               onClick={() => inspect(p.id)}
               aria-label={`查看${index + 1}号玩家${p.name}的资产`}
             >
+              {emotes[p.id] && (
+                <span
+                  key={emotes[p.id].id}
+                  className="card-emote"
+                  aria-label={`${p.name}发送了${emotes[p.id].emote}`}
+                >
+                  {emotes[p.id].emote}
+                </span>
+              )}
               {delta && (
                 <span
                   key={delta.key}

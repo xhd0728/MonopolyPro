@@ -620,3 +620,85 @@ label {
   color: #1d5b86;
   font-weight: 700;
 }
+
+.emote-bar {
+  position: relative;
+}
+.emote-toggle {
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ocean);
+}
+.emote-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: repeat(4, 40px);
+  gap: 4px;
+  padding: 6px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 24px #163a5c33;
+}
+.emote-menu button {
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  font-size: 22px;
+  background: #f4f7fa;
+}
+.card-emote {
+  position: absolute;
+  left: -6px;
+  top: -10px;
+  z-index: 3;
+  font-size: 22px;
+  filter: drop-shadow(0 2px 3px #163a5c44);
+  animation: card-emote 3.5s ease-out forwards;
+}
+@keyframes card-emote {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  10% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+  20% {
+    transform: scale(1);
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.prophet-title {
+  font-weight: 700;
+  color: var(--navy);
+}
+@media (max-width: 800px) {
+  .board-meta .emote-bar {
+    margin-left: auto;
+  }
+  .emote-menu {
+    grid-template-columns: repeat(4, 44px);
+  }
+  .emote-menu button {
+    min-height: 44px;
+  }
+}
+[data-reduced-motion='true'] .card-emote {
+  animation: none;
+}
+/* The emote menu opens below the meta strip, so the strip must not clip it. */
+.match-page .board-meta {
+  overflow: visible;
+}

@@ -380,7 +380,31 @@ function checkWinner(g: GameState, env: EngineEnvironment): boolean {
   }
   return false;
 }
+function resolveGuesses(g: GameState, die: number, env: EngineEnvironment) {
+  const result = die >= 4 ? 'high' : 'low';
+  const right = g.players.filter((x) => !x.bankrupt && g.guesses[x.id] === result);
+  g.guesses = {};
+  if (!right.length) return;
+  for (const x of right) {
+    x.prophet++;
+    if (x.prophet <= BOARD.guessCap) {
+      x.cash += BOARD.guessReward;
+      log(g, env, 'money', `${x.name}猜中点数 +${BOARD.guessReward}`, x.id, BOARD.guessReward);
+    }
+  }
+  log(
+    g,
+    env,
+    'guess',
+    `猜「${result === 'high' ? '大' : '小'}」猜中了：${right.map((x) => x.name).join('、')}`,
+    undefined,
+    undefined,
+    undefined,
+    { spot: 'guess' },
+  );
+}
 function advanceTurn(g: GameState, env: EngineEnvironment) {
+  g.guesses = {};
   if (checkWinner(g, env)) return;
   g.trade = null;
   g.debt = null;
@@ -1070,6 +1094,14 @@ export function applyAction(
   }
   const p = playerById(g, playerId);
   requireRule(p && !p.bankrupt, '此席位无法操作');
+  if (action.type === 'guess') {
+    // A free side guess by a waiting player. It does not advance the revision, so it can
+    // never make the acting player's command stale.
+    requireRule(g.phase === 'roll' && currentPlayer(g).id !== p.id, '只能在别人掷骰前猜点数');
+    requireRule(!g.guesses[p.id], '本回合已经猜过了');
+    g.guesses[p.id] = action.pick;
+    return g;
+  }
   if (g.trade && env.now >= g.trade.expiresAt) g.trade = null;
   requireRule(
     !g.trade || ['tradeAccept', 'tradeReject', 'surrender'].includes(action.type),
@@ -1144,6 +1176,7 @@ export function applyAction(
         `${p.name}掷出 ${die} 点${p.characterId === 'runner' ? '，漫游者额外 +1' : ''}`,
         p.id,
       );
+      resolveGuesses(g, die, env);
       move(g, die + (p.characterId === 'runner' ? 1 : 0), env);
       break;
     }

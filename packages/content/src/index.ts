@@ -74,6 +74,9 @@ export const BOARD = {
   salary: 500,
   bail: 100,
   jailEscapeFace: 6,
+  /** 猜一猜: reward per correct free guess, paid at most this many times a match. */
+  guessReward: 30,
+  guessCap: 5,
 } as const;
 // Clockwise ring on a 10x10 grid: top row left→right, right column down, bottom row
 // right→left, left column up. Corners sit at 0 / 9 / 18 / 27.

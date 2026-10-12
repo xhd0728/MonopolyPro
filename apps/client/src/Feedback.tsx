@@ -1,11 +1,16 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { CARDS, countryFlag, deckCardById, newsById } from '../../../packages/content/src/index.ts';
-import type {
-  GameEvent,
-  GameView,
-  MapDefinition,
-  SpotKind,
+import {
+  EMOTES,
+  type Emote,
+  type EmoteView,
+  type GameEvent,
+  type GameView,
+  type MapDefinition,
+  type RoomView,
+  type SpotKind,
 } from '../../../packages/shared/src/index.ts';
+import { serverTime } from './clock.tsx';
 import { money, playerColor } from './game-ui.ts';
 
 /** Events added since the previous revision this component saw (empty after a new match). */
@@ -84,6 +89,7 @@ export function Headlines({
 }) {
   const fresh = useFreshEvents(game);
   const [queue, setQueue] = useState<Headline[]>([]);
+  const shown = useRef<{ key: string; until: number } | null>(null);
   // Empty at first so the opening turn (or the turn in progress after a refresh) is announced.
   const turnKey = useRef('');
   useEffect(() => {
@@ -133,17 +139,35 @@ export function Headlines({
       });
     }
     turnKey.current = key;
-    if (next.length) setQueue((q) => [...q, ...next].slice(-4));
+    if (!next.length) return;
+    // The viewer's own turn matters more than anything still waiting: show it right away.
+    const mine = next.find((n) => n.tone === 'myturn');
+    if (mine) {
+      shown.current = null;
+      setQueue([mine]);
+      return;
+    }
+    setQueue((q) => [...q, ...next.filter((n) => !q.some((x) => x.key === n.key))].slice(-3));
   }, [fresh]);
   const current = queue[0];
+  // Each headline gets an absolute deadline when it reaches the front. One interval drops it,
+  // so re-renders, duplicate keys or bursts of views can never keep a headline up.
+  if (current && shown.current?.key !== current.key) {
+    // Readable when calm; when more is waiting, keep pace with the board (bots act ~1.2s apart).
+    const read = ['chance', 'fate', 'news'].includes(current.tone) ? 3000 : 2200;
+    shown.current = { key: current.key, until: Date.now() + (queue.length > 1 ? 1000 : read) };
+  }
+  const busy = queue.length > 0;
   useEffect(() => {
-    if (!current) return;
-    // Busy queues move faster so headlines never lag far behind the board.
-    // Drawn cards stay a little longer so everyone can read them.
-    const read = ['chance', 'fate', 'news'].includes(current.tone) ? 3200 : 2300;
-    const timer = setTimeout(() => setQueue((q) => q.slice(1)), queue.length > 2 ? 1300 : read);
-    return () => clearTimeout(timer);
-  }, [current?.key, queue.length > 2]);
+    if (!busy) return;
+    const timer = setInterval(() => {
+      if (shown.current && Date.now() >= shown.current.until) {
+        shown.current = null;
+        setQueue((q) => q.slice(1));
+      }
+    }, 200);
+    return () => clearInterval(timer);
+  }, [busy]);
   if (!current) return null;
   return (
     <div className="headline-slot" aria-live="polite" aria-label="全场提示">
@@ -261,4 +285,58 @@ export function useTurnAttention(needsMe: boolean) {
       document.title = base;
     };
   }, [needsMe]);
+}
+
+/** Emotes from the last few seconds, keyed by seat. Expires locally even without new views. */
+export function useLiveEmotes(emotes: EmoteView[], enabled: boolean) {
+  const [, tick] = useState(0);
+  const live = enabled ? emotes.filter((e) => serverTime() - e.at < EMOTE_LIFE_MS) : [];
+  const key = live.map((e) => e.id).join(',');
+  const newest = live.at(-1)?.at;
+  useEffect(() => {
+    if (newest === undefined) return;
+    const wait = Math.max(50, newest + EMOTE_LIFE_MS - serverTime());
+    const timer = setTimeout(() => tick((n) => n + 1), wait);
+    return () => clearTimeout(timer);
+  }, [key]);
+  // Stable identity while the set of live emotes is unchanged keeps memoized panels quiet.
+  return useMemo(() => {
+    const bySeat: Record<string, EmoteView> = {};
+    for (const e of live) bySeat[e.seatId] = e;
+    return bySeat;
+  }, [key]);
+}
+const EMOTE_LIFE_MS = 3500;
+export function EmoteBar({ send, disabled }: { send: (emote: Emote) => void; disabled: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="emote-bar">
+      <button
+        className="text-button emote-toggle"
+        aria-expanded={open}
+        aria-label="发送表情"
+        onClick={() => setOpen(!open)}
+      >
+        😊 表情
+      </button>
+      {open && (
+        <span className="emote-menu" role="menu">
+          {EMOTES.map((emote) => (
+            <button
+              key={emote}
+              role="menuitem"
+              aria-label={`发送${emote}`}
+              disabled={disabled}
+              onClick={() => {
+                send(emote);
+                setOpen(false);
+              }}
+            >
+              {emote}
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
+  );
 }

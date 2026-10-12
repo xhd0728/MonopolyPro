@@ -260,6 +260,11 @@ test('six player finances remain readable on desktop and mobile; a second window
   const countdown = (await page.locator('.decision-timer').innerText()).match(/还剩\s*(\d+)/);
   expect(Number(countdown?.[1])).toBeLessThanOrEqual(45);
   await expect(page.locator('.country-tile.property').first()).toBeVisible();
+  // Emotes: fixed reactions, shown on the sender's card and pawn.
+  await page.getByRole('button', { name: '发送表情' }).click();
+  await page.getByRole('menuitem', { name: '发送🎉' }).click();
+  await expect(page.locator('.player-card[data-self="true"] .card-emote')).toHaveText('🎉');
+  await expect(page.locator('.pawn-emote')).toHaveText('🎉');
   await page.screenshot({ path: 'artifacts/ui/desktop-six-players.png', fullPage: true });
   const clipped = await page
     .locator('.country-tile')

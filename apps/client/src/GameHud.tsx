@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { GameView, MapDefinition, RoomView } from '../../../packages/shared/src/index.ts';
 import { money, playerColor } from './game-ui.ts';
-import { CARDS, countryFlag, newsById } from '../../../packages/content/src/index.ts';
+import { BOARD, CARDS, countryFlag, newsById } from '../../../packages/content/src/index.ts';
 import './match.css';
 import { ActionTicker } from './Feedback.tsx';
 const pips: Record<number, number[]> = {
@@ -146,11 +146,14 @@ export function MatchHud({
   map,
   rolling,
   action,
+  onGuess,
 }: {
   room: RoomView;
   map: MapDefinition;
   rolling: boolean;
   action?: HudAction | null;
+  /** Free side guess on the current roll; omitted when the viewer cannot guess. */
+  onGuess?: (pick: 'high' | 'low') => void;
 }) {
   const game = room.game!,
     guide = phaseGuide(game, map);
@@ -186,6 +189,7 @@ export function MatchHud({
         <h3>{guide.title}</h3>
         <p>{thinking ? `${thinking}正在用 LLM 思考，服务端会校验它的选择。` : guide.text}</p>
       </div>
+      {onGuess && <GuessPanel game={game} onGuess={onGuess} />}
       {action && (
         <button
           className="hud-action"
@@ -195,6 +199,48 @@ export function MatchHud({
         >
           {action.label}
         </button>
+      )}
+    </div>
+  );
+}
+/** 猜一猜: waiting players guess high or low on the current roll. Free, small capped reward. */
+function GuessPanel({
+  game,
+  onGuess,
+}: {
+  game: GameView;
+  onGuess: (pick: 'high' | 'low') => void;
+}) {
+  const active = game.players.find((p) => p.id === game.activeId);
+  const me = game.players.find((p) => p.id === game.viewerId);
+  const mine = game.viewerId ? game.guesses[game.viewerId] : undefined;
+  const picks = Object.values(game.guesses);
+  const high = picks.filter((x) => x === 'high').length,
+    low = picks.length - high;
+  const left = Math.max(0, BOARD.guessCap - (me?.prophet ?? 0));
+  return (
+    <div className="guess-panel" aria-label="猜一猜">
+      <span>
+        猜一猜：{active?.name}这一掷？
+        <small>
+          {left
+            ? `猜中 +${BOARD.guessReward}，本局还可奖励 ${left} 次`
+            : '本局奖励已满，仍可猜着玩'}
+        </small>
+      </span>
+      {mine ? (
+        <b>
+          你猜「{mine === 'high' ? '大' : '小'}」· 大 {high} / 小 {low}
+        </b>
+      ) : (
+        <span className="guess-buttons">
+          <button onClick={() => onGuess('high')} aria-label="猜大">
+            大 4–6
+          </button>
+          <button onClick={() => onGuess('low')} aria-label="猜小">
+            小 1–3
+          </button>
+        </span>
       )}
     </div>
   );

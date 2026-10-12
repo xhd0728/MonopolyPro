@@ -222,3 +222,26 @@ test('version-2 games on the 36-square board load with decks, news and guesses f
   assert.ok(g.players.every((p) => p.prophet === 0));
   store.close();
 });
+test('emotes are fixed, rate limited, shown briefly and never persisted', () => {
+  const store = new Store(':memory:');
+  let now = 1000;
+  const service = new GameService(store, { now: () => now });
+  const c = service.create({ name: '甲' });
+  service.emote(c.code, c.seatId, '🎉');
+  assert.throws(() => service.emote(c.code, c.seatId, '😂'), /太快/);
+  assert.throws(() => service.emote(c.code, c.seatId, '<b>hi</b>'));
+  assert.deepEqual(
+    service.view(c.code, c.seatId).emotes.map((e) => e.emote),
+    ['🎉'],
+  );
+  now += 3000;
+  service.emote(c.code, c.seatId, '👍');
+  now += 4000;
+  assert.deepEqual(
+    service.view(c.code, c.seatId).emotes.map((e) => e.emote),
+    ['👍'],
+    'older reactions expire',
+  );
+  assert.equal(JSON.stringify(store.get(c.code)).includes('👍'), false);
+  store.close();
+});

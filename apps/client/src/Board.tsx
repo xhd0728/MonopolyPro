@@ -6,6 +6,7 @@ import {
   shortCountryName,
 } from '../../../packages/content/src/index.ts';
 import type {
+  EmoteView,
   GameView,
   MapDefinition,
   TileDefinition,
@@ -220,10 +221,12 @@ function TokenLayer({
   game,
   map,
   reduced,
+  emotes,
 }: {
   game: GameView;
   map: MapDefinition;
   reduced: boolean;
+  emotes: Record<string, EmoteView>;
 }) {
   const live = game.players.filter((p) => !p.bankrupt);
   const [shown, setShown] = useState<Record<string, number>>(() =>
@@ -325,6 +328,11 @@ function TokenLayer({
               } as CSSProperties
             }
           >
+            {emotes[p.id] && (
+              <span key={emotes[p.id].id} className="pawn-emote">
+                {emotes[p.id].emote}
+              </span>
+            )}
             <span className="pawn-body">{characterById(p.characterId).icon}</span>
             <span className="pawn-number">{index + 1}</span>
           </span>
@@ -342,6 +350,7 @@ export function Board({
   highlight = [],
   center,
   attention = false,
+  emotes = {},
 }: {
   map: MapDefinition;
   game?: GameView | null;
@@ -351,6 +360,7 @@ export function Board({
   center?: ReactNode;
   /** The viewing seat must act: the board frame glows. */
   attention?: boolean;
+  emotes?: Record<string, EmoteView>;
 }) {
   const gatesOpen = map.mechanic !== 'gates' || (game?.round ?? 1) % 2 === 0;
   const at = (i: number) => map.tiles[i];
@@ -397,7 +407,7 @@ export function Board({
           </svg>
         )}
         <TileGrid map={map} game={game} highlight={highlight.join(',')} onTile={onTile} />
-        {game && <TokenLayer game={game} map={map} reduced={reduced} />}
+        {game && <TokenLayer game={game} map={map} reduced={reduced} emotes={emotes} />}
         {game && (
           <span className="sr-only">
             {game.players

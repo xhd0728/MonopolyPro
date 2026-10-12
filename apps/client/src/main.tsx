@@ -29,7 +29,7 @@ import { money, cardTargetReason, validMoney, groupColor } from './game-ui.ts';
 import { MatchHud, ActionAnnouncements, phaseGuide, type HudAction } from './GameHud.tsx';
 import { api, Connection, type Credentials } from './network.ts';
 import { Clock, setServerOffset } from './clock.tsx';
-import { Headlines, useTurnAttention } from './Feedback.tsx';
+import { EmoteBar, Headlines, useLiveEmotes, useTurnAttention } from './Feedback.tsx';
 import './theme.css';
 const phaseNames = {
   roll: '掷骰出发',
@@ -54,6 +54,7 @@ const kindNames = {
   gotojail: '遣返 · 直接前往拘留所',
   transit: '轮渡 · 船票 80',
 };
+const NO_EMOTES: RoomView['emotes'] = [];
 function Modal({
   title,
   children,
@@ -156,7 +157,8 @@ function App() {
   const [botMode, setBotMode] = useState<'rule' | 'llm'>('llm');
   const automaticSheet = useRef(false),
     pendingAction = useRef<GameAction | null>(null);
-  const [reduced, setReduced] = useState(localStorage.getItem('mp-reduced') === 'true'),
+  const [emotesOn, setEmotesOn] = useState(localStorage.getItem('mp-emotes') !== 'false'),
+    [reduced, setReduced] = useState(localStorage.getItem('mp-reduced') === 'true'),
     [hints, setHints] = useState(localStorage.getItem('mp-hints') !== 'false'),
     [tutorial, setTutorial] = useState<number | null>(null),
     [tutorialGame, setTutorialGame] = useState(false);
@@ -411,6 +413,9 @@ function App() {
   // This seat must decide something now: its own turn, an auction bid or an incoming trade.
   const needsMe = !!g && g.phase !== 'finished' && (myTurn || g.trade?.to === room?.viewerId);
   useTurnAttention(needsMe);
+  const liveEmotes = useLiveEmotes(room?.emotes ?? NO_EMOTES, emotesOn);
+  const canGuess =
+    !!g && !!me && !me.bankrupt && g.phase === 'roll' && g.activeId !== me.id && !g.trade;
   const hudAction: HudAction | null =
     myTurn && quickAction && ['roll', 'jailRoll', 'buy', 'end'].includes(quickAction.action.type)
       ? {
@@ -885,7 +890,7 @@ function App() {
             ) : (
               <>
                 <div className="match-workspace">
-                  <PlayerRoster room={room} inspect={inspectPlayer} />
+                  <PlayerRoster room={room} inspect={inspectPlayer} emotes={liveEmotes} />
                   <div className="game-layout">
                     <section className="board-wrap">
                       <div className="board-meta" data-revision={g.revision}>
@@ -911,6 +916,12 @@ function App() {
                           </Clock>{' '}
                           分钟剩余
                         </span>
+                        {emotesOn && (
+                          <EmoteBar
+                            disabled={!connected}
+                            send={(emote) => connection.current!.send('emote', emote)}
+                          />
+                        )}
                         <span className="meta-room invite">
                           房间 <b>{room.code}</b>
                           <button className="text-button" onClick={invite}>
@@ -929,6 +940,12 @@ function App() {
                                 ['roll', 'jailRoll'].includes(pendingAction.current?.type ?? '')
                               }
                               action={hudAction}
+                              {...(canGuess
+                                ? {
+                                    onGuess: (pick: 'high' | 'low') =>
+                                      command({ type: 'guess', pick }),
+                                  }
+                                : {})}
                             />
                             <Headlines game={g} map={map} reduced={reduced} />
                             <ActionAnnouncements game={g} enabled={hints} />
@@ -951,6 +968,7 @@ function App() {
                         onTile={clickTile}
                         reduced={reduced}
                         attention={needsMe}
+                        emotes={liveEmotes}
                       />
                     </section>
                     <aside className="game-sidebar">
@@ -1274,6 +1292,15 @@ function App() {
                       获胜！
                     </h2>
                     <p>{g.finishReason}</p>
+                    {(() => {
+                      const best = Math.max(0, ...g.players.map((p) => p.prophet));
+                      const seers = g.players.filter((p) => best > 0 && p.prophet === best);
+                      return seers.length ? (
+                        <p className="prophet-title">
+                          🔮 最佳预言家：{seers.map((p) => p.name).join('、')}（猜中 {best} 次）
+                        </p>
+                      ) : null;
+                    })()}
                     <div className="ranking">
                       {[...g.players]
                         .sort((a, b) => b.assets - a.assets)
@@ -1939,6 +1966,7 @@ function App() {
         <Modal title="让旅程更合心意" close={() => setDialog(null)}>
           {[
             { label: '减少移动动画', value: reduced, key: 'mp-reduced', set: setReduced },
+            { label: '显示表情互动', value: emotesOn, key: 'mp-emotes', set: setEmotesOn },
             { label: '显示操作情境提示', value: hints, key: 'mp-hints', set: setHints },
           ].map((s) => (
             <label className="toggle-row" key={s.key}>

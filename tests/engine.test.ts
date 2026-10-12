@@ -615,3 +615,29 @@ test('catch-up rules: subsidy for players far behind, wealth-scaled tax, travel 
     ),
   );
 });
+test('waiting players can guess the next roll for free; correct guesses earn a capped reward', () => {
+  let g = game('town', 3);
+  assert.throws(() => act(g, { type: 'guess', pick: 'high' }), /别人掷骰/);
+  const revision = g.revision;
+  g = act(g, { type: 'guess', pick: 'high' }, 'p1');
+  g = act(g, { type: 'guess', pick: 'low' }, 'p2');
+  assert.equal(g.revision, revision, 'guesses never make the roller stale');
+  assert.throws(() => act(g, { type: 'guess', pick: 'low' }, 'p1'), /已经猜过/);
+  assert.equal(viewFor(g, 'p0').guesses.p1, 'high', 'guesses are public');
+  g.players[0].nextDice = 5;
+  g.decks.chance = ['chance-dividend', ...g.decks.chance.filter((id) => id !== 'chance-dividend')];
+  g = act(g, { type: 'roll' });
+  assert.equal(g.players[1].cash, 3000 + BOARD.guessReward);
+  assert.equal(g.players[2].cash, 3000);
+  assert.equal(g.players[1].prophet, 1);
+  assert.deepEqual(g.guesses, {});
+  assert.ok(g.events.some((e) => e.spot === 'guess'));
+  // The reward stops after the cap; the count keeps going for the end-of-match title.
+  g = game('town', 3);
+  g.players[1].prophet = BOARD.guessCap;
+  g = act(g, { type: 'guess', pick: 'low' }, 'p1');
+  g.players[0].nextDice = 1;
+  g = act(g, { type: 'roll' });
+  assert.equal(g.players[1].cash, 3000);
+  assert.equal(g.players[1].prophet, BOARD.guessCap + 1);
+});
