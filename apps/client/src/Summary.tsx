@@ -43,7 +43,7 @@ export function MatchSummary({
   return (
     <section className="settlement paper" aria-label="旅程纪念册">
       <div className="eyebrow">
-        旅程纪念册 · 第 {Math.min(game.round, game.settings.rounds ?? game.round)} 轮结束
+        旅程纪念册 · 共 {game.settings.end === 'rounds' ? game.settings.rounds : game.round} 轮
       </div>
       <h2>
         {game.players

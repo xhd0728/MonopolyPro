@@ -332,3 +332,34 @@ test('reported pings show on connected human seats and only band changes trigger
   assert.equal(service.view(c.code, c.seatId).seats[0].latency, undefined);
   store.close();
 });
+test('review fixes: kicked seats cannot reconnect with an old grant; auto-play ends with the match', () => {
+  const store = new Store(':memory:');
+  const service = new GameService(store, { now: () => 1000 });
+  const h = service.create({ name: '房主' });
+  const y = service.join(h.code, { name: '玩家二' });
+  service.connected(h.code, h.seatId);
+  service.connected(h.code, y.seatId);
+  service.lobby(h.code, h.seatId, { type: 'ready' });
+  service.lobby(h.code, y.seatId, { type: 'ready' });
+  service.lobby(h.code, h.seatId, { type: 'start' });
+  const grant = service.grant(h.code, y.token);
+  service.lobby(h.code, h.seatId, { type: 'kick', seatId: y.seatId });
+  assert.throws(() => service.consumeGrant(h.code, grant.key), /凭证|机器人/);
+  assert.throws(
+    () =>
+      service.command(h.code, y.seatId, {
+        id: 'ghost-move',
+        revision: 0,
+        action: { type: 'roll' },
+      }),
+    /机器人/,
+  );
+  // Auto-play is cleared when the next match is set up.
+  service.lobby(h.code, h.seatId, { type: 'afk', afk: true });
+  const r = service.record(h.code);
+  r.game!.phase = 'finished';
+  store.save(r);
+  service.lobby(h.code, h.seatId, { type: 'newMatch' });
+  assert.equal(service.record(h.code).seats[0].afk, false);
+  store.close();
+});

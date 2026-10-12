@@ -892,3 +892,77 @@ test('match statistics count rent, purchases, builds, laps, jail visits, cards a
   // Stats are public: every viewer sees them.
   assert.equal(viewFor(g, null).players[0].stats.cards, 1);
 });
+test('review fixes: trades cannot stall the table, team targets use averages', () => {
+  // Expired offers start the cooldown too, and counters are capped.
+  let g = game('town', 3);
+  g = act(
+    g,
+    { type: 'tradeOffer', to: 'p2', giveCash: 10, wantCash: 0, giveTiles: [], wantTiles: [] },
+    'p1',
+  );
+  assert.equal(g.trade!.expiresAt, env.now + 30000, 'side trades hold the table for 30 s');
+  const later = { now: env.now + 31000, randomInt: () => 0 };
+  g = applyAction(g, 'p0', { type: 'ability' }, later);
+  assert.equal(g.trade, null);
+  assert.throws(
+    () =>
+      applyAction(
+        g,
+        'p1',
+        { type: 'tradeOffer', to: 'p2', giveCash: 10, wantCash: 0, giveTiles: [], wantTiles: [] },
+        later,
+      ),
+    /稍等/,
+  );
+  g = game('town', 2);
+  g = act(g, {
+    type: 'tradeOffer',
+    to: 'p1',
+    giveCash: 10,
+    wantCash: 0,
+    giveTiles: [],
+    wantTiles: [],
+  });
+  g = act(
+    g,
+    { type: 'tradeCounter', giveCash: 0, wantCash: 20, giveTiles: [], wantTiles: [] },
+    'p1',
+  );
+  g = act(
+    g,
+    { type: 'tradeCounter', giveCash: 15, wantCash: 0, giveTiles: [], wantTiles: [] },
+    'p0',
+  );
+  assert.throws(
+    () =>
+      act(
+        g,
+        { type: 'tradeCounter', giveCash: 0, wantCash: 12, giveTiles: [], wantTiles: [] },
+        'p1',
+      ),
+    /两次/,
+  );
+  // 3v3 at 3000 each with a 9000 target must not end on the first move.
+  g = createGame(
+    { ...DEFAULT_SETTINGS, mode: 'team', end: 'target', target: 9000 },
+    seats(6),
+    'team-target',
+    env,
+  );
+  g = act(g, { type: 'ability' });
+  assert.notEqual(g.phase, 'finished');
+  // Money owed to a player who has since gone bankrupt goes to the pot.
+  g = game('town', 3);
+  propertyAt(g, 1)!.owner = 'p1';
+  g.players[0].cash = 0;
+  g.players[0].position = 0;
+  g.players[0].nextDice = 1;
+  g = act(g, { type: 'roll' });
+  assert.equal(g.phase, 'debt');
+  g = act(g, { type: 'surrender' }, 'p1');
+  g.players[0].deposit = 1000;
+  g = act(g, { type: 'bank', direction: 'withdraw', amount: 1000 });
+  assert.equal(g.players[1].cash, 0);
+  assert.equal(g.players[1].stats.rentIn, 0);
+  assertInvariants(g);
+});

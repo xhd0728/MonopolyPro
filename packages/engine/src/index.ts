@@ -374,9 +374,10 @@ function charge(
         if (to.bankrupt) g.pot += part;
         else to.cash += part;
       });
-    } else if (creditorId) playerById(g, creditorId)!.cash += amount;
+    } else if (creditorId && !playerById(g, creditorId)!.bankrupt)
+      playerById(g, creditorId)!.cash += amount;
     else g.pot += amount;
-    if (meta?.spot === 'rent' && creditorId) {
+    if (meta?.spot === 'rent' && creditorId && !playerById(g, creditorId)!.bankrupt) {
       const owner = playerById(g, creditorId)!;
       p.stats.rentOut += amount;
       owner.stats.rentIn += amount;
@@ -480,25 +481,36 @@ function checkWinner(g: GameState, env: EngineEnvironment): boolean {
   return false;
 }
 /** Name of the player (or team) whose net worth reached the target, if any. */
-function targetReached(g: GameState): string | null {
+/**
+ * Best progress toward the target: each player's net worth, or in team games each team's
+ * average per member (so team size never decides the race).
+ */
+function targetStandings(g: GameState): { name: string; worth: number }[] {
   const alive = g.players.filter((p) => !p.bankrupt);
-  if (g.settings.mode === 'team') {
-    for (const team of [0, 1]) {
+  if (g.settings.mode === 'team')
+    return [0, 1].flatMap((team) => {
       const side = alive.filter((p) => p.team === team);
-      if (side.length && side.reduce((n, p) => n + assetsOf(g, p), 0) >= g.settings.target)
-        return team === 0 ? '青队' : '橙队';
-    }
-    return null;
-  }
-  return alive.find((p) => assetsOf(g, p) >= g.settings.target)?.name ?? null;
+      return side.length
+        ? [
+            {
+              name: team === 0 ? '青队' : '橙队',
+              worth: side.reduce((n, p) => n + assetsOf(g, p), 0) / side.length,
+            },
+          ]
+        : [];
+    });
+  return alive.map((p) => ({ name: p.name, worth: assetsOf(g, p) }));
+}
+/** Name of the leading player (or team) once they reached the target, if any. */
+function targetReached(g: GameState): string | null {
+  const best = targetStandings(g).sort((a, b) => b.worth - a.worth)[0];
+  return best && best.worth >= g.settings.target ? best.name : null;
 }
 /** Whether the match is in its last stretch: final two rounds, last five minutes, or 80% of the target. */
 export function finaleDue(g: GameState, now: number): boolean {
   if (g.settings.end === 'rounds') return g.round >= g.settings.rounds - 1;
-  if (g.settings.end === 'target') {
-    const best = Math.max(...g.players.filter((p) => !p.bankrupt).map((p) => assetsOf(g, p)));
-    return best >= g.settings.target * 0.8;
-  }
+  if (g.settings.end === 'target')
+    return Math.max(...targetStandings(g).map((x) => x.worth)) >= g.settings.target * 0.8;
   return g.endsAt - now <= 5 * 60000;
 }
 function updateFinale(g: GameState, env: EngineEnvironment) {
@@ -1116,7 +1128,7 @@ function cardAction(
       break;
     case 'teleport':
       p.position = mapOf(g).corners.start;
-      reward(g, p, salaryOf(g), env, '回到起点');
+      paySalary(g, p, env);
       break;
     case 'dice':
       requireRule(
@@ -1237,7 +1249,20 @@ function cardAction(
 }
 
 export const TRADE_COOLDOWN_MS = 15000,
-  TRADE_OFFER_MS = 60000;
+  TRADE_OFFER_MS = 60000,
+  /** Offers between two players who are not on turn hold up the table for less time. */
+  SIDE_TRADE_MS = 30000,
+  MAX_COUNTERS = 2;
+/** An unanswered offer lapses: the proposer waits before offering again, and the clock resets. */
+function expireTrade(g: GameState, env: EngineEnvironment) {
+  const offer = g.trade!;
+  g.tradeMemo[offer.from] = {
+    ...(g.tradeMemo[offer.from] ?? { round: 0 }),
+    until: env.now + TRADE_COOLDOWN_MS,
+  };
+  g.trade = null;
+  g.decisionAt = env.now;
+}
 function tradeSquares(list: number[] = [], single?: number | null): number[] {
   return [...new Set([...list, ...(single !== undefined && single !== null ? [single] : [])])];
 }
@@ -1273,8 +1298,11 @@ function proposeTrade(
     giveTiles,
     wantTiles,
     ...(counter ? { counter: true } : {}),
-    expiresAt: env.now + TRADE_OFFER_MS,
+    expiresAt:
+      env.now + ([p.id, target.id].includes(currentPlayer(g).id) ? TRADE_OFFER_MS : SIDE_TRADE_MS),
   };
+  // The table waits for the offer, so the active player's decision clock restarts afterwards.
+  g.decisionAt = env.now;
   g.tradeMemo[p.id] = { until: g.tradeMemo[p.id]?.until ?? 0, round: g.round };
   log(
     g,
@@ -1309,7 +1337,7 @@ export function applyAction(
     g.guesses[p.id] = action.pick;
     return g;
   }
-  if (g.trade && env.now >= g.trade.expiresAt) g.trade = null;
+  if (g.trade && env.now >= g.trade.expiresAt) expireTrade(g, env);
   requireRule(
     !g.trade || ['tradeAccept', 'tradeReject', 'tradeCounter', 'surrender'].includes(action.type),
     '请先完成或撤回交易提案',
@@ -1580,7 +1608,9 @@ export function applyAction(
     case 'tradeCounter': {
       const offer = g.trade;
       requireRule(offer && offer.to === p.id, '没有可以还价的提案');
+      requireRule((offer.depth ?? 0) < MAX_COUNTERS, '已经来回还价两次，请接受或拒绝');
       const target = playerById(g, offer.from)!;
+      const depth = (offer.depth ?? 0) + 1;
       g.trade = null;
       proposeTrade(
         g,
@@ -1593,6 +1623,7 @@ export function applyAction(
         true,
         env,
       );
+      g.trade!.depth = depth;
       break;
     }
     case 'tradeAccept':
@@ -1645,6 +1676,7 @@ export function applyAction(
         };
       }
       g.trade = null;
+      g.decisionAt = env.now;
       break;
     }
   }
@@ -1677,7 +1709,7 @@ export function tickGame(state: GameState, env: EngineEnvironment): GameState | 
   const g = structuredClone(state);
   let changed = false;
   if (g.trade && env.now >= g.trade.expiresAt) {
-    g.trade = null;
+    expireTrade(g, env);
     changed = true;
     log(g, env, 'trade', '交易提案已超时撤回。');
   }

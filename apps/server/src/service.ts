@@ -247,6 +247,9 @@ export class GameService {
       '连接凭证已过期，请重试',
       403,
     );
+    // A seat handed to a bot (or removed) can no longer be taken back with an old grant.
+    const seat = this.peek(code).seats.find((s) => s.id === grant.seatId);
+    ensure(seat && !seat.bot, '席位已交给机器人或已移出', 403);
     return grant.seatId;
   }
   connected(code: string, id: string) {
@@ -389,6 +392,7 @@ export class GameService {
       r.game = null;
       for (const s of r.seats) {
         s.ready = s.bot;
+        s.afk = false;
         if (s.spectator) continue;
         s.controlEpoch++;
       }
@@ -427,6 +431,8 @@ export class GameService {
         target.disconnectedAt = null;
         target.controlEpoch++;
         log(r.game!, this.env(), 'room', `房主把${target.name}的席位交给机器人代打`);
+        for (const [key, grant] of this.grants)
+          if (grant.code === r.code && grant.seatId === target.id) this.grants.delete(key);
       } else r.seats = r.seats.filter((s) => s.id !== target.id);
       this.save(r);
       return target.id;
@@ -501,7 +507,7 @@ export class GameService {
     const cmd = commandSchema.parse(input),
       r = this.record(code),
       seat = r.seats.find((s) => s.id === id);
-    ensure(seat && !seat.spectator, '观众不能执行游戏动作', 403);
+    ensure(seat && !seat.spectator && !seat.bot, '观众或机器人席位不能执行游戏动作', 403);
     // A player who acts is back at the table.
     if (seat.afk && cmd.action.type !== 'guess') seat.afk = false;
     ensure(r.game, '对局尚未开始');
@@ -727,6 +733,7 @@ export class GameService {
       job.controller.abort();
     }, this.options.aiDecisionCapMs ?? AI_DECISION_CAP_MS);
     job.controller.signal.addEventListener('abort', () => clearTimeout(cap), { once: true });
+    const clearCap = () => clearTimeout(cap);
     this.aiActivity.set(code, {
       playerId: seat.id,
       state: 'thinking',
@@ -734,6 +741,7 @@ export class GameService {
       at: this.now(),
     });
     const finish = (decision: AiDecision) => {
+      clearCap();
       if (this.botJobs.get(code) !== job) return;
       this.botJobs.delete(code);
       const latest = this.store.get(code);
@@ -797,6 +805,8 @@ export class GameService {
     this.takeoverSignatures.clear();
   }
   private timeoutAction(g: NonNullable<RoomRecord['game']>, id: string): GameAction | null {
+    // A trade offer that runs out of time is declined, never answered with a game move.
+    if (g.trade?.to === id) return { type: 'tradeReject' };
     if (actingPlayerId(g) !== id) return null;
     if (g.phase === 'roll') return { type: 'roll' };
     if (g.phase === 'jail') return { type: 'jailRoll' };

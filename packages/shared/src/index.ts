@@ -277,6 +277,8 @@ export interface TradeOffer {
   wantTiles: number[];
   /** True when this offer answers an earlier one (还价). */
   counter?: boolean;
+  /** How many counters deep this exchange is; capped so offers cannot bounce forever. */
+  depth?: number;
   expiresAt: number;
 }
 export interface GameState {

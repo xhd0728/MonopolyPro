@@ -22,11 +22,12 @@ export function useShortcuts(options: Shortcuts) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const o = current.current;
+      if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === '?') {
         o.help();
         return;
       }
-      if (!o.enabled || typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (!o.enabled) return;
       const find = (...types: string[]) => o.actions.find((a) => types.includes(a.action.type));
       let action: ActionOption | undefined;
       const key = e.key.toLowerCase();
