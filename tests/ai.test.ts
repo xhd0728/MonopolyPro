@@ -54,11 +54,18 @@ test('LLM protocols use filtered views, a fixed choice index and server-only cre
               ],
             }
           : { content: [{ type: 'text', text: '{"choice":0}' }] };
-    const brain = createBotBrain({ ...config, mode }, async (_url, init) => {
-      wire = JSON.parse(init!.body as string);
-      assert.equal(JSON.stringify(wire).includes('test-secret'), false);
-      return new Response(JSON.stringify(response));
-    });
+    const brain = createBotBrain(
+      { ...config, mode, disableThinking: true, reasoningEffort: 'none' },
+      async (_url, init) => {
+        wire = JSON.parse(init!.body as string);
+        if (mode === 'chat') {
+          assert.equal(wire.reasoning_effort, 'none');
+          assert.equal(wire.enable_thinking, false);
+        }
+        assert.equal(JSON.stringify(wire).includes('test-secret'), false);
+        return new Response(JSON.stringify(response));
+      },
+    );
     const result = await brain.choose(view, choices, choices[0], new AbortController().signal);
     assert.equal(result.source, 'llm');
     assert.deepEqual(result.action, choices[0]);

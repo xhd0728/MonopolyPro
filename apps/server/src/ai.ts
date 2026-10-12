@@ -20,6 +20,8 @@ export interface AiConfig {
   model: string;
   mode: 'chat' | 'responses' | 'anthropic';
   timeoutMs: number;
+  disableThinking?: boolean;
+  reasoningEffort?: string;
 }
 export function readAiConfig(env: NodeJS.ProcessEnv): AiConfig | null {
   if (env.MONOPOLY_AI_ENABLED !== 'true') return null;
@@ -34,12 +36,21 @@ export function readAiConfig(env: NodeJS.ProcessEnv): AiConfig | null {
   if (!['chat', 'responses', 'anthropic'].includes(mode)) throw Error('Invalid LLM API mode');
   const timeoutMs = Number(env.MONOPOLY_AI_TIMEOUT_MS ?? 12000);
   if (!Number.isFinite(timeoutMs) || timeoutMs < 100) throw Error('Invalid LLM timeout');
+  if (
+    env.MONOPOLY_AI_REASONING_EFFORT &&
+    !['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(
+      env.MONOPOLY_AI_REASONING_EFFORT,
+    )
+  )
+    throw Error('Invalid LLM reasoning effort');
   return {
     baseUrl,
     key,
     model,
     mode: mode as AiConfig['mode'],
     timeoutMs: Math.min(timeoutMs, 20000),
+    disableThinking: env.MONOPOLY_AI_DISABLE_THINKING === 'true',
+    reasoningEffort: env.MONOPOLY_AI_REASONING_EFFORT || undefined,
   };
 }
 export function createBotBrain(config: AiConfig, request: typeof fetch = fetch): BotBrain {
@@ -113,8 +124,12 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
             : {
                 model: config.model,
                 messages,
-                max_tokens: 256,
+                max_tokens: 2048,
                 temperature: 0.2,
+                ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
+                ...(config.disableThinking
+                  ? { enable_thinking: false, chat_template_kwargs: { enable_thinking: false } }
+                  : {}),
                 response_format: { type: 'json_object' },
               };
       }

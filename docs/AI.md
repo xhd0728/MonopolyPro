@@ -29,3 +29,10 @@ LLM 获得该机器人自己的手牌和公开局面，对手手牌、预设骰�
 每个异步任务绑定房间、对局 ID、状态版本、席位与控制 epoch。返回时重新核对，过时结果废弃；最终动作再次由引擎校验，快照和事件事务落盘后才发布。服务关闭时取消未完成请求。
 
 前端显示模型是否配置、机器人模式、思考/回退状态。公开的决策说明使用固定文字，不发布模型原始输出或内部推理。
+
+
+## 已有接口的兼容验证
+
+2026-10-12，复用配置的 `qwen3.8-flash-next` 接口最初返回 HTTP 200，但输出预算全部用于内部推理，没有最终 JSON。加入该兼容接口支持的 `reasoning_effort=none` 后，真实请求约 528ms 返回合法候选，未触发规则回退。`MONOPOLY_AI_REASONING_EFFORT` 仅在聊天接口配置该字段时发送；本机另设置 `MONOPOLY_AI_DISABLE_THINKING=true`，标准提供者可保留默认关闭。内部推理从不作为游戏提示或日志发布。
+
+有关思考开关的提供者说明：[Alibaba Cloud OpenAI 兼容接口文档](https://www.alibabacloud.com/help/zh/model-studio/qwen-api-via-openai-chat-completions)。实际兼容性以本机真实接口验证为准；原始输出和 API 密钥不进入验收记录。
