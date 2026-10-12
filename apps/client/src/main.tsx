@@ -28,6 +28,7 @@ import { MatchHud, ActionAnnouncements, phaseGuide } from './GameHud.tsx';
 import { api, Connection, type Credentials } from './network.ts';
 const phaseNames = {
   roll: '掷骰出发',
+  jail: '拘留所',
   manage: '经营时间',
   purchase: '购买地产',
   auction: '公开拍卖',
@@ -41,8 +42,10 @@ const kindNames = {
   bank: '银行 · 每轮利息 3%',
   shop: '卡牌商店 · 最多 8 张',
   event: '旅途机遇',
-  tax: '公共税费',
-  hospital: '休息 · 领取 80',
+  tax: '公共税费 · 进入停车场奖池',
+  jail: '拘留所 · 路过只是探访',
+  parking: '免费停车场 · 领取全部奖池',
+  gotojail: '遣返 · 直接前往拘留所',
   transit: '轮渡 · 船票 80',
 };
 function Modal({
@@ -1277,9 +1280,12 @@ function App() {
                     <button
                       className="primary"
                       disabled={disabled}
-                      aria-label={`快捷${quickAction && ['roll', 'buy', 'end'].includes(quickAction.action.type) ? quickAction.label : '查看操作'}`}
+                      aria-label={`快捷${quickAction && ['roll', 'jailRoll', 'buy', 'end'].includes(quickAction.action.type) ? quickAction.label : '查看操作'}`}
                       onClick={() => {
-                        if (quickAction && ['roll', 'buy', 'end'].includes(quickAction.action.type))
+                        if (
+                          quickAction &&
+                          ['roll', 'jailRoll', 'buy', 'end'].includes(quickAction.action.type)
+                        )
                           command(quickAction.action);
                         else {
                           setPanel('操作');
@@ -1288,7 +1294,8 @@ function App() {
                         }
                       }}
                     >
-                      {quickAction && ['roll', 'buy', 'end'].includes(quickAction.action.type)
+                      {quickAction &&
+                      ['roll', 'jailRoll', 'buy', 'end'].includes(quickAction.action.type)
                         ? quickAction.label
                         : '查看操作'}
                     </button>
@@ -1421,7 +1428,7 @@ function App() {
           ) : (
             <p>{kindNames[selected.kind]}</p>
           )}
-          {map.mechanic === 'gates' && [9, 23].includes(selected.index) && (
+          {map.mechanic === 'gates' && map.shortcuts.some(([from]) => from === selected.index) && (
             <p className="tip-box">
               商路在偶数轮开放。当前
               {(g?.round ?? 1) % 2 === 0 ? '开放，可选跨洲快线' : '关闭，沿环线前进'}。

@@ -9,7 +9,7 @@ export function botChoices(game: GameState, id: string): GameAction[] {
   const proposals = actionsFor(game, id)
     .filter((a) => !a.disabled)
     .map((a) => a.action);
-  if (!game.trade && ['roll', 'manage'].includes(game.phase) && view.activeId === id) {
+  if (!game.trade && ['roll', 'jail', 'manage'].includes(game.phase) && view.activeId === id) {
     for (const cardId of me.cards ?? []) {
       const card = CARDS.find((c) => c.id === cardId)!;
       if (card.effect === 'dice')

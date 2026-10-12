@@ -1,4 +1,4 @@
-import { MAPS, CARDS } from '../../../packages/content/src/index.ts';
+import { BOARD, MAPS, CARDS } from '../../../packages/content/src/index.ts';
 import type { GameAction, GameView } from '../../../packages/shared/src/index.ts';
 export interface AiDecision {
   action: GameAction;
@@ -77,6 +77,13 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
             trade: view.trade,
             auction: view.auction,
             debt: view.debt,
+            rules: {
+              salary: BOARD.salary,
+              bail: BOARD.bail,
+              jailEscapeFace: BOARD.jailEscapeFace,
+              freeParkingPot: view.pot,
+              note: '单骰子 1–6；落在遣返或抽到遣返时直接进入拘留所，不经过起点。拘留所可缴纳保释金、使用自由通行或掷出 6 点出狱；否则停留一回合。税费与保释金进入免费停车场奖池。',
+            },
             board: map.tiles.map((t) => ({
               index: t.index,
               name: t.name,

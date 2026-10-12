@@ -1,4 +1,4 @@
-import { CARDS, cardById, characterById, mapById } from '../../content/src/index.ts';
+import { BOARD, CARDS, cardById, characterById, mapById } from '../../content/src/index.ts';
 import type {
   ActionOption,
   GameAction,
@@ -106,6 +106,7 @@ export function createGame(
           shield: 0,
           taxShield: 0,
           skipTurns: 0,
+          jailTurns: 0,
           nextDice: null,
           discount: false,
           abilityRound: -2,
@@ -121,7 +122,7 @@ export function createGame(
       '团队模式需要均分的 2v2 或 3v3 队伍',
     );
   const g: GameState = {
-    version: 1,
+    version: 2,
     id,
     revision: 0,
     settings,
@@ -148,6 +149,7 @@ export function createGame(
     debt: null,
     trade: null,
     traps: {},
+    pot: 0,
     events: [],
     nextEvent: 1,
     lastDice: [],
@@ -184,6 +186,7 @@ function charge(
   if (p.cash >= amount) {
     p.cash -= amount;
     if (creditorId) playerById(g, creditorId)!.cash += amount;
+    else g.pot += amount;
     log(g, env, 'payment', `${p.name}：${reason} −${amount}`, p.id, -amount);
   } else {
     g.debt = { playerId: p.id, amount, creditorId, reason };
@@ -286,17 +289,60 @@ function advanceTurn(g: GameState, env: EngineEnvironment) {
       log(g, env, 'skip', `${p.name}临时停留一回合`, p.id);
       continue;
     }
+    if (p.jailTurns > 0) {
+      setPhase(g, 'jail', env);
+      log(
+        g,
+        env,
+        'jail',
+        `轮到${p.name}，仍在${tileAt(g, BOARD.jail).name}：缴纳 ${BOARD.bail} 保释金、使用「自由通行」或掷出 ${BOARD.jailEscapeFace} 点出狱`,
+        p.id,
+      );
+      return;
+    }
     setPhase(g, 'roll', env);
     log(g, env, 'turn', `轮到${p.name}，第 ${g.round} 轮`, p.id);
     return;
   }
   throw new RuleError('没有可推进的玩家回合');
 }
+export const gatesOpen = (g: Pick<GameState, 'round'>) => g.round % 2 === 0;
 export function exitsFor(g: GameState, index: number): number[] {
   const map = mapById(g.settings.mapId);
-  if (map.mechanic === 'gates' && g.round % 2 === 0 && [9, 23].includes(index))
-    return [(index + 1) % 28, index === 9 ? 20 : 6];
+  if (map.mechanic === 'gates' && gatesOpen(g)) {
+    const gate = map.shortcuts.find(([from]) => from === index);
+    if (gate) return [(index + 1) % map.tiles.length, gate[1]];
+  }
   return map.tiles[index].exits;
+}
+/** Partner port for the ferry map, or undefined when the tile is not a port. */
+export function ferryTarget(g: GameState, index: number): number | undefined {
+  const map = mapById(g.settings.mapId);
+  if (map.tiles[index]?.kind !== 'transit') return undefined;
+  const pair = map.shortcuts.find((link) => link.includes(index));
+  return pair && (pair[0] === index ? pair[1] : pair[0]);
+}
+const FERRY_FARE = 80;
+function sendToJail(g: GameState, p: PlayerState, env: EngineEnvironment, reason: string) {
+  p.position = BOARD.jail;
+  p.jailTurns = 1;
+  p.nextDice = null;
+  g.pendingPath = null;
+  setPhase(g, 'manage', env);
+  log(
+    g,
+    env,
+    'jail',
+    `${p.name}${reason}，直接前往${tileAt(g, BOARD.jail).name}，不经过起点`,
+    p.id,
+    undefined,
+    [BOARD.jail],
+  );
+}
+function releaseFromJail(g: GameState, p: PlayerState, env: EngineEnvironment, how: string) {
+  p.jailTurns = 0;
+  if (g.phase === 'jail') setPhase(g, 'roll', env);
+  log(g, env, 'jail', `${p.name}${how}，离开${tileAt(g, BOARD.jail).name}`, p.id);
 }
 function land(g: GameState, env: EngineEnvironment) {
   const p = currentPlayer(g),
@@ -329,7 +375,7 @@ function land(g: GameState, env: EngineEnvironment) {
     return;
   }
   if (tile.kind === 'event') {
-    const event = env.randomInt(4);
+    const event = env.randomInt(8);
     if (event === 0)
       reward(
         g,
@@ -342,17 +388,51 @@ function land(g: GameState, env: EngineEnvironment) {
     else if (event === 2) {
       p.shield++;
       log(g, env, 'event', `${p.name}得到市民保险，一次租金护盾`, p.id);
-    } else charge(g, p, 100, null, env, '公共设施维护');
+    } else if (event === 3) charge(g, p, 100, null, env, '公共设施维护');
+    else if (event === 4) {
+      const size = mapById(g.settings.mapId).tiles.length;
+      const path = [1, 2, 3].map((n) => (p.position - n + size) % size);
+      p.position = path[2];
+      log(
+        g,
+        env,
+        'move',
+        `${p.name}遇到逆风，后退 3 格至${tileAt(g, p.position).name}`,
+        p.id,
+        undefined,
+        path,
+      );
+      land(g, env);
+    } else if (event === 5) sendToJail(g, p, env, '护照过期');
+    else if (event === 6) {
+      p.position = BOARD.start;
+      log(g, env, 'move', `${p.name}搭上免费航班，直飞起点`, p.id, undefined, [BOARD.start]);
+      reward(g, p, BOARD.salary, env, '抵达起点');
+    } else {
+      let total = 0;
+      for (const other of g.players.filter((x) => !x.bankrupt && enemy(g, p, x))) {
+        const amount = Math.min(other.cash, 30);
+        other.cash -= amount;
+        total += amount;
+      }
+      p.cash += total;
+      log(g, env, 'event', `${p.name}举办旅途生日会，收到对手礼金 ${total}`, p.id, total);
+    }
   } else if (tile.kind === 'tax') {
     if (p.taxShield > 0) {
       p.taxShield--;
       log(g, env, 'shield', `${p.name}使用税务减免`, p.id);
     } else charge(g, p, 120 + g.round * 5, null, env, '公共税费');
-  } else if (tile.kind === 'hospital') {
-    p.skipTurns = 0;
-    reward(g, p, 80, env, '休息补助');
-  } else if (tile.kind === 'transit')
-    log(g, env, 'map', '轮渡已靠岸，可支付 80 前往另一座码头。', p.id);
+  } else if (tile.kind === 'gotojail') sendToJail(g, p, env, '在海关接受检查');
+  else if (tile.kind === 'parking') {
+    if (g.pot > 0) {
+      const pot = g.pot;
+      g.pot = 0;
+      reward(g, p, pot, env, '领取免费停车场奖池');
+    } else log(g, env, 'map', `${p.name}在免费停车场休息，奖池暂时为空`, p.id);
+  } else if (tile.kind === 'jail') log(g, env, 'map', `${p.name}只是路过拘留所探访`, p.id);
+  else if (tile.kind === 'transit')
+    log(g, env, 'map', `港口已靠岸，可支付 ${FERRY_FARE} 乘船前往对岸港口。`, p.id);
 }
 function move(g: GameState, steps: number, env: EngineEnvironment, existingPath: number[] = []) {
   const p = currentPlayer(g),
@@ -366,7 +446,7 @@ function move(g: GameState, steps: number, env: EngineEnvironment, existingPath:
     }
     p.position = exits[0];
     path.push(p.position);
-    if (p.position === 0) reward(g, p, 300, env, '经过起点');
+    if (p.position === BOARD.start) reward(g, p, BOARD.salary, env, '经过起点');
   }
   g.pendingPath = null;
   log(g, env, 'move', `${p.name}抵达${tileAt(g, p.position).name}`, p.id, undefined, path);
@@ -463,9 +543,10 @@ function ownProperty(g: GameState, p: PlayerState, tile: number): PropertyState 
   requireRule(property && property.owner === p.id, '这处地产不属于你');
   return property;
 }
+const MANAGE_PHASES: GameState['phase'][] = ['roll', 'jail', 'manage'];
 function manageAllowed(g: GameState, p: PlayerState) {
   requireRule(
-    currentPlayer(g).id === p.id && ['roll', 'manage'].includes(g.phase),
+    currentPlayer(g).id === p.id && MANAGE_PHASES.includes(g.phase),
     '请等待自己的可操作阶段',
   );
 }
@@ -478,6 +559,7 @@ function cardAction(
   manageAllowed(g, p);
   const card = cardById(action.cardId);
   requireRule(card && p.cards.includes(card.id), '没有这张卡牌');
+  requireRule(p.jailTurns === 0 || card.category !== 'move', '拘留中不能使用移动类卡牌');
   let target = p;
   let property: PropertyState | undefined;
   if (card.target === 'player') {
@@ -501,8 +583,8 @@ function cardAction(
       move(g, card.amount, env);
       break;
     case 'teleport':
-      p.position = 0;
-      reward(g, p, 300, env, '回到起点');
+      p.position = BOARD.start;
+      reward(g, p, BOARD.salary, env, '回到起点');
       break;
     case 'dice':
       requireRule(
@@ -591,6 +673,7 @@ function cardAction(
       break;
     case 'rescue':
       p.skipTurns = 0;
+      if (p.jailTurns > 0) releaseFromJail(g, p, env, `使用「${card.name}」`);
       reward(g, p, 100, env, card.name);
       break;
     case 'insure':
@@ -638,15 +721,58 @@ export function applyAction(
   switch (action.type) {
     case 'ferry': {
       manageAllowed(g, p);
-      requireRule(
-        g.phase === 'manage' && g.settings.mapId === 'islands' && [11, 25].includes(p.position),
-        '请在轮渡码头的经营阶段乘船',
-      );
-      requireRule(p.cash >= 80, '轮渡需要 80 现金');
-      p.cash -= 80;
-      p.position = p.position === 11 ? 25 : 11;
+      const target = ferryTarget(g, p.position);
+      requireRule(g.phase === 'manage' && target !== undefined, '请在轮渡码头的经营阶段乘船');
+      requireRule(p.cash >= FERRY_FARE, `轮渡需要 ${FERRY_FARE} 现金`);
+      p.cash -= FERRY_FARE;
+      p.position = target;
       setPhase(g, 'roll', env);
-      log(g, env, 'map', `${p.name}支付 80 乘坐轮渡，获得从另一座码头掷骰出发的机会`, p.id, -80);
+      log(
+        g,
+        env,
+        'map',
+        `${p.name}支付 ${FERRY_FARE} 乘坐轮渡，获得从另一座码头掷骰出发的机会`,
+        p.id,
+        -FERRY_FARE,
+        [target],
+      );
+      break;
+    }
+    case 'bail': {
+      requireRule(currentPlayer(g).id === p.id && g.phase === 'jail', '现在不在拘留所');
+      requireRule(p.cash >= BOARD.bail, `保释金需要 ${BOARD.bail} 现金`);
+      p.cash -= BOARD.bail;
+      g.pot += BOARD.bail;
+      log(
+        g,
+        env,
+        'payment',
+        `${p.name}：缴纳保释金 −${BOARD.bail}，计入停车场奖池`,
+        p.id,
+        -BOARD.bail,
+      );
+      releaseFromJail(g, p, env, '缴纳保释金');
+      break;
+    }
+    case 'jailRoll': {
+      requireRule(currentPlayer(g).id === p.id && g.phase === 'jail', '现在不在拘留所');
+      const die = env.randomInt(6) + 1;
+      g.lastDice = [die];
+      log(g, env, 'dice', `${p.name}在拘留所掷出 ${die} 点`, p.id);
+      p.jailTurns = 0;
+      if (die >= BOARD.jailEscapeFace) {
+        log(g, env, 'jail', `${p.name}掷出 ${die} 点，当场出狱并前进`, p.id);
+        move(g, die + (p.characterId === 'runner' ? 1 : 0), env);
+      } else {
+        setPhase(g, 'manage', env);
+        log(
+          g,
+          env,
+          'jail',
+          `${p.name}未掷出 ${BOARD.jailEscapeFace} 点，本回合留在拘留所，下回合自由出发`,
+          p.id,
+        );
+      }
       break;
     }
     case 'roll': {
@@ -722,7 +848,7 @@ export function applyAction(
     case 'mortgage':
     case 'redeem': {
       requireRule(
-        currentPlayer(g).id === p.id && ['roll', 'manage', 'debt'].includes(g.phase),
+        currentPlayer(g).id === p.id && [...MANAGE_PHASES, 'debt'].includes(g.phase),
         '请等待自己的经营阶段',
       );
       const property = ownProperty(g, p, action.tile),
@@ -769,7 +895,7 @@ export function applyAction(
     case 'bank': {
       requireRule(
         currentPlayer(g).id === p.id &&
-          ['roll', 'manage', 'debt'].includes(g.phase) &&
+          [...MANAGE_PHASES, 'debt'].includes(g.phase) &&
           (tileAt(g, p.position).kind === 'bank' || g.phase === 'debt'),
         '请在银行办理，负债时也可紧急取款',
       );
@@ -820,6 +946,7 @@ export function applyAction(
       }
       if (p.characterId === 'explorer') {
         p.skipTurns = 0;
+        if (p.jailTurns > 0) releaseFromJail(g, p, env, '凭探险家天赋');
         reward(g, p, 120, env, '探险奖励');
       }
       log(g, env, 'ability', `${p.name}使用角色天赋`, p.id);
@@ -873,7 +1000,7 @@ export function applyAction(
       requireRule(
         offer &&
           (offer.to === p.id || (action.type === 'tradeReject' && offer.from === p.id)) &&
-          ['roll', 'manage'].includes(g.phase),
+          MANAGE_PHASES.includes(g.phase),
         '交易已结束或不属于你',
       );
       if (action.type === 'tradeAccept') {
@@ -934,7 +1061,8 @@ export function assertInvariants(g: GameState) {
         Number.isSafeInteger(p.deposit) &&
         p.deposit >= 0 &&
         p.position >= 0 &&
-        p.position < 28 &&
+        p.position < mapById(g.settings.mapId).tiles.length &&
+        (p.jailTurns === 0 || p.jailTurns === 1) &&
         p.cards.length <= 8,
     ),
     '资产或玩家状态不满足约束',
@@ -958,6 +1086,8 @@ export function assertInvariants(g: GameState) {
   requireRule(g.phase !== 'path' || !!g.pendingPath, '岔路决策缺失');
   requireRule(g.phase !== 'auction' || !!g.auction, '拍卖决策缺失');
   requireRule(g.phase !== 'debt' || !!g.debt, '偿债决策缺失');
+  requireRule(Number.isSafeInteger(g.pot) && g.pot >= 0, '奖池金额无效');
+  requireRule(g.phase !== 'jail' || currentPlayer(g).jailTurns > 0, '拘留决策缺失');
 }
 
 export function actionsFor(g: GameState, id: string): ActionOption[] {
@@ -966,7 +1096,7 @@ export function actionsFor(g: GameState, id: string): ActionOption[] {
   const options: ActionOption[] = [];
   const add = (action: GameAction, label: string, hint: string, primary = false) =>
     options.push({ action, label, hint, primary });
-  if (g.trade?.to === id && ['roll', 'manage'].includes(g.phase)) {
+  if (g.trade?.to === id && MANAGE_PHASES.includes(g.phase)) {
     add({ type: 'tradeAccept' }, '接受交易', '现金与地产将同时交换');
     add({ type: 'tradeReject' }, '拒绝交易', '不改变资产');
   }
@@ -1007,13 +1137,18 @@ export function actionsFor(g: GameState, id: string): ActionOption[] {
     return options;
   }
   if (g.phase === 'roll') add({ type: 'roll' }, '掷骰出发', '可先使用卡牌或角色天赋', true);
-  if (
-    g.phase === 'manage' &&
-    g.settings.mapId === 'islands' &&
-    [11, 25].includes(p.position) &&
-    p.cash >= 80
-  )
-    add({ type: 'ferry' }, '轮渡捷径 · 80', '抵达另一座码头后再次掷骰');
+  if (g.phase === 'jail') {
+    add(
+      { type: 'jailRoll' },
+      `掷骰出狱`,
+      `掷出 ${BOARD.jailEscapeFace} 点立即出狱并前进；否则本回合留下，下回合自由`,
+      true,
+    );
+    if (p.cash >= BOARD.bail)
+      add({ type: 'bail' }, `缴纳保释金 · ${BOARD.bail}`, '出狱后正常掷骰；保释金进入停车场奖池');
+  }
+  if (g.phase === 'manage' && ferryTarget(g, p.position) !== undefined && p.cash >= FERRY_FARE)
+    add({ type: 'ferry' }, `轮渡捷径 · ${FERRY_FARE}`, '抵达另一座码头后再次掷骰');
   if (g.phase === 'manage') add({ type: 'end' }, '结束回合', '可先建设、交易或使用卡牌', true);
   for (const prop of g.properties.filter((x) => x.owner === id)) {
     const tile = tileAt(g, prop.tile);

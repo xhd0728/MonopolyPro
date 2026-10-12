@@ -8,12 +8,13 @@ import {
   propertyAt,
   rentOf,
   exitsFor,
+  actionsFor,
   viewFor,
   tickGame,
   assetsOf,
 } from '../packages/engine/src/index.ts';
 import { botAction } from '../packages/engine/src/bot.ts';
-import { CARDS, CHARACTERS, MAPS, mapById } from '../packages/content/src/index.ts';
+import { BOARD, CARDS, CHARACTERS, MAPS, mapById } from '../packages/content/src/index.ts';
 import {
   DEFAULT_SETTINGS,
   type Seat,
@@ -154,7 +155,7 @@ test('debt can be resolved by emergency withdrawal; bankruptcy clears ownership'
   let g = game();
   g.players[0].cash = 1;
   g.players[0].deposit = 300;
-  g.players[0].position = 4;
+  g.players[0].position = 5;
   g.players[0].nextDice = 1;
   g = act(g, { type: 'roll' });
   assert.equal(g.phase, 'debt');
@@ -197,24 +198,113 @@ test('private cards and predetermined dice do not reach opponents or spectators'
 test('maps differ in live routing, and ferry costs exactly 80', () => {
   let g = game('islands');
   g.phase = 'manage';
-  g.players[0].position = 11;
+  g.players[0].position = 13;
   g = act(g, { type: 'ferry' });
-  assert.equal(g.players[0].position, 25);
+  assert.equal(g.players[0].position, 31);
   assert.equal(g.players[0].cash, 2920);
   assert.equal(g.phase, 'roll');
   g = game('neon');
-  assert.deepEqual(exitsFor(g, 9), [10, 18]);
-  g.players[0].position = 9;
+  assert.deepEqual(exitsFor(g, 11), [12, 23]);
+  g.players[0].position = 11;
   g.players[0].nextDice = 1;
   g = act(g, { type: 'roll' });
   assert.equal(g.phase, 'path');
-  g = act(g, { type: 'choosePath', tile: 18 });
-  assert.equal(g.players[0].position, 18);
+  g = act(g, { type: 'choosePath', tile: 23 });
+  assert.equal(g.players[0].position, 23);
   assert.equal(g.pendingPath, null);
   g = game('ancient');
-  assert.deepEqual(exitsFor(g, 9), [10]);
+  assert.deepEqual(exitsFor(g, 11), [12]);
   g.round = 2;
-  assert.deepEqual(exitsFor(g, 9), [10, 20]);
+  assert.deepEqual(exitsFor(g, 11), [12, 22]);
+});
+test('go-to-jail sends players straight to jail without salary; three ways out', () => {
+  const jailed = () => {
+    let g = game();
+    g.players[0].position = BOARD.goToJail - 2;
+    g.players[0].nextDice = 2;
+    g = act(g, { type: 'roll' });
+    assert.equal(g.players[0].position, BOARD.jail);
+    assert.equal(g.players[0].jailTurns, 1);
+    assert.equal(g.players[0].cash, 3000, 'no salary when sent to jail');
+    assert.equal(g.phase, 'manage');
+    g = act(g, { type: 'end' });
+    g = act(g, { type: 'roll' }, 'p1');
+    g.phase = 'manage';
+    g = act(g, { type: 'end' }, 'p1');
+    assert.equal(g.phase, 'jail');
+    assert.ok(actionsFor(g, 'p0').some((a) => a.action.type === 'bail'));
+    assert.throws(() => act(g, { type: 'roll' }), /不能掷骰/);
+    return g;
+  };
+  // 1. Pay bail: the fine feeds the Free Parking pot and the turn continues normally.
+  let g = jailed();
+  const pot = g.pot;
+  g = act(g, { type: 'bail' });
+  assert.equal(g.phase, 'roll');
+  assert.equal(g.players[0].jailTurns, 0);
+  assert.equal(g.pot, pot + BOARD.bail);
+  // 2. Roll a six: leave immediately and move by that roll.
+  g = jailed();
+  g = applyAction(
+    g,
+    'p0',
+    { type: 'jailRoll' },
+    {
+      now: 1000,
+      randomInt: (max) => (max === 6 ? 5 : 0),
+    },
+  );
+  assert.equal(g.players[0].position, BOARD.jail + 6);
+  assert.equal(g.players[0].jailTurns, 0);
+  // Any other face serves the turn; next turn is free.
+  g = jailed();
+  g = applyAction(g, 'p0', { type: 'jailRoll' }, { now: 1000, randomInt: () => 2 });
+  assert.equal(g.players[0].position, BOARD.jail);
+  assert.equal(g.players[0].jailTurns, 0);
+  assert.equal(g.phase, 'manage');
+  // 3. A get-out card releases the player; movement cards are blocked while jailed.
+  g = jailed();
+  g.players[0].cards = ['sprint', 'rescue'];
+  assert.throws(() => act(g, { type: 'playCard', cardId: 'sprint' }), /拘留中/);
+  g = act(g, { type: 'playCard', cardId: 'rescue' });
+  assert.equal(g.phase, 'roll');
+  assert.equal(g.players[0].jailTurns, 0);
+  assertInvariants(g);
+});
+test('taxes fill the Free Parking pot, and landing there collects it all', () => {
+  let g = game();
+  g.players[0].position = 5;
+  g.players[0].nextDice = 1;
+  g = act(g, { type: 'roll' });
+  const tax = 3000 - g.players[0].cash;
+  assert.ok(tax > 0);
+  assert.equal(g.pot, tax);
+  g = act(g, { type: 'end' });
+  g.players[1].position = BOARD.parking - 3;
+  g.players[1].nextDice = 3;
+  const before = g.players[1].cash;
+  g = act(g, { type: 'roll' }, 'p1');
+  assert.equal(g.players[1].cash, before + tax);
+  assert.equal(g.pot, 0);
+});
+test('chance tiles can push players back three squares', () => {
+  let g = game();
+  g.players[0].position = 2;
+  g.players[0].nextDice = 1;
+  // Event roll picks outcome 4 (headwind), every other random draw is 0.
+  let draws = 0;
+  g = applyAction(
+    g,
+    'p0',
+    { type: 'roll' },
+    {
+      now: 1000,
+      randomInt: (max) => (max === 8 && draws++ === 0 ? 4 : 0),
+    },
+  );
+  assert.equal(g.players[0].position, 0);
+  const move = [...g.events].reverse().find((e) => e.kind === 'move');
+  assert.deepEqual(move?.path, [2, 1, 0]);
 });
 test('all 30 controlled card effects execute with valid targets', () => {
   assert.equal(CARDS.length, 30);

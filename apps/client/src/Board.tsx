@@ -8,7 +8,9 @@ const symbols = {
   start: '↗',
   bank: '▤',
   shop: '♧',
-  hospital: '☕',
+  jail: '⛓',
+  parking: 'P',
+  gotojail: '⚠',
   tax: '¤',
   event: '✦',
   transit: '⚓',
@@ -59,27 +61,16 @@ export function Board({
       behavior: reduced ? 'instant' : 'smooth',
     });
   }, [active?.position, active?.id, compact, follow, reduced]);
-  const columns = compact ? 4 : 8,
-    rows = compact ? 7 : 8;
+  const size = map.tiles.length,
+    side = Math.round(size / 4) + 1;
+  const columns = compact ? 4 : side,
+    rows = compact ? Math.ceil(size / 4) : side;
   const point = (i: number) => {
     if (!compact) return { x: map.tiles[i].x, y: map.tiles[i].z };
     const row = Math.floor(i / 4);
     return { x: row % 2 ? 3 - (i % 4) : i % 4, y: row };
   };
-  const shortcuts =
-    map.mechanic === 'metro'
-      ? [
-          [9, 18],
-          [23, 4],
-        ]
-      : map.mechanic === 'gates'
-        ? [
-            [9, 20],
-            [23, 6],
-          ]
-        : map.mechanic === 'ferry'
-          ? [[11, 25]]
-          : [];
+  const shortcuts = map.shortcuts;
   const open = map.mechanic !== 'gates' || (game?.round ?? 1) % 2 === 0;
   return (
     <div
@@ -114,8 +105,8 @@ export function Board({
           </defs>
           {map.tiles.map((t, i) => {
             const a = point(i),
-              b = point((i + 1) % 28);
-            if (compact && i === 27) return null;
+              b = point((i + 1) % size);
+            if (compact && i === size - 1) return null;
             return (
               <line
                 key={i}
@@ -135,7 +126,7 @@ export function Board({
                 <path
                   key={from}
                   className={`shortcut ${open ? '' : 'closed'}`}
-                  d={`M${a.x * 100 + 50},${a.y * 100 + 50} Q400,400 ${b.x * 100 + 50},${b.y * 100 + 50}`}
+                  d={`M${a.x * 100 + 50},${a.y * 100 + 50} Q${columns * 50},${rows * 50} ${b.x * 100 + 50},${b.y * 100 + 50}`}
                 />
               );
             })}
@@ -223,9 +214,13 @@ export function Board({
                           ? '税费'
                           : t.kind === 'shop'
                             ? '购买卡牌'
-                            : t.kind === 'hospital'
-                              ? '+80'
-                              : '抽取机遇'}
+                            : t.kind === 'jail'
+                              ? '探访 / 拘留'
+                              : t.kind === 'parking'
+                                ? `奖池 ${game?.pot ?? 0}`
+                                : t.kind === 'gotojail'
+                                  ? '前往拘留所'
+                                  : '抽取机遇'}
               </span>
               {property && (
                 <span className="tile-owner">
@@ -278,7 +273,7 @@ export function Board({
       {compact && (
         <div className="compact-route-guide">
           {map.mechanic === 'none'
-            ? '按编号前进，27 → 00 回到起点。'
+            ? `按编号前进，${size - 1} → 00 回到起点。`
             : `${map.mechanic === 'ferry' ? '轮渡 80 金币' : map.mechanic === 'gates' ? `商路${open ? '开放' : '关闭'}（偶数轮开放）` : '岔路可选快线'} · ${shortcuts.map(([from, to]) => `${String(from).padStart(2, '0')} → ${String(to).padStart(2, '0')}`).join(' / ')}`}
           <span>上下滑动看国家 · 点击查看费用与归属</span>
         </div>

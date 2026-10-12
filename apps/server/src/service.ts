@@ -638,6 +638,7 @@ export class GameService {
   private timeoutAction(g: NonNullable<RoomRecord['game']>, id: string): GameAction | null {
     if (actingPlayerId(g) !== id) return null;
     if (g.phase === 'roll') return { type: 'roll' };
+    if (g.phase === 'jail') return { type: 'jailRoll' };
     if (g.phase === 'purchase') return { type: 'pass' };
     if (g.phase === 'manage') return { type: 'end' };
     if (g.phase === 'auction') return { type: 'auctionPass' };

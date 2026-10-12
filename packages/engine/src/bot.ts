@@ -1,4 +1,4 @@
-import { cardById } from '../../content/src/index.ts';
+import { BOARD, cardById } from '../../content/src/index.ts';
 import type { GameAction, GameState } from '../../shared/src/index.ts';
 import { actionsFor, actingPlayerId, assetsOf, propertyAt } from './index.ts';
 
@@ -36,6 +36,16 @@ export function botAction(g: GameState, id: string): GameAction | null {
     return p.cash > 600 && options.some((x) => x.action.type === 'buy')
       ? { type: 'buy' }
       : { type: 'pass' };
+  if (g.phase === 'jail') {
+    const rescue = p.cards.find((c) => cardById(c)?.effect === 'rescue');
+    if (rescue) return { type: 'playCard', cardId: rescue };
+    // Leaving early matters most while unowned land is still on the board.
+    const landLeft = g.properties.some((x) => !x.owner);
+    return p.cash >= BOARD.bail + (landLeft ? 500 : 1500) &&
+      options.some((x) => x.action.type === 'bail')
+      ? { type: 'bail' }
+      : { type: 'jailRoll' };
+  }
   if (g.phase === 'path')
     return (
       [...options].sort((a, b) => {
@@ -51,6 +61,9 @@ export function botAction(g: GameState, id: string): GameAction | null {
   if (ability) return ability.action;
   for (const id of p.cards) {
     const card = cardById(id)!;
+    if (p.jailTurns > 0 && card.category === 'move') continue;
+    // Keep the jail key for when it is needed.
+    if (card.effect === 'rescue' && p.skipTurns === 0 && p.jailTurns === 0) continue;
     if (card.target === 'self' && !['move', 'teleport', 'dice'].includes(card.effect))
       return { type: 'playCard', cardId: id };
     if (card.target === 'ownProperty') {

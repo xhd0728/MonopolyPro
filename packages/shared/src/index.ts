@@ -9,7 +9,16 @@ export interface RoomSettings {
   maxPlayers: number;
 }
 export type TileKind =
-  'start' | 'property' | 'bank' | 'shop' | 'event' | 'tax' | 'hospital' | 'transit';
+  | 'start'
+  | 'property'
+  | 'bank'
+  | 'shop'
+  | 'event'
+  | 'tax'
+  | 'jail'
+  | 'parking'
+  | 'gotojail'
+  | 'transit';
 export interface TileDefinition {
   id: string;
   index: number;
@@ -33,6 +42,8 @@ export interface MapDefinition {
   color: string;
   recommended: string;
   mechanic: 'none' | 'ferry' | 'metro' | 'gates';
+  /** Route shortcuts drawn across the board: metro forks, trade gates or the ferry pair. */
+  shortcuts: [number, number][];
   tiles: TileDefinition[];
 }
 export interface CharacterDefinition {
@@ -104,6 +115,8 @@ export interface PlayerState {
   shield: number;
   taxShield: number;
   skipTurns: number;
+  /** Turns still to be served in the jail corner; 0 when free. */
+  jailTurns: number;
   nextDice: number | null;
   discount: boolean;
   abilityRound: number;
@@ -148,7 +161,7 @@ export interface TradeOffer {
   expiresAt: number;
 }
 export interface GameState {
-  version: 1;
+  version: 2;
   id: string;
   revision: number;
   settings: RoomSettings;
@@ -156,7 +169,7 @@ export interface GameState {
   properties: PropertyState[];
   turn: number;
   round: number;
-  phase: 'roll' | 'path' | 'purchase' | 'auction' | 'manage' | 'debt' | 'finished';
+  phase: 'roll' | 'jail' | 'path' | 'purchase' | 'auction' | 'manage' | 'debt' | 'finished';
   startedAt: number;
   endsAt: number;
   decisionAt: number;
@@ -165,6 +178,8 @@ export interface GameState {
   debt: DebtDecision | null;
   trade: TradeOffer | null;
   traps: Record<number, { owner: string; until: number; amount: number }>;
+  /** Free Parking jackpot: taxes, public fees and bail collected by the bank. */
+  pot: number;
   events: GameEvent[];
   nextEvent: number;
   lastDice: number[];
@@ -280,6 +295,8 @@ export const actionSchema = z.discriminatedUnion('type', [
       'tradeAccept',
       'tradeReject',
       'ferry',
+      'bail',
+      'jailRoll',
     ]),
   }),
   z.object({ type: z.literal('choosePath'), tile }),

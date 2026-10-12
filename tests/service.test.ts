@@ -99,7 +99,7 @@ test('restart restores trade, auction and path decisions with resume credentials
     } else {
       r.settings.mapId = 'neon';
       r.game!.settings.mapId = 'neon';
-      r.game!.players[0].position = 9;
+      r.game!.players[0].position = 11;
       r.game!.players[0].nextDice = 1;
       store.save(r);
       service.command(c.code, c.seatId, {
@@ -167,5 +167,30 @@ test('inactive offline seats announce takeover at the grace boundary without cha
     false,
   );
   service.dispose();
+  store.close();
+});
+test('legacy 28-tile snapshots return the room to the lobby instead of blocking startup', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'monopoly-'));
+  const path = join(dir, 'legacy.sqlite');
+  let store = new Store(path);
+  const service = new GameService(store, { now: () => 1000 });
+  const c = service.create({ name: '甲' });
+  service.lobby(c.code, c.seatId, { type: 'addBot' });
+  service.lobby(c.code, c.seatId, { type: 'ready' });
+  service.connected(c.code, c.seatId);
+  service.lobby(c.code, c.seatId, { type: 'start' });
+  const r = service.record(c.code);
+  (r.game as unknown as { version: number }).version = 1;
+  store.save(r);
+  store.close();
+  store = new Store(path);
+  const restored = store.get(c.code)!;
+  assert.equal(restored.game, null);
+  assert.equal(restored.seats.find((s) => !s.bot)!.ready, false);
+  assert.match(restored.chat.at(-1)!.text, /36 格/);
+  store.close();
+  // The migration is persisted, so a second start sees the same lobby.
+  store = new Store(path);
+  assert.equal(store.get(c.code)!.game, null);
   store.close();
 });

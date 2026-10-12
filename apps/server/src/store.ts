@@ -29,8 +29,26 @@ export class Store {
       snapshot: string;
     }[]) {
       const record = JSON.parse(row.snapshot) as RoomRecord;
-      if (record.version !== 1 || (record.game && record.game.version !== 1))
+      const gameVersion = (record.game as { version?: number } | null)?.version;
+      if (record.version !== 1 || (record.game && gameVersion !== 1 && gameVersion !== 2))
         throw new Error('Unsupported snapshot version');
+      if (gameVersion === 1) {
+        // Version 1 games used the 28-tile, two-dice board; positions cannot be carried over.
+        record.game = null;
+        for (const seat of record.seats) seat.ready = seat.bot;
+        record.chat = [
+          ...record.chat,
+          {
+            id: `upgrade-${record.code}`,
+            name: '系统',
+            text: '规则已升级为单骰子与 36 格地图，原对局已结束；请重新准备并开始新的旅程。',
+            at: Date.now(),
+          },
+        ].slice(-40);
+        this.db
+          .prepare('UPDATE rooms SET snapshot=? WHERE code=?')
+          .run(JSON.stringify(record), record.code);
+      }
       this.records.set(record.code, record);
     }
   }

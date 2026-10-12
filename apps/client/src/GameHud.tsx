@@ -95,6 +95,11 @@ export function phaseGuide(game: GameView, map: MapDefinition): { title: string;
       title: `${prefix}请选择下一段道路`,
       text: `剩余 ${game.pendingPath!.remaining} 步；高亮国家是可选入口，选路后继续移动。`,
     };
+  if (game.phase === 'jail')
+    return {
+      title: `${prefix}被拘留在${map.tiles[actor?.position ?? 0].name}`,
+      text: '掷出 6 点当场出狱；也可缴纳保释金或使用「自由通行」后正常掷骰。未出狱则本回合留下，下回合自由。',
+    };
   if (game.phase === 'debt')
     return {
       title: `${prefix}需筹集 ${money(game.debt!.amount)}`,
