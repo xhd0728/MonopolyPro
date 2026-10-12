@@ -220,6 +220,8 @@ export interface DebtDecision {
   amount: number;
   creditorId: string | null;
   reason: string;
+  /** Creditors who share the amount equally instead of a single creditor. */
+  split?: string[];
 }
 export interface AuctionDecision {
   tile: number;
@@ -301,7 +303,7 @@ export interface ActionOption {
   disabled?: string;
   primary?: boolean;
 }
-export interface GameView extends Omit<GameState, 'players' | 'traps' | 'properties'> {
+export interface GameView extends Omit<GameState, 'players' | 'traps' | 'properties' | 'decks'> {
   players: PlayerView[];
   properties: PropertyView[];
   actions: ActionOption[];

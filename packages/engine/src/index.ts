@@ -161,7 +161,15 @@ function flipNews(g: GameState, env: EngineEnvironment) {
       assetsOf(g, rich) >= average * 1.2
         ? Math.min(300, Math.round((rich.cash * news.amount) / 100))
         : 0;
-    if (!tax) log(g, env, 'news', '暂无明显领先的富豪，本轮无人缴纳富豪税');
+    if (!tax)
+      log(
+        g,
+        env,
+        'news',
+        assetsOf(g, rich) >= average * 1.2
+          ? `${rich.name}手头没有现金，本轮富豪税为 0`
+          : '暂无明显领先的富豪，本轮无人缴纳富豪税',
+      );
     else {
       rich.cash -= tax;
       g.pot += tax;
@@ -181,11 +189,21 @@ function shuffle<T>(items: T[], env: EngineEnvironment): T[] {
  * Bring a stored version-2/3 game up to the current shape. Idempotent: fields added later in
  * version 3 (decks, news, guesses, prophet counts) get neutral defaults.
  */
-export function migrateGame(state: GameState): GameState {
+export function migrateGame(state: GameState, randomInt?: (max: number) => number): GameState {
   const g = state as GameState & Partial<Pick<GameState, 'decks' | 'news' | 'guesses'>>;
   g.version = 3;
   g.pot ??= 0;
-  g.decks ??= { chance: CHANCE_CARDS.map((c) => c.id), fate: FATE_CARDS.map((c) => c.id) };
+  const env = { now: 0, randomInt: randomInt ?? (() => 0) };
+  g.decks ??= {
+    chance: shuffle(
+      CHANCE_CARDS.map((c) => c.id),
+      env,
+    ),
+    fate: shuffle(
+      FATE_CARDS.map((c) => c.id),
+      env,
+    ),
+  };
   g.news ??= null;
   g.guesses ??= {};
   for (const p of g.players) (p as Partial<PlayerState>).prophet ??= 0;
@@ -306,14 +324,25 @@ function charge(
   env: EngineEnvironment,
   reason: string,
   meta?: Pick<GameEvent, 'spot' | 'tile' | 'card'>,
+  /** Several creditors share the amount equally (e.g. paying every rival). */
+  split?: string[],
 ) {
   if (p.cash >= amount) {
     p.cash -= amount;
-    if (creditorId) playerById(g, creditorId)!.cash += amount;
+    if (split?.length) {
+      const share = Math.floor(amount / split.length);
+      split.forEach((id, n) => {
+        const to = playerById(g, id)!;
+        // Bankrupt creditors' shares go to the pot; any rounding remainder to the first.
+        const part = share + (n === 0 ? amount - share * split.length : 0);
+        if (to.bankrupt) g.pot += part;
+        else to.cash += part;
+      });
+    } else if (creditorId) playerById(g, creditorId)!.cash += amount;
     else g.pot += amount;
     log(g, env, 'payment', `${p.name}：${reason} −${amount}`, p.id, -amount, undefined, meta);
   } else {
-    g.debt = { playerId: p.id, amount, creditorId, reason };
+    g.debt = { playerId: p.id, amount, creditorId, reason, ...(split ? { split } : {}) };
     setPhase(g, 'debt', env);
     log(
       g,
@@ -331,7 +360,7 @@ function settleDebt(g: GameState, env: EngineEnvironment) {
   if (p.cash < d.amount) return;
   g.debt = null;
   setPhase(g, 'manage', env);
-  charge(g, p, d.amount, d.creditorId, env, d.reason);
+  charge(g, p, d.amount, d.creditorId, env, d.reason, undefined, d.split);
 }
 function finish(g: GameState, reason: string, env: EngineEnvironment) {
   const alive = g.players.filter((p) => !p.bankrupt);
@@ -662,8 +691,9 @@ function drawDeck(g: GameState, p: PlayerState, deck: DeckId, env: EngineEnviron
     undefined,
     { spot: deck, card: card.id, tile: p.position },
   );
+  // Lucky-day money arrives before the card so it can help pay what the card costs.
+  if (newsNow(g)?.effect === 'luckyDraw') reward(g, p, 50, env, '幸运日抽卡奖励');
   applyDeckCard(g, p, card, env);
-  if (newsNow(g)?.effect === 'luckyDraw' && !p.bankrupt) reward(g, p, 50, env, '幸运日抽卡奖励');
 }
 function applyDeckCard(
   g: GameState,
@@ -727,10 +757,18 @@ function applyDeckCard(
       break;
     }
     case 'payEach':
-      for (const other of rivals) {
-        if (g.debt) break;
-        charge(g, p, card.amount, other.id, env, `${card.name}：付给${other.name}`);
-      }
+      // One payment shared by every rival, so a shortfall never skips the later rivals.
+      if (rivals.length)
+        charge(
+          g,
+          p,
+          card.amount * rivals.length,
+          null,
+          env,
+          `${card.name}：付给每位对手 ${card.amount}`,
+          undefined,
+          rivals.map((x) => x.id),
+        );
       break;
     case 'collectEach': {
       let total = 0;
@@ -1166,6 +1204,7 @@ export function applyAction(
     case 'roll': {
       requireRule(currentPlayer(g).id === p.id && g.phase === 'roll', '现在不能掷骰');
       // One six-sided die: a remote-dice card fixes the value, otherwise the server rolls.
+      const fixed = p.nextDice !== null;
       const die = p.nextDice ?? env.randomInt(6) + 1;
       p.nextDice = null;
       g.lastDice = [die];
@@ -1176,7 +1215,12 @@ export function applyAction(
         `${p.name}掷出 ${die} 点${p.characterId === 'runner' ? '，漫游者额外 +1' : ''}`,
         p.id,
       );
-      resolveGuesses(g, die, env);
+      if (fixed) {
+        // The roller chose this value after seeing the guesses, so it is not scored.
+        if (Object.keys(g.guesses).length)
+          log(g, env, 'guess', '遥控骰子指定了点数，本次猜一猜不结算');
+        g.guesses = {};
+      } else resolveGuesses(g, die, env);
       move(g, die + (p.characterId === 'runner' ? 1 : 0), env);
       break;
     }
@@ -1433,6 +1477,9 @@ export function applyAction(
       break;
     }
   }
+  // Safety net: if money arrived after a debt was created, settle it instead of leaving
+  // the player in a debt phase they can already pay.
+  if (g.debt) settleDebt(g, env);
   checkWinner(g, env);
   g.revision++;
   assertInvariants(g);
@@ -1618,7 +1665,8 @@ const QUIET_EVENTS = new Set(['turn', 'start', 'move', 'ai']);
 export function viewFor(g: GameState, viewerId: string | null): GameView {
   // Views are serialized immediately. Copy only the small mutable parts instead of the whole
   // state; event objects are append-only and safe to share.
-  const { players, traps, properties, events, ...rest } = g;
+  // Deck order is hidden information: it never leaves the server.
+  const { players, traps, properties, events, decks: _decks, ...rest } = g;
   const publicState = structuredClone(rest);
   const viewer = playerById(g, viewerId ?? '');
   const lastAction = new Map<string, string>();

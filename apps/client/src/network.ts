@@ -100,6 +100,9 @@ export class Connection {
         this.rejectLeave(message);
         this.error(message);
       });
+      room.onMessage('notice', (message: string) => {
+        if (current()) this.error(message);
+      });
       room.onMessage('left', () => {
         if (!current() || !this.leaving) return;
         clearTimeout(this.leaving.timer);

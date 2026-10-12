@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { randomInt } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { CommandResult, RoomRecord } from '../../../packages/shared/src/index.ts';
@@ -34,7 +35,7 @@ export class Store {
       if (record.version !== 1 || (record.game && ![1, 2, 3].includes(gameVersion ?? 0)))
         throw new Error('Unsupported snapshot version');
       // Version 2 games share the 36-square board; fill in decks, news and guesses.
-      if (record.game && gameVersion !== 1) migrateGame(record.game);
+      if (record.game && gameVersion !== 1) migrateGame(record.game, randomInt);
       if (gameVersion === 1) {
         // Version 1 games used the 28-tile, two-dice board; positions cannot be carried over.
         record.game = null;

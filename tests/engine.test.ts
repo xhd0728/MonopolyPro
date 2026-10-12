@@ -624,9 +624,13 @@ test('waiting players can guess the next roll for free; correct guesses earn a c
   assert.equal(g.revision, revision, 'guesses never make the roller stale');
   assert.throws(() => act(g, { type: 'guess', pick: 'low' }, 'p1'), /已经猜过/);
   assert.equal(viewFor(g, 'p0').guesses.p1, 'high', 'guesses are public');
-  g.players[0].nextDice = 5;
-  g.decks.chance = ['chance-dividend', ...g.decks.chance.filter((id) => id !== 'chance-dividend')];
-  g = act(g, { type: 'roll' });
+  // A real roll of 5 (remote-dice rolls are not scored).
+  g = applyAction(
+    g,
+    'p0',
+    { type: 'roll' },
+    { now: 1000, randomInt: (max) => (max === 6 ? 4 : 0) },
+  );
   assert.equal(g.players[1].cash, 3000 + BOARD.guessReward);
   assert.equal(g.players[2].cash, 3000);
   assert.equal(g.players[1].prophet, 1);
@@ -636,8 +640,47 @@ test('waiting players can guess the next roll for free; correct guesses earn a c
   g = game('town', 3);
   g.players[1].prophet = BOARD.guessCap;
   g = act(g, { type: 'guess', pick: 'low' }, 'p1');
-  g.players[0].nextDice = 1;
-  g = act(g, { type: 'roll' });
+  g = applyAction(g, 'p0', { type: 'roll' }, { now: 1000, randomInt: () => 0 });
   assert.equal(g.players[1].cash, 3000);
   assert.equal(g.players[1].prophet, BOARD.guessCap + 1);
+});
+test('review fixes: hidden decks, lucky-day debt, shared payments, fixed rolls', () => {
+  // Deck order never reaches any viewer.
+  let g = game('town', 3);
+  for (const id of ['p0', 'p1', null]) assert.equal('decks' in viewFor(g, id), false);
+  // Lucky day money arrives first, so a small fine is paid instead of forcing bankruptcy.
+  g = game();
+  g.news = { id: 'lucky', round: g.round };
+  g.players[0].cash = 30;
+  g.players[0].position = 2;
+  g.players[0].nextDice = 1;
+  g.decks.chance = ['chance-speeding', ...g.decks.chance.filter((id) => id !== 'chance-speeding')];
+  g = act(g, { type: 'roll' });
+  assert.equal(g.debt, null);
+  assert.equal(g.players[0].cash, 30 + 50 - 60);
+  // Paying every rival: a shortfall becomes one debt shared by all rivals.
+  g = game('town', 4);
+  for (const p of g.players) p.cash = 60;
+  propertyAt(g, 1)!.owner = 'p0';
+  g.players[0].position = 2;
+  g.players[0].nextDice = 1;
+  g.decks.chance = ['chance-chairman', ...g.decks.chance.filter((id) => id !== 'chance-chairman')];
+  g = act(g, { type: 'roll' });
+  assert.equal(g.phase, 'debt');
+  assert.equal(g.debt!.amount, 150);
+  assert.deepEqual(g.debt!.split, ['p1', 'p2', 'p3']);
+  g.players[0].deposit = 200;
+  g = act(g, { type: 'bank', direction: 'withdraw', amount: 200 });
+  assert.deepEqual(
+    g.players.map((p) => p.cash),
+    [60 + 200 - 150, 110, 110, 110],
+  );
+  // A roll fixed by remote dice is not scored for guesses.
+  g = game('town', 3);
+  g = act(g, { type: 'guess', pick: 'high' }, 'p1');
+  g.players[0].nextDice = 6;
+  g.decks.fate = ['fate-bonus', ...g.decks.fate.filter((id) => id !== 'fate-bonus')];
+  g = act(g, { type: 'roll' });
+  assert.equal(g.players[1].cash, 3000);
+  assert.equal(g.players[1].prophet, 0);
 });

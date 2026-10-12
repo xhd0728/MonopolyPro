@@ -143,8 +143,9 @@ export function Headlines({
     // The viewer's own turn matters more than anything still waiting: show it right away.
     const mine = next.find((n) => n.tone === 'myturn');
     if (mine) {
+      // Keep the round's news with it, so the first player of a round still sees the news.
       shown.current = null;
-      setQueue([mine]);
+      setQueue([mine, ...next.filter((n) => n.tone === 'news')]);
       return;
     }
     setQueue((q) => [...q, ...next.filter((n) => !q.some((x) => x.key === n.key))].slice(-3));
@@ -292,10 +293,11 @@ export function useLiveEmotes(emotes: EmoteView[], enabled: boolean) {
   const [, tick] = useState(0);
   const live = enabled ? emotes.filter((e) => serverTime() - e.at < EMOTE_LIFE_MS) : [];
   const key = live.map((e) => e.id).join(',');
-  const newest = live.at(-1)?.at;
+  // Wake up when the oldest live emote expires; later ones schedule their own wake-up.
+  const oldest = live.length ? Math.min(...live.map((e) => e.at)) : undefined;
   useEffect(() => {
-    if (newest === undefined) return;
-    const wait = Math.max(50, newest + EMOTE_LIFE_MS - serverTime());
+    if (oldest === undefined) return;
+    const wait = Math.max(50, oldest + EMOTE_LIFE_MS - serverTime());
     const timer = setTimeout(() => tick((n) => n + 1), wait);
     return () => clearTimeout(timer);
   }, [key]);

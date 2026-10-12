@@ -125,9 +125,15 @@ class MonopolyRoom extends Room {
         this.views();
       }),
     );
+    // Emote problems (cooldown, bad input) are notices: they must not cancel a pending command.
     this.onMessage('emote', (c, data) =>
       guard(c, () => {
-        service.emote(this.code, c.auth, data);
+        try {
+          service.emote(this.code, c.auth, data);
+        } catch (error) {
+          c.send('notice', error instanceof ZodError ? '表情无效' : (error as Error).message);
+          return;
+        }
         this.views();
       }),
     );
