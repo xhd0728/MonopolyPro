@@ -1242,3 +1242,7 @@
     min-height: 44px;
   }
 }
+/* Network and command errors remain readable while a decision dialog is open. */
+.toast {
+  z-index: 70;
+}
