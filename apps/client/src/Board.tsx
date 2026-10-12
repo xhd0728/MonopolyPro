@@ -1,6 +1,5 @@
 import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
-  BOARD,
   characterById,
   countryFlag,
   shortCountryName,
@@ -29,27 +28,31 @@ const SEALS: Partial<Record<TileDefinition['kind'], string>> = {
 };
 
 // Ring geometry: corners are 1.5 units, the eight side squares 1 unit, 11 units in total.
-const CORNER = 1.5,
-  SPAN = 8 + CORNER * 2;
+// Ring geometry for a board with `side` squares per edge: corners are 1.5 units wide and the
+// side squares 1 unit, so an edge spans side + 1 units.
+const CORNER = 1.5;
 const cellStart = (i: number) => (i === 0 ? 0 : CORNER + i - 1);
-const cellSize = (i: number) => (i === 0 || i === 9 ? CORNER : 1);
+const cellSize = (i: number, side: number) => (i === 0 || i === side - 1 ? CORNER : 1);
 /** Centre of a grid cell as a fraction of the board side (0–1). */
-export const cellCentre = (i: number) => (cellStart(i) + cellSize(i) / 2) / SPAN;
-const sideOf = (t: TileDefinition) =>
-  t.z === 0 && t.x > 0 && t.x < 9
+export const cellCentre = (i: number, side = 10) =>
+  (cellStart(i) + cellSize(i, side) / 2) / (side + 1);
+const sideOf = (t: TileDefinition, side: number) => {
+  const last = side - 1;
+  return t.z === 0 && t.x > 0 && t.x < last
     ? 'top'
-    : t.x === 9 && t.z > 0 && t.z < 9
+    : t.x === last && t.z > 0 && t.z < last
       ? 'right'
-      : t.z === 9 && t.x > 0 && t.x < 9
+      : t.z === last && t.x > 0 && t.x < last
         ? 'bottom'
-        : t.x === 0 && t.z > 0 && t.z < 9
+        : t.x === 0 && t.z > 0 && t.z < last
           ? 'left'
           : 'corner';
+};
 
-function tileCaption(t: TileDefinition, game: GameView | null | undefined) {
+function tileCaption(t: TileDefinition, game: GameView | null | undefined, salary: number) {
   switch (t.kind) {
     case 'start':
-      return `经过 +${BOARD.salary}`;
+      return `经过 +${salary}`;
     case 'jail':
       return '探访 / 拘留';
     case 'parking':
@@ -110,7 +113,7 @@ const TileGrid = memo(function TileGrid({
         const here = occupants.get(t.index);
         const trap = game?.traps[t.index];
         const gate = gates.get(t.index);
-        const side = sideOf(t);
+        const side = sideOf(t, map.side);
         return (
           <button
             key={t.index}
@@ -145,7 +148,7 @@ const TileGrid = memo(function TileGrid({
                 ? ownerName
                   ? `${ownerName}所有，${property!.level} 级${property!.mortgaged ? '，已抵押' : `，租金 ${property!.rent}`}`
                   : `地价 ${t.price}，待售`
-                : tileCaption(t, game),
+                : tileCaption(t, game, map.salary),
               here && `此处：${here.join('、')}`,
             ]
               .filter(Boolean)
@@ -180,7 +183,7 @@ const TileGrid = memo(function TileGrid({
                   {SEALS[t.kind]}
                 </span>
                 <b className="tile-name">{t.name}</b>
-                <span className="tile-price">{tileCaption(t, game)}</span>
+                <span className="tile-price">{tileCaption(t, game, map.salary)}</span>
               </>
             )}
             {newsGroup?.group === t.group && t.kind === 'property' && (
@@ -307,7 +310,7 @@ function TokenLayer({
         const slot = stack.indexOf(p.id);
         // Stand on the ocean-facing half of the square so the flag and name stay readable,
         // and fan stacked pawns around that spot.
-        const [ix, iy] = INNER[sideOf(tile)] ?? [
+        const [ix, iy] = INNER[sideOf(tile, map.side)] ?? [
           tile.x === 0 ? 0.42 : -0.42,
           tile.z === 0 ? 0.42 : -0.42,
         ];
@@ -319,8 +322,8 @@ function TokenLayer({
             className={`pawn ${game.activeId === p.id ? 'active' : ''} ${moving.includes(p.id) ? 'hopping' : ''}`}
             style={
               {
-                '--cx': cellCentre(tile.x).toFixed(4),
-                '--cy': cellCentre(tile.z).toFixed(4),
+                '--cx': cellCentre(tile.x, map.side).toFixed(4),
+                '--cy': cellCentre(tile.z, map.side).toFixed(4),
                 '--dx': (ix + Math.cos(angle) * spread).toFixed(3),
                 '--dy': (iy + Math.sin(angle) * spread).toFixed(3),
                 '--pawn': playerColor(index),
@@ -366,7 +369,18 @@ export function Board({
   const at = (i: number) => map.tiles[i];
   return (
     <div className="board-frame" role="group" aria-label={`${map.name}二维国家棋盘`}>
-      <div className={`board-square ${attention ? 'attention' : ''}`} data-map={map.id}>
+      <div
+        className={`board-square ${attention ? 'attention' : ''}`}
+        data-map={map.id}
+        data-size={map.tiles.length}
+        style={
+          {
+            '--span': map.side + 1,
+            gridTemplateColumns: `1.5fr repeat(${map.side - 2}, minmax(0, 1fr)) 1.5fr`,
+            gridTemplateRows: `1.5fr repeat(${map.side - 2}, minmax(0, 1fr)) 1.5fr`,
+          } as CSSProperties
+        }
+      >
         <div className="board-ocean">
           <div className="board-center">
             {center ?? (
@@ -380,7 +394,7 @@ export function Board({
                       ? '虚线是丝路商路，偶数轮开放'
                       : map.mechanic === 'metro'
                         ? '虚线是国际快线，抵达岔路时自选'
-                        : `顺时针前进，经过起点领取 ${BOARD.salary}`}
+                        : `顺时针前进，经过起点领取 ${map.salary}`}
                 </small>
               </div>
             )}
@@ -400,7 +414,7 @@ export function Board({
                 <path
                   key={from}
                   className={gatesOpen ? '' : 'closed'}
-                  d={`M${cellCentre(a.x)},${cellCentre(a.z)} Q0.5,0.5 ${cellCentre(b.x)},${cellCentre(b.z)}`}
+                  d={`M${cellCentre(a.x, map.side)},${cellCentre(a.z, map.side)} Q0.5,0.5 ${cellCentre(b.x, map.side)},${cellCentre(b.z, map.side)}`}
                 />
               );
             })}

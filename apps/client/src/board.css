@@ -13,7 +13,7 @@
   flex: 1;
 }
 .board-square {
-  --u: calc(100cqi / 11);
+  --u: calc(100cqi / var(--span, 11));
   --seal: #d8432f;
   --tile-ink: #1d2a36;
   container-type: inline-size;

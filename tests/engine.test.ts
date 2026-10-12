@@ -16,6 +16,7 @@ import {
   VIEW_EVENTS,
   isTrailing,
   isBehind,
+  mapOf,
   taxFor,
   salaryOf,
   bailOf,
@@ -804,4 +805,41 @@ test('end conditions: a fixed number of rounds, a net-worth target, and the fina
   // Rounds and target modes still stop at the 90-minute cap.
   g = createGame(DEFAULT_SETTINGS, seats(2), 'cap', env);
   assert.equal(g.endsAt, env.now + 90 * 60000);
+});
+test('44-square boards: corners, jail, salary and complete bot matches on every map', () => {
+  for (const mapId of ['town', 'islands', 'neon', 'ancient']) {
+    let random = mapId.length * 97;
+    const randomInt = (max: number) => {
+      random = (Math.imul(random, 1664525) + 1013904223) >>> 0;
+      return random % max;
+    };
+    let now = 1000;
+    let g = createGame(
+      { ...DEFAULT_SETTINGS, mapId, size: 44, end: 'rounds', rounds: 10 },
+      seats(4),
+      `xl-${mapId}`,
+      { now, randomInt },
+    );
+    assert.equal(mapOf(g).tiles.length, 44);
+    assert.equal(g.properties.length, mapId === 'islands' ? 30 : 32);
+    for (let step = 0; step < 8000 && g.phase !== 'finished'; step++) {
+      const actor = g.trade?.to ?? actingPlayerId(g)!;
+      g = applyAction(g, actor, botAction(g, actor)!, { now: (now += 500), randomInt });
+      assertInvariants(g);
+    }
+    assert.equal(g.phase, 'finished', `${mapId} XL finishes`);
+  }
+  // Go-to-jail on the large ring sends players to square 11 without salary; start pays 600.
+  let g = createGame({ ...DEFAULT_SETTINGS, size: 44 }, seats(2), 'xl', env);
+  g.players[0].position = 31;
+  g.players[0].nextDice = 2;
+  g = act(g, { type: 'roll' });
+  assert.equal(g.players[0].position, 11);
+  assert.equal(g.players[0].jailTurns, 1);
+  g = createGame({ ...DEFAULT_SETTINGS, size: 44 }, seats(2), 'xl2', env);
+  g.players[0].position = 42;
+  g.players[0].nextDice = 3;
+  g = act(g, { type: 'roll' });
+  assert.equal(g.players[0].position, 1);
+  assert.equal(g.players[0].cash, 3000 + 600);
 });

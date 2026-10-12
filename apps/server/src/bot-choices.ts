@@ -22,7 +22,7 @@ export function botChoices(game: GameState, id: string): GameAction[] {
         for (const property of view.properties)
           proposals.push({ type: 'playCard', cardId, tile: property.tile });
     }
-    if (mapById(game.settings.mapId).tiles[me.position].kind === 'shop')
+    if (mapById(game.settings.mapId, game.settings.size).tiles[me.position].kind === 'shop')
       for (const card of CARDS) proposals.push({ type: 'buyCard', cardId: card.id });
   }
   const unique = [...new Map(proposals.map((a) => [JSON.stringify(a), a])).values()];

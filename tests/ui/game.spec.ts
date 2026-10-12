@@ -196,7 +196,7 @@ test('mobile country express map: real fork selection and auction input advance 
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await create(page, '路线玩家');
-  await page.getByLabel('地图').selectOption('neon');
+  await page.getByLabel('地图', { exact: true }).selectOption('neon');
   await page.getByRole('button', { name: '添加机器人' }).click();
   await page.getByRole('button', { name: '我准备好了' }).click();
   await page.getByRole('button', { name: '开始旅程' }).click();
@@ -425,4 +425,43 @@ test('the complete board and all six players fit one screen; dice and opponent a
   await closePanel(page);
   await expect(page.getByLabel('实时行动提示')).toContainText('对手行动');
   await page.screenshot({ path: 'artifacts/ui/opponent-action.png' });
+});
+test('the 44-square board fits the screen on desktop and phones', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await create(page, '大地图', 2);
+  await page.getByLabel('地图大小').selectOption('44');
+  await page.getByRole('button', { name: '添加机器人' }).click();
+  await page.getByRole('button', { name: '我准备好了' }).click();
+  await page.getByRole('button', { name: '开始旅程' }).click();
+  await expect(page.locator('.country-tile')).toHaveCount(44);
+  for (const [width, height] of [
+    [1440, 900],
+    [1280, 720],
+    [390, 844],
+    [360, 740],
+  ]) {
+    await page.setViewportSize({ width, height });
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const tiles = [...document.querySelectorAll<HTMLElement>('.country-tile')];
+            return (
+              tiles.length === 44 &&
+              tiles.every((t) => {
+                const r = t.getBoundingClientRect();
+                return (
+                  r.left >= 0 &&
+                  r.top >= 0 &&
+                  r.right <= innerWidth + 1 &&
+                  r.bottom <= innerHeight + 1
+                );
+              }) &&
+              document.documentElement.scrollWidth <= innerWidth + 1
+            );
+          }),
+        { message: `${width}x${height} shows all 44 squares` },
+      )
+      .toBe(true);
+  }
 });

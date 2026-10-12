@@ -50,7 +50,7 @@ const phaseNames = {
   finished: '旅程结算',
 };
 const kindNames = {
-  start: `起点 · 经过领取 ${BOARD.salary}`,
+  start: '起点 · 经过领取薪水',
   property: '可购买的地产',
   bank: '银行 · 每轮利息 3%',
   shop: '卡牌商店 · 最多 8 张',
@@ -401,7 +401,7 @@ function App() {
   }
   const g = room?.game,
     me = g?.players.find((p) => p.id === room!.viewerId),
-    map = mapById(room?.settings.mapId ?? settings.mapId),
+    map = mapById(room?.settings.mapId ?? settings.mapId, room?.settings.size ?? settings.size),
     active = g?.players.find((p) => p.id === g.activeId),
     myTurn = !!g && g.activeId === room?.viewerId && !me?.bankrupt,
     canManage = myTurn && ['roll', 'manage'].includes(g!.phase) && !g!.trade;
@@ -858,6 +858,7 @@ function App() {
                   <label>
                     地图
                     <select
+                      aria-label="地图"
                       value={room.settings.mapId}
                       disabled={!room.isHost || disabled}
                       onChange={(e) =>
@@ -891,6 +892,22 @@ function App() {
                       <option value="free">自由对战</option>
                       <option value="quick">快速对战</option>
                       <option value="team">团队战 2v2 / 3v3</option>
+                    </select>
+                  </label>
+                  <label>
+                    地图大小
+                    <select
+                      aria-label="地图大小"
+                      value={room.settings.size ?? 36}
+                      disabled={!room.isHost || disabled}
+                      onChange={(e) =>
+                        lobby('settings', {
+                          settings: { ...room.settings, size: Number(e.target.value) },
+                        })
+                      }
+                    >
+                      <option value={36}>标准 · 36 格（10×10）</option>
+                      <option value={44}>大地图 · 44 格（12×12，地产更多、节奏更长）</option>
                     </select>
                   </label>
                   <label>
@@ -1919,8 +1936,8 @@ function App() {
               </p>
               <h3>02 / 四个角落与拘留所</h3>
               <p>
-                棋盘一圈 36 格，四角依次是起点、海关拘留所、免费停车场和海关遣返。经过起点领取{' '}
-                {BOARD.salary}
+                标准棋盘一圈 36 格（大地图 44
+                格），四角依次是起点、海关拘留所、免费停车场和海关遣返。经过起点领取 {map.salary}
                 。停在遣返或抽到「护照过期」会直接进入拘留所，不经过起点、不领薪水；只是路过拘留所算作探访。被拘留后的下一回合可以缴纳
                 100 保释金、使用「自由通行」卡（探险家天赋也可以），或掷骰碰运气：掷出 6
                 点当场出狱并前进，否则留下一回合，之后自由出发。拘留期间仍可收租、建设和交易，但不能使用移动类卡牌。税费、维护费和保释金都会进入免费停车场奖池，下一位停车的玩家全部领走。

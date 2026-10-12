@@ -97,13 +97,14 @@ export function botAction(g: GameState, id: string): GameAction | null {
   return options.find((x) => x.primary)?.action ?? null;
 }
 
-const groupOf = (g: GameState, tile: number) => mapById(g.settings.mapId).tiles[tile].group;
+const groupOf = (g: GameState, tile: number) =>
+  mapById(g.settings.mapId, g.settings.size).tiles[tile].group;
 /**
  * Worth of a square to `receiver`: its price, much more if it completes the receiver's colour
  * group (rent +30% on the whole set and cheap building from then on).
  */
 export function squareValue(g: GameState, tile: number, receiver: string, gaining: boolean) {
-  const price = mapById(g.settings.mapId).tiles[tile].price;
+  const price = mapById(g.settings.mapId, g.settings.size).tiles[tile].price;
   const group = g.properties.filter((x) => groupOf(g, x.tile) === groupOf(g, tile));
   const completes = group.every((x) => x.tile === tile || x.owner === receiver);
   return Math.round(price * (gaining && completes ? 1.8 : 1));
@@ -121,7 +122,7 @@ function groupOffer(g: GameState, p: PlayerState): GameAction | null {
     if (owner.bankrupt || (g.settings.mode === 'team' && owner.team === p.team)) continue;
     const group = g.properties.filter((x) => groupOf(g, x.tile) === groupOf(g, prop.tile));
     if (!group.every((x) => x.tile === prop.tile || x.owner === p.id)) continue;
-    const price = mapById(g.settings.mapId).tiles[prop.tile].price;
+    const price = mapById(g.settings.mapId, g.settings.size).tiles[prop.tile].price;
     const cash = Math.round((price * 1.7) / 10) * 10;
     if (p.cash < cash + 500) continue;
     return {

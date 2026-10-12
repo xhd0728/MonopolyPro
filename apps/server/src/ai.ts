@@ -1,4 +1,4 @@
-import { BOARD, MAPS, CARDS } from '../../../packages/content/src/index.ts';
+import { BOARD, CARDS, mapById } from '../../../packages/content/src/index.ts';
 import type { GameAction, GameView } from '../../../packages/shared/src/index.ts';
 import { AI_DECISION_CAP_MS } from '../../../packages/shared/src/index.ts';
 export interface AiDecision {
@@ -61,7 +61,7 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
     async choose(view, choices, fallback, signal) {
       const timeout = AbortSignal.timeout(config.timeoutMs);
       const combined = AbortSignal.any([signal, timeout]);
-      const map = MAPS.find((m) => m.id === view.settings.mapId)!;
+      const map = mapById(view.settings.mapId, view.settings.size);
       const messages = [
         {
           role: 'system',
@@ -80,7 +80,7 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
             auction: view.auction,
             debt: view.debt,
             rules: {
-              salary: BOARD.salary,
+              salary: map.salary,
               bail: BOARD.bail,
               jailEscapeFace: BOARD.jailEscapeFace,
               freeParkingPot: view.pot,

@@ -78,13 +78,18 @@ export const BOARD = {
   guessReward: 30,
   guessCap: 5,
 } as const;
-// Clockwise ring on a 10x10 grid: top row left→right, right column down, bottom row
-// right→left, left column up. Corners sit at 0 / 9 / 18 / 27.
-const coords: [number, number][] = [];
-for (let x = 0; x < 10; x++) coords.push([x, 0]);
-for (let z = 1; z < 10; z++) coords.push([9, z]);
-for (let x = 8; x >= 0; x--) coords.push([x, 9]);
-for (let z = 8; z > 0; z--) coords.push([0, z]);
+/** Square sizes the host can pick: a 10x10 ring (36 squares) or a 12x12 ring (44). */
+export const BOARD_SIZES = [36, 44] as const;
+export type BoardSize = (typeof BOARD_SIZES)[number];
+// Clockwise ring: top row left→right, right column down, bottom row right→left, left column up.
+function ringCoords(side: number): [number, number][] {
+  const out: [number, number][] = [];
+  for (let x = 0; x < side; x++) out.push([x, 0]);
+  for (let z = 1; z < side; z++) out.push([side - 1, z]);
+  for (let x = side - 2; x >= 0; x--) out.push([x, side - 1]);
+  for (let z = side - 2; z > 0; z--) out.push([0, z]);
+  return out;
+}
 const COUNTRIES: Record<string, string> = {
   CN: '中国',
   JP: '日本',
@@ -153,6 +158,25 @@ const COUNTRIES: Record<string, string> = {
   ET: '埃塞俄比亚',
   MG: '马达加斯加',
   MU: '毛里求斯',
+  MV: '马尔代夫',
+  BE: '比利时',
+  LU: '卢森堡',
+  MT: '马耳他',
+  CY: '塞浦路斯',
+  SK: '斯洛伐克',
+  RO: '罗马尼亚',
+  BG: '保加利亚',
+  HR: '克罗地亚',
+  PK: '巴基斯坦',
+  BT: '不丹',
+  BH: '巴林',
+  KW: '科威特',
+  LB: '黎巴嫩',
+  TN: '突尼斯',
+  DO: '多米尼加',
+  PG: '巴布亚新几内亚',
+  WS: '萨摩亚',
+  TO: '汤加',
 };
 /** Board-label abbreviations for names longer than four characters. */
 const SHORT_NAMES: Record<string, string> = {
@@ -164,6 +188,7 @@ const SHORT_NAMES: Record<string, string> = {
   埃塞俄比亚: '埃塞',
   沙特阿拉伯: '沙特',
   马达加斯加: '马岛',
+  巴布亚新几内亚: '巴新',
 };
 export const shortCountryName = (name: string) => SHORT_NAMES[name] ?? name;
 export const countryFlag = (code?: string) =>
@@ -208,6 +233,45 @@ const countryRoutes: Record<string, string[]> = {
     ...['TZ', 'MG', 'ZA'],
   ],
 };
+// The 44-square boards: eight colour groups of four countries (the ferry map has two ports).
+const countryRoutesXL: Record<string, string[]> = {
+  town: [
+    ...['CN', 'JP', 'KR', 'MN'],
+    ...['SG', 'TH', 'VN', 'MY'],
+    ...['GB', 'FR', 'DE', 'BE'],
+    ...['IT', 'ES', 'PT', 'NL'],
+    ...['US', 'CA', 'MX', 'CU'],
+    ...['BR', 'AR', 'CL', 'PE'],
+    ...['EG', 'MA', 'KE', 'ZA'],
+    ...['AU', 'NZ', 'FJ', 'PG'],
+  ],
+  islands: [
+    ...['JP', 'PH', 'ID', 'SG', 'MY', 'LK', 'MV', 'GB'],
+    ...['IE', 'IS', 'NO', 'DK', 'PT', 'GR', 'MT', 'CY'],
+    ...['CU', 'JM', 'BS', 'DO', 'CA', 'CL', 'PE'],
+    ...['AU', 'NZ', 'FJ', 'PG', 'WS', 'TO', 'MG'],
+  ],
+  neon: [
+    ...['CN', 'JP', 'KR', 'MN'],
+    ...['TH', 'SG', 'MY', 'KZ'],
+    ...['DE', 'FR', 'NL', 'BE'],
+    ...['CH', 'AT', 'IT', 'LU'],
+    ...['ES', 'PT', 'GR', 'MT'],
+    ...['TR', 'PL', 'CZ', 'SK'],
+    ...['HU', 'RO', 'BG', 'HR'],
+    ...['SE', 'FI', 'NO', 'DK'],
+  ],
+  ancient: [
+    ...['CN', 'MN', 'KG', 'KZ'],
+    ...['UZ', 'TM', 'PK', 'IN'],
+    ...['NP', 'BT', 'LK', 'IR'],
+    ...['AZ', 'GE', 'TR', 'JO'],
+    ...['SA', 'AE', 'OM', 'QA'],
+    ...['BH', 'KW', 'LB', 'EG'],
+    ...['TN', 'MA', 'ET', 'KE'],
+    ...['TZ', 'MG', 'ZA', 'CY'],
+  ],
+};
 const specialNames: Partial<Record<TileDefinition['kind'], string>> = {
   start: '环球起点',
   bank: '国际银行',
@@ -220,73 +284,96 @@ const specialNames: Partial<Record<TileDefinition['kind'], string>> = {
   fate: '命运',
   transit: '跨洋港口',
 };
-/** Special tiles on each side (offset from the side's first corner). Everything else is land. */
-const SIDE_SPECIALS: Record<number, TileDefinition['kind']> = {
-  3: 'chance',
-  6: 'tax',
-  12: 'bank',
-  15: 'fate',
-  21: 'chance',
-  24: 'shop',
-  30: 'tax',
-  33: 'fate',
-};
-const CORNERS: Record<number, TileDefinition['kind']> = {
-  [BOARD.start]: 'start',
-  [BOARD.jail]: 'jail',
-  [BOARD.parking]: 'parking',
-  [BOARD.goToJail]: 'gotojail',
-};
-const MAP_SHORTCUTS: Record<MapDefinition['mechanic'], [number, number][]> = {
-  none: [],
-  ferry: [[13, 31]],
-  metro: [
-    [11, 23],
-    [29, 5],
-  ],
-  gates: [
-    [11, 22],
-    [29, 4],
-  ],
-};
-function makeMap(
-  id: string,
-  name: string,
-  subtitle: string,
-  description: string,
-  theme: string,
-  color: string,
-  recommended: string,
-  mechanic: MapDefinition['mechanic'],
-): MapDefinition {
-  const shortcuts = MAP_SHORTCUTS[mechanic];
-  const ports = mechanic === 'ferry' ? shortcuts[0] : [];
+/** Kinds of the two special squares on each side, in side order. */
+const SIDE_KINDS: [TileDefinition['kind'], TileDefinition['kind']][] = [
+  ['chance', 'tax'],
+  ['bank', 'fate'],
+  ['chance', 'shop'],
+  ['tax', 'fate'],
+];
+/**
+ * Where things sit on a ring of `side` squares per edge: the two specials per side, the ferry
+ * ports (middle of the second and fourth sides) and the fork / gate shortcuts. Offsets are counted
+ * from each side's first corner, so 36- and 44-square boards share one layout logic.
+ */
+function layoutFor(side: number) {
+  const edge = side - 1;
+  const specials = side === 10 ? [3, 6] : [3, 8];
+  const port = side === 10 ? 4 : 5;
+  const fork = 2,
+    landing = side === 10 ? 5 : 6;
+  return {
+    edge,
+    corners: { start: 0, jail: edge, parking: edge * 2, goToJail: edge * 3 },
+    specials: Object.fromEntries(
+      SIDE_KINDS.flatMap(([a, b], k) => [
+        [k * edge + specials[0], a],
+        [k * edge + specials[1], b],
+      ]),
+    ) as Record<number, TileDefinition['kind']>,
+    shortcuts: {
+      none: [] as [number, number][],
+      ferry: [[edge + port, edge * 3 + port]] as [number, number][],
+      metro: [
+        [edge + fork, edge * 2 + landing],
+        [edge * 3 + fork, landing],
+      ] as [number, number][],
+      gates: [
+        [edge + fork, edge * 2 + landing - 1],
+        [edge * 3 + fork, landing - 1],
+      ] as [number, number][],
+    },
+  };
+}
+interface MapInfo {
+  id: string;
+  name: string;
+  subtitle: string;
+  description: (squares: number, countries: number) => string;
+  color: string;
+  recommended: string;
+  mechanic: MapDefinition['mechanic'];
+}
+function makeMap(info: MapInfo, size: BoardSize): MapDefinition {
+  const side = size / 4 + 1;
+  const { edge, corners, specials, shortcuts: all } = layoutFor(side);
+  const coords = ringCoords(side);
+  const shortcuts = all[info.mechanic];
+  const ports = info.mechanic === 'ferry' ? shortcuts[0] : [];
+  const cornerKinds: Record<number, TileDefinition['kind']> = {
+    [corners.start]: 'start',
+    [corners.jail]: 'jail',
+    [corners.parking]: 'parking',
+    [corners.goToJail]: 'gotojail',
+  };
   const kinds = coords.map(
     (_, index): TileDefinition['kind'] =>
-      CORNERS[index] ??
-      SIDE_SPECIALS[index] ??
+      cornerKinds[index] ??
+      specials[index] ??
       ((ports as number[]).includes(index) ? 'transit' : 'property'),
   );
   // Two colour groups per side: the first half of a side's countries, then the second half.
   const groupOf: number[] = [];
-  for (let side = 0; side < 4; side++) {
+  for (let k = 0; k < 4; k++) {
     const lots = kinds
       .map((kind, index) => ({ kind, index }))
-      .filter((t) => t.kind === 'property' && Math.floor(t.index / 9) === side && t.index % 9);
-    lots.forEach(
-      (t, n) => (groupOf[t.index] = side * 2 + (n < Math.ceil(lots.length / 2) ? 0 : 1)),
-    );
+      .filter((t) => t.kind === 'property' && Math.floor(t.index / edge) === k && t.index % edge);
+    lots.forEach((t, n) => (groupOf[t.index] = k * 2 + (n < Math.ceil(lots.length / 2) ? 0 : 1)));
   }
+  // Prices climb along the route; the large board spreads them a little wider.
+  const groupStep = size === 36 ? 45 : 60,
+    lotStep = size === 36 ? 20 : 15;
+  const route = (size === 36 ? countryRoutes : countryRoutesXL)[info.id];
   const rank: number[] = [];
   let countryIndex = 0;
   const tiles: TileDefinition[] = coords.map(([x, z], index) => {
     const kind = kinds[index];
-    const group = kind === 'property' ? groupOf[index] : Math.floor(index / 9) * 2;
+    const group = kind === 'property' ? groupOf[index] : Math.floor(index / edge) * 2;
     const step = kind === 'property' ? (rank[group] = (rank[group] ?? -1) + 1) : 0;
-    const price = kind === 'property' ? 200 + group * 45 + step * 20 : 0;
-    const countryCode = kind === 'property' ? countryRoutes[id][countryIndex++] : undefined;
+    const price = kind === 'property' ? 200 + group * groupStep + step * lotStep : 0;
+    const countryCode = kind === 'property' ? route[countryIndex++] : undefined;
     return {
-      id: `${id}-${index}`,
+      id: `${info.id}-${size}-${index}`,
       index,
       name: countryCode ? COUNTRIES[countryCode] : specialNames[kind]!,
       kind,
@@ -297,69 +384,79 @@ function makeMap(
       price,
       rent: Math.round(price * 0.14),
       buildCost: Math.round(price * 0.55),
-      exits: [(index + 1) % BOARD.tiles],
+      exits: [(index + 1) % size],
     };
   });
-  if (mechanic === 'metro') for (const [from, to] of shortcuts) tiles[from].exits = [from + 1, to];
-  if (mechanic === 'ferry') {
+  if (info.mechanic === 'metro')
+    for (const [from, to] of shortcuts) tiles[from].exits = [from + 1, to];
+  if (info.mechanic === 'ferry') {
     tiles[ports[0]].name = '东洋港口';
     tiles[ports[1]].name = '西洋港口';
   }
+  const countries = tiles.filter((t) => t.kind === 'property').length;
   return {
-    id,
-    name,
-    subtitle,
-    description,
-    theme,
-    color,
-    recommended,
-    mechanic,
+    id: info.id,
+    name: info.name,
+    subtitle: info.subtitle,
+    description: info.description(size, countries),
+    theme: info.id,
+    color: info.color,
+    recommended: info.recommended,
+    mechanic: info.mechanic,
+    side,
+    corners,
+    // A lap of the larger ring takes longer, so passing start pays more.
+    salary: size === 36 ? BOARD.salary : 600,
     shortcuts,
     tiles,
   };
 }
-export const MAPS: MapDefinition[] = [
-  makeMap(
-    'town',
-    '世界环游',
-    '从亚洲出发，经营全球旅程',
-    '沿 36 格环线游历 24 个国家、8 个地产组。四角是起点、拘留所、免费停车与遣返，适合第一场对局。',
-    'town',
-    '#78a985',
-    '2–6 人 · 入门',
-    'none',
-  ),
-  makeMap(
-    'islands',
-    '海洋航线',
-    '连接海岸与岛屿的财富航线',
-    '在 22 个海洋与海岸国家之间经营。两座港口提供轮渡捷径，船票 80，直达对岸半张棋盘。',
-    'islands',
-    '#76b6c2',
-    '2–6 人 · 路线策略',
-    'ferry',
-  ),
-  makeMap(
-    'neon',
-    '欧亚快线',
-    '穿行欧亚，选择自己的路线',
-    '24 个欧亚国家与两条国际快线。抵达岔路时主动选路，跳过半圈但可能错过起点薪水。',
-    'neon',
-    '#9690c2',
-    '3–6 人 · 岔路博弈',
-    'metro',
-  ),
-  makeMap(
-    'ancient',
-    '丝路商旅',
-    '沿商路跨洲，抓住通行窗口',
-    '连接 24 个亚洲与非洲国家。商路偶数轮开放、奇数轮关闭，提前规划每次跨洲通行。',
-    'ancient',
-    '#c5a271',
-    '3–6 人 · 动态机关',
-    'gates',
-  ),
+const MAP_INFO: MapInfo[] = [
+  {
+    id: 'town',
+    name: '世界环游',
+    subtitle: '从亚洲出发，经营全球旅程',
+    description: (n, c) =>
+      `沿 ${n} 格环线游历 ${c} 个国家、8 个地产组。四角是起点、拘留所、免费停车与遣返，适合第一场对局。`,
+    color: '#78a985',
+    recommended: '2–6 人 · 入门',
+    mechanic: 'none',
+  },
+  {
+    id: 'islands',
+    name: '海洋航线',
+    subtitle: '连接海岸与岛屿的财富航线',
+    description: (n, c) =>
+      `${n} 格航线上的 ${c} 个海洋与海岸国家。两座港口提供轮渡捷径，船票 80，直达对岸半张棋盘。`,
+    color: '#76b6c2',
+    recommended: '2–6 人 · 路线策略',
+    mechanic: 'ferry',
+  },
+  {
+    id: 'neon',
+    name: '欧亚快线',
+    subtitle: '穿行欧亚，选择自己的路线',
+    description: (n, c) =>
+      `${n} 格、${c} 个欧亚国家与两条国际快线。抵达岔路时主动选路，跳过半圈但可能错过起点薪水。`,
+    color: '#9690c2',
+    recommended: '3–6 人 · 岔路博弈',
+    mechanic: 'metro',
+  },
+  {
+    id: 'ancient',
+    name: '丝路商旅',
+    subtitle: '沿商路跨洲，抓住通行窗口',
+    description: (n, c) =>
+      `${n} 格商路连接 ${c} 个亚洲与非洲国家。商路偶数轮开放、奇数轮关闭，提前规划每次跨洲通行。`,
+    color: '#c5a271',
+    recommended: '3–6 人 · 动态机关',
+    mechanic: 'gates',
+  },
 ];
+/** Standard 36-square maps (the default). */
+export const MAPS: MapDefinition[] = MAP_INFO.map((info) => makeMap(info, 36));
+/** Large 44-square maps. */
+export const MAPS_XL: MapDefinition[] = MAP_INFO.map((info) => makeMap(info, 44));
 function card(
   id: string,
   name: string,
@@ -585,7 +682,10 @@ export const CARDS: CardDefinition[] = [
   ),
   card('taxfree', '税务减免', 'defense', 'taxShield', 1, 'self', '免除下一次公共税费。', '📋'),
 ];
-export const mapById = (id: string) => MAPS.find((m) => m.id === id) ?? MAPS[0];
+export const mapById = (id: string, size: number = 36) => {
+  const list = size === 44 ? MAPS_XL : MAPS;
+  return list.find((m) => m.id === id) ?? list[0];
+};
 export const characterById = (id: string) => CHARACTERS.find((c) => c.id === id) ?? CHARACTERS[0];
 export const cardById = (id: string) => CARDS.find((c) => c.id === id);
 export const CATEGORY_NAMES = {

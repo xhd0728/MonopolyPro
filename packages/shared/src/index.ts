@@ -13,6 +13,8 @@ export interface RoomSettings {
   end: EndMode;
   rounds: number;
   target: number;
+  /** Board size: 36 squares (default) or 44. */
+  size: 36 | 44;
 }
 export type EndMode = 'rounds' | 'time' | 'target';
 export type TileKind =
@@ -50,6 +52,11 @@ export interface MapDefinition {
   color: string;
   recommended: string;
   mechanic: 'none' | 'ferry' | 'metro' | 'gates';
+  /** Squares per edge of the ring (10 for 36 squares, 12 for 44), corners included. */
+  side: number;
+  corners: { start: number; jail: number; parking: number; goToJail: number };
+  /** Paid when passing start; the larger ring pays more. */
+  salary: number;
   /** Route shortcuts drawn across the board: metro forks, trade gates or the ferry pair. */
   shortcuts: [number, number][];
   tiles: TileDefinition[];
@@ -481,6 +488,7 @@ export const settingsSchema = z.object({
   end: z.enum(['rounds', 'time', 'target']).default('rounds'),
   rounds: z.number().int().min(4).max(40).default(12),
   target: z.number().int().min(5000).max(100000).default(15000),
+  size: z.union([z.literal(36), z.literal(44)]).default(36),
 });
 /** Whatever the end mode, a match never runs longer than this. */
 export const HARD_CAP_MINUTES = 90;
@@ -494,6 +502,7 @@ export const DEFAULT_SETTINGS: RoomSettings = {
   end: 'rounds',
   rounds: 12,
   target: 15000,
+  size: 36,
 };
 export interface CommandResult {
   id: string;

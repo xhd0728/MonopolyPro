@@ -36,7 +36,9 @@ function requireRule(condition: unknown, message: string): asserts condition {
 }
 export const currentPlayer = (g: GameState) => g.players[g.turn];
 export const propertyAt = (g: GameState, tile: number) => g.properties.find((p) => p.tile === tile);
-const tileAt = (g: GameState, tile: number) => mapById(g.settings.mapId).tiles[tile];
+/** The map in play, at the room's chosen board size. */
+export const mapOf = (g: Pick<GameState, 'settings'>) => mapById(g.settings.mapId, g.settings.size);
+const tileAt = (g: GameState, tile: number) => mapOf(g).tiles[tile];
 const playerById = (g: GameState, id: string) => g.players.find((p) => p.id === id);
 const enemy = (g: GameState, a: PlayerState, b: PlayerState) =>
   a.id !== b.id && (g.settings.mode !== 'team' || a.team !== b.team);
@@ -112,7 +114,7 @@ export function newsNow(g: Pick<GameState, 'news' | 'round'>) {
   return g.news && g.news.round === g.round ? newsById(g.news.id) : undefined;
 }
 export const salaryOf = (g: GameState) =>
-  BOARD.salary * (newsNow(g)?.effect === 'doubleSalary' ? 2 : 1);
+  mapOf(g).salary * (newsNow(g)?.effect === 'doubleSalary' ? 2 : 1);
 export const bailOf = (g: GameState) =>
   BOARD.bail * (newsNow(g)?.effect === 'strictCustoms' ? 2 : 1);
 /** Price of unowned land this round (land rush / land sale news). */
@@ -127,7 +129,7 @@ const interestRate = (g: GameState) => {
   return effect === 'rateCut' ? 0 : effect === 'rateHike' ? 0.06 : 0.03;
 };
 function groupNames(g: GameState, group: number) {
-  return mapById(g.settings.mapId)
+  return mapOf(g)
     .tiles.filter((t) => t.kind === 'property' && t.group === group)
     .map((t) => t.name)
     .join('、');
@@ -212,7 +214,7 @@ export function migrateGame(state: GameState, randomInt?: (max: number) => numbe
   (g as Partial<GameState>).finale ??= false;
   // Games saved before end conditions existed ended on the clock.
   g.settings = Object.assign(
-    { turnSeconds: 0, end: 'time' as const, rounds: 12, target: 15000 },
+    { turnSeconds: 0, end: 'time' as const, rounds: 12, target: 15000, size: 36 as const },
     g.settings,
   );
   // Offers saved before multi-square trades carried one square per side.
@@ -269,7 +271,7 @@ export function createGame(
     revision: 0,
     settings,
     players,
-    properties: mapById(settings.mapId)
+    properties: mapById(settings.mapId, settings.size)
       .tiles.filter((t) => t.kind === 'property')
       .map((t) => ({
         tile: t.index,
@@ -519,7 +521,7 @@ function advanceTurn(g: GameState, env: EngineEnvironment) {
       for (const p of g.players.filter((p) => !p.bankrupt && p.deposit > 0))
         if (Math.floor(p.deposit * rate) > 0)
           reward(g, p, Math.floor(p.deposit * rate), env, '银行利息');
-      const map = mapById(g.settings.mapId);
+      const map = mapOf(g);
       if (map.mechanic === 'gates')
         log(
           g,
@@ -552,7 +554,7 @@ function advanceTurn(g: GameState, env: EngineEnvironment) {
         g,
         env,
         'jail',
-        `轮到${p.name}，仍在${tileAt(g, BOARD.jail).name}：缴纳 ${bailOf(g)} 保释金、使用「自由通行」或掷出 ${BOARD.jailEscapeFace} 点出狱`,
+        `轮到${p.name}，仍在${tileAt(g, mapOf(g).corners.jail).name}：缴纳 ${bailOf(g)} 保释金、使用「自由通行」或掷出 ${BOARD.jailEscapeFace} 点出狱`,
         p.id,
       );
       return;
@@ -565,7 +567,7 @@ function advanceTurn(g: GameState, env: EngineEnvironment) {
 }
 export const gatesOpen = (g: Pick<GameState, 'round'>) => g.round % 2 === 0;
 export function exitsFor(g: GameState, index: number): number[] {
-  const map = mapById(g.settings.mapId);
+  const map = mapOf(g);
   if (map.mechanic === 'gates' && gatesOpen(g)) {
     const gate = map.shortcuts.find(([from]) => from === index);
     if (gate) return [(index + 1) % map.tiles.length, gate[1]];
@@ -574,14 +576,14 @@ export function exitsFor(g: GameState, index: number): number[] {
 }
 /** Partner port for the ferry map, or undefined when the tile is not a port. */
 export function ferryTarget(g: GameState, index: number): number | undefined {
-  const map = mapById(g.settings.mapId);
+  const map = mapOf(g);
   if (map.tiles[index]?.kind !== 'transit') return undefined;
   const pair = map.shortcuts.find((link) => link.includes(index));
   return pair && (pair[0] === index ? pair[1] : pair[0]);
 }
 const FERRY_FARE = 80;
 function sendToJail(g: GameState, p: PlayerState, env: EngineEnvironment, reason: string) {
-  p.position = BOARD.jail;
+  p.position = mapOf(g).corners.jail;
   p.jailTurns = 1;
   p.nextDice = null;
   g.pendingPath = null;
@@ -590,11 +592,11 @@ function sendToJail(g: GameState, p: PlayerState, env: EngineEnvironment, reason
     g,
     env,
     'jail',
-    `${p.name}${reason}，直接前往${tileAt(g, BOARD.jail).name}，不经过起点`,
+    `${p.name}${reason}，直接前往${tileAt(g, mapOf(g).corners.jail).name}，不经过起点`,
     p.id,
     undefined,
-    [BOARD.jail],
-    { spot: 'jail', tile: BOARD.jail },
+    [mapOf(g).corners.jail],
+    { spot: 'jail', tile: mapOf(g).corners.jail },
   );
 }
 function releaseFromJail(g: GameState, p: PlayerState, env: EngineEnvironment, how: string) {
@@ -604,13 +606,13 @@ function releaseFromJail(g: GameState, p: PlayerState, env: EngineEnvironment, h
     g,
     env,
     'jail',
-    `${p.name}${how}，离开${tileAt(g, BOARD.jail).name}`,
+    `${p.name}${how}，离开${tileAt(g, mapOf(g).corners.jail).name}`,
     p.id,
     undefined,
     undefined,
     {
       spot: 'release',
-      tile: BOARD.jail,
+      tile: mapOf(g).corners.jail,
     },
   );
 }
@@ -673,12 +675,12 @@ function land(g: GameState, env: EngineEnvironment) {
 }
 /** Walk the ring square by square (ignoring forks) to a card's destination, then land. */
 function walkTo(g: GameState, p: PlayerState, target: number, env: EngineEnvironment, why: string) {
-  const size = mapById(g.settings.mapId).tiles.length;
+  const size = mapOf(g).tiles.length;
   const path: number[] = [];
   for (let at = p.position; at !== target;) {
     at = (at + 1) % size;
     path.push(at);
-    if (at === BOARD.start) paySalary(g, p, env);
+    if (at === mapOf(g).corners.start) paySalary(g, p, env);
   }
   p.position = target;
   log(g, env, 'move', `${p.name}${why}，抵达${tileAt(g, target).name}`, p.id, undefined, path);
@@ -691,7 +693,7 @@ function walkBack(
   env: EngineEnvironment,
   why: string,
 ) {
-  const size = mapById(g.settings.mapId).tiles.length;
+  const size = mapOf(g).tiles.length;
   const path = Array.from({ length: steps }, (_, n) => (p.position - n - 1 + size) % size);
   p.position = path.at(-1)!;
   log(
@@ -772,7 +774,7 @@ function applyDeckCard(
   card: DeckCardDefinition,
   env: EngineEnvironment,
 ) {
-  const map = mapById(g.settings.mapId);
+  const map = mapOf(g);
   const rivals = g.players.filter((x) => !x.bankrupt && enemy(g, p, x));
   switch (card.effect) {
     case 'gain':
@@ -790,8 +792,8 @@ function applyDeckCard(
       break;
     case 'advanceTo': {
       let target: number | undefined;
-      if (card.target === 'start') target = BOARD.start;
-      else if (card.target === 'parking') target = BOARD.parking;
+      if (card.target === 'start') target = mapOf(g).corners.start;
+      else if (card.target === 'parking') target = mapOf(g).corners.parking;
       else if (card.target === 'priciest')
         target = map.tiles.reduce(
           (best, t) => (t.price > map.tiles[best].price ? t.index : best),
@@ -912,7 +914,7 @@ function applyDeckCard(
       p.cash += half;
       log(g, env, 'money', `${p.name}领取一半奖池 +${half}`, p.id, half, undefined, {
         spot: 'pot',
-        tile: BOARD.parking,
+        tile: mapOf(g).corners.parking,
       });
       break;
     }
@@ -930,7 +932,7 @@ function move(g: GameState, steps: number, env: EngineEnvironment, existingPath:
     }
     p.position = exits[0];
     path.push(p.position);
-    if (p.position === BOARD.start) paySalary(g, p, env);
+    if (p.position === mapOf(g).corners.start) paySalary(g, p, env);
   }
   g.pendingPath = null;
   log(g, env, 'move', `${p.name}抵达${tileAt(g, p.position).name}`, p.id, undefined, path);
@@ -1071,7 +1073,7 @@ function cardAction(
       move(g, card.amount, env);
       break;
     case 'teleport':
-      p.position = BOARD.start;
+      p.position = mapOf(g).corners.start;
       reward(g, p, salaryOf(g), env, '回到起点');
       break;
     case 'dice':
@@ -1355,7 +1357,7 @@ export function applyAction(
       );
       const pending = g.pendingPath!;
       p.position = action.tile;
-      if (p.position === BOARD.start) paySalary(g, p, env);
+      if (p.position === mapOf(g).corners.start) paySalary(g, p, env);
       move(g, pending.remaining - 1, env, [...pending.path, p.position]);
       break;
     }
@@ -1650,8 +1652,8 @@ export function assertInvariants(g: GameState) {
         Number.isSafeInteger(p.deposit) &&
         p.deposit >= 0 &&
         p.position >= 0 &&
-        p.position < mapById(g.settings.mapId).tiles.length &&
-        (p.jailTurns === 0 || (p.jailTurns === 1 && p.position === BOARD.jail)) &&
+        p.position < mapOf(g).tiles.length &&
+        (p.jailTurns === 0 || (p.jailTurns === 1 && p.position === mapOf(g).corners.jail)) &&
         p.cards.length <= 8,
     ),
     '资产或玩家状态不满足约束',
