@@ -24,6 +24,7 @@ import type {
   Seat,
   TileDefinition,
 } from '../../shared/src/index.ts';
+import { HARD_CAP_MINUTES } from '../../shared/src/index.ts';
 
 export interface EngineEnvironment {
   now: number;
@@ -90,6 +91,7 @@ export function rentOf(g: GameState, property: PropertyState, payer?: PlayerStat
   if (payer?.characterId === 'guardian') rent *= 0.85;
   if (property.boostUntil >= g.round) rent *= 1.5;
   if (property.cutUntil >= g.round) rent *= 0.5;
+  if (g.finale) rent *= 1.5;
   const news = newsNow(g);
   if (news && g.news!.group === tile.group) {
     if (news.effect === 'groupBoom') rent *= 1.5;
@@ -207,6 +209,12 @@ export function migrateGame(state: GameState, randomInt?: (max: number) => numbe
   g.news ??= null;
   g.guesses ??= {};
   (g as Partial<GameState>).tradeMemo ??= {};
+  (g as Partial<GameState>).finale ??= false;
+  // Games saved before end conditions existed ended on the clock.
+  g.settings = Object.assign(
+    { turnSeconds: 0, end: 'time' as const, rounds: 12, target: 15000 },
+    g.settings,
+  );
   // Offers saved before multi-square trades carried one square per side.
   if (g.trade) {
     const old = g.trade as unknown as { giveTile?: number | null; wantTile?: number | null };
@@ -276,7 +284,8 @@ export function createGame(
     round: 1,
     phase: 'roll',
     startedAt: env.now,
-    endsAt: env.now + settings.minutes * 60000,
+    endsAt:
+      env.now + ((settings.end ?? 'time') === 'time' ? settings.minutes : HARD_CAP_MINUTES) * 60000,
     decisionAt: env.now,
     pendingPath: null,
     auction: null,
@@ -297,6 +306,7 @@ export function createGame(
     news: null,
     guesses: {},
     tradeMemo: {},
+    finale: false,
     events: [],
     nextEvent: 1,
     lastDice: [],
@@ -412,10 +422,61 @@ function checkWinner(g: GameState, env: EngineEnvironment): boolean {
     return true;
   }
   if (env.now >= g.endsAt) {
-    finish(g, '比赛时间结束，按净资产结算', env);
+    finish(
+      g,
+      g.settings.end === 'time' ? '比赛时间结束，按净资产结算' : '达到最长时长，按净资产结算',
+      env,
+    );
+    return true;
+  }
+  if (g.settings.end === 'rounds' && g.round > g.settings.rounds) {
+    finish(g, `完成全部 ${g.settings.rounds} 轮，按净资产结算`, env);
+    return true;
+  }
+  if (g.settings.end === 'target' && targetReached(g)) {
+    finish(g, `${targetReached(g)}率先达到目标净资产 ${g.settings.target}`, env);
     return true;
   }
   return false;
+}
+/** Name of the player (or team) whose net worth reached the target, if any. */
+function targetReached(g: GameState): string | null {
+  const alive = g.players.filter((p) => !p.bankrupt);
+  if (g.settings.mode === 'team') {
+    for (const team of [0, 1]) {
+      const side = alive.filter((p) => p.team === team);
+      if (side.length && side.reduce((n, p) => n + assetsOf(g, p), 0) >= g.settings.target)
+        return team === 0 ? '青队' : '橙队';
+    }
+    return null;
+  }
+  return alive.find((p) => assetsOf(g, p) >= g.settings.target)?.name ?? null;
+}
+/** Whether the match is in its last stretch: final two rounds, last five minutes, or 80% of the target. */
+export function finaleDue(g: GameState, now: number): boolean {
+  if (g.settings.end === 'rounds') return g.round >= g.settings.rounds - 1;
+  if (g.settings.end === 'target') {
+    const best = Math.max(...g.players.filter((p) => !p.bankrupt).map((p) => assetsOf(g, p)));
+    return best >= g.settings.target * 0.8;
+  }
+  return g.endsAt - now <= 5 * 60000;
+}
+function updateFinale(g: GameState, env: EngineEnvironment) {
+  if (g.finale || g.phase === 'finished' || !finaleDue(g, env.now)) return false;
+  g.finale = true;
+  log(
+    g,
+    env,
+    'news',
+    '终局冲刺！比赛进入最后阶段：所有租金 ×1.5，抓紧最后的机会',
+    undefined,
+    undefined,
+    undefined,
+    {
+      spot: 'news',
+    },
+  );
+  return true;
 }
 function resolveGuesses(g: GameState, die: number, env: EngineEnvironment) {
   const result = die >= 4 ? 'high' : 'low';
@@ -453,6 +514,8 @@ function advanceTurn(g: GameState, env: EngineEnvironment) {
       // Interest uses the news of the round that just ended.
       const rate = interestRate(g);
       g.round++;
+      if (checkWinner(g, env)) return;
+      updateFinale(g, env);
       for (const p of g.players.filter((p) => !p.bankrupt && p.deposit > 0))
         if (Math.floor(p.deposit * rate) > 0)
           reward(g, p, Math.floor(p.deposit * rate), env, '银行利息');
@@ -1537,7 +1600,7 @@ export function applyAction(
   // Safety net: if money arrived after a debt was created, settle it instead of leaving
   // the player in a debt phase they can already pay.
   if (g.debt) settleDebt(g, env);
-  checkWinner(g, env);
+  if (!checkWinner(g, env)) updateFinale(g, env);
   g.revision++;
   assertInvariants(g);
   return g;
@@ -1554,7 +1617,12 @@ function winnerDue(g: GameState, env: EngineEnvironment) {
 export function tickGame(state: GameState, env: EngineEnvironment): GameState | null {
   if (state.phase === 'finished') return null;
   // Most ticks change nothing; decide before paying for a deep copy.
-  if (!(state.trade && env.now >= state.trade.expiresAt) && !winnerDue(state, env)) return null;
+  if (
+    !(state.trade && env.now >= state.trade.expiresAt) &&
+    !winnerDue(state, env) &&
+    (state.finale || !finaleDue(state, env.now))
+  )
+    return null;
   const g = structuredClone(state);
   let changed = false;
   if (g.trade && env.now >= g.trade.expiresAt) {
@@ -1563,6 +1631,7 @@ export function tickGame(state: GameState, env: EngineEnvironment): GameState | 
     log(g, env, 'trade', '交易提案已超时撤回。');
   }
   if (checkWinner(g, env)) changed = true;
+  if (updateFinale(g, env)) changed = true;
   if (!changed) return null;
   g.revision++;
   return g;

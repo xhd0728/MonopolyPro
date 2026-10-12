@@ -63,6 +63,62 @@ const kindNames = {
   transit: '轮渡 · 船票 80',
 };
 const NO_EMOTES: RoomView['emotes'] = [];
+/** End-condition choices for the lobby, encoded as mode:value. */
+const END_CHOICES: [string, string][] = [
+  ['rounds:8', '8 轮（约 15 分钟）'],
+  ['rounds:12', '12 轮（默认，约 20–25 分钟）'],
+  ['rounds:16', '16 轮（约 30 分钟）'],
+  ['rounds:24', '24 轮（长局）'],
+  ['time:15', '限时 15 分钟'],
+  ['time:30', '限时 30 分钟'],
+  ['time:45', '限时 45 分钟'],
+  ['time:60', '限时 60 分钟'],
+  ['target:10000', '净资产先到 10,000'],
+  ['target:15000', '净资产先到 15,000'],
+  ['target:25000', '净资产先到 25,000'],
+];
+const endValue = (s: RoomSettings) => {
+  const end = s.end ?? 'time';
+  const value = `${end}:${end === 'rounds' ? s.rounds : end === 'time' ? s.minutes : s.target}`;
+  return END_CHOICES.some(([v]) => v === value) ? value : END_CHOICES[1][0];
+};
+/** How far along the match is, in the terms of its end condition. */
+function MatchProgress({ game }: { game: GameView }) {
+  const s = game.settings;
+  const leader = Math.max(...game.players.filter((p) => !p.bankrupt).map((p) => p.assets));
+  const share =
+    s.end === 'rounds'
+      ? Math.min(1, (game.round - 1) / s.rounds)
+      : s.end === 'target'
+        ? Math.min(1, leader / s.target)
+        : null;
+  return (
+    <span className="meta-clock">
+      {s.end === 'rounds' ? (
+        <>
+          第 <b>{Math.min(game.round, s.rounds)}</b> / {s.rounds} 轮
+        </>
+      ) : s.end === 'target' ? (
+        <>
+          目标 {money(s.target)} · 领先者 {Math.round(Math.min(1, leader / s.target) * 100)}%
+        </>
+      ) : (
+        <>
+          <Clock>
+            {(now) => Math.max(0, Math.min(s.minutes, Math.ceil((game.endsAt - now) / 60000)))}
+          </Clock>{' '}
+          分钟剩余
+        </>
+      )}
+      {share !== null && (
+        <i className="meta-bar" aria-hidden="true">
+          <i style={{ width: `${share * 100}%` }} />
+        </i>
+      )}
+      {game.finale && <em className="meta-finale">🔥 终局冲刺 · 租金 ×1.5</em>}
+    </span>
+  );
+}
 function Modal({
   title,
   children,
@@ -265,7 +321,9 @@ function App() {
     setBusy(true);
     try {
       localStorage.setItem('mp-name', name);
-      const chosen = teaching ? { ...DEFAULT_SETTINGS, maxPlayers: 2, minutes: 10 } : settings;
+      const chosen = teaching
+        ? { ...DEFAULT_SETTINGS, maxPlayers: 2, end: 'rounds' as const, rounds: 6 }
+        : settings;
       const c = await api<Credentials>(
         create ? '/api/rooms' : `/api/rooms/${code.trim().toUpperCase()}/join`,
         create
@@ -820,7 +878,8 @@ function App() {
                           settings: {
                             ...room.settings,
                             mode: e.target.value,
-                            minutes: e.target.value === 'quick' ? 10 : 30,
+                            end: 'rounds',
+                            rounds: e.target.value === 'quick' ? 8 : 12,
                           },
                         })
                       }
@@ -831,19 +890,28 @@ function App() {
                     </select>
                   </label>
                   <label>
-                    时间限制
+                    结束方式
                     <select
-                      value={room.settings.minutes}
+                      aria-label="结束方式"
+                      value={endValue(room.settings)}
                       disabled={!room.isHost || disabled}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        const [end, raw] = e.target.value.split(':');
+                        const n = Number(raw);
                         lobby('settings', {
-                          settings: { ...room.settings, minutes: Number(e.target.value) },
-                        })
-                      }
+                          settings: {
+                            ...room.settings,
+                            end,
+                            ...(end === 'rounds' ? { rounds: n } : {}),
+                            ...(end === 'time' ? { minutes: n } : {}),
+                            ...(end === 'target' ? { target: n } : {}),
+                          },
+                        });
+                      }}
                     >
-                      {[5, 10, 15, 30, 45, 60].map((v) => (
-                        <option key={v} value={v}>
-                          {v} 分钟
+                      {END_CHOICES.map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
                         </option>
                       ))}
                     </select>
@@ -953,20 +1021,16 @@ function App() {
                             disabled={!connected}
                             onClick={() => lobby('afk', { afk: !mySeat?.afk })}
                           >
-                            {mySeat?.afk ? '挂机托管中 · 回来继续' : '🛋 挂机'}
+                            {mySeat?.afk ? (
+                              '挂机中 · 回来'
+                            ) : (
+                              <>
+                                🛋<span className="afk-label"> 挂机</span>
+                              </>
+                            )}
                           </button>
                         )}
-                        <span className="meta-clock">
-                          <Clock>
-                            {(now) =>
-                              Math.max(
-                                0,
-                                Math.min(g.settings.minutes, Math.ceil((g.endsAt - now) / 60000)),
-                              )
-                            }
-                          </Clock>{' '}
-                          分钟剩余
-                        </span>
+                        <MatchProgress game={g} />
                         {emotesOn && (
                           <EmoteBar
                             disabled={!connected}
@@ -1883,9 +1947,12 @@ function App() {
               </p>
               <h3>06 / 胜负与队伍</h3>
               <p>
-                最后仍在经营的一方获胜。到时按现金 + 存款 + 未抵押地产半价 + 建筑回收价 −
-                待付债务结算；并列可共同获胜。团队战要求 2v2 或
-                3v3，同队免租，资产合计结算。快速战默认 10 分钟。
+                房主选择结束方式：固定轮数（默认 12 轮，快速战 8
+                轮）、限时，或谁的净资产先达到目标。无论哪种方式，最多 90 分钟。最后两轮、最后 5
+                分钟，或有人达到目标的 80% 时进入「终局冲刺」，所有租金 ×1.5。结束时按现金 + 存款 +
+                未抵押地产半价 + 建筑回收价 −
+                待付债务排名，并列可共同获胜；只剩一方仍在经营时提前结束。团队战要求 2v2 或
+                3v3，同队免租，资产合计结算。
               </p>
               <h3>07 / 联机与恢复</h3>
               <p>

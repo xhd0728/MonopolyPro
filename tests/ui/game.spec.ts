@@ -263,7 +263,7 @@ test('six player finances remain readable on desktop and mobile; a second window
   await page.getByRole('button', { name: '我准备好了' }).click();
   await page.getByRole('button', { name: '开始旅程' }).click();
   await expect(page.locator('.player-card')).toHaveCount(6);
-  await expect(page.locator('.board-meta')).toContainText('30 分钟剩余');
+  await expect(page.locator('.board-meta')).toContainText('第 1 / 12 轮');
   // Human decisions are not timed unless the host turns a limit on.
   await expect(page.locator('.decision-timer')).toContainText('不限时');
   await expect(page.locator('.country-tile.property').first()).toBeVisible();
@@ -279,7 +279,7 @@ test('six player finances remain readable on desktop and mobile; a second window
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   await expect(page.locator('.player-card[data-self="true"]')).toContainText('新名字');
   // Auto-play on and off.
-  await page.getByRole('button', { name: '🛋 挂机' }).click();
+  await page.locator('.meta-afk').click();
   await expect(page.locator('.player-card[data-self="true"]')).toContainText('挂机托管中');
   await page.locator('.meta-afk').click();
   await expect(page.locator('.player-card[data-self="true"]')).not.toContainText('挂机托管中');

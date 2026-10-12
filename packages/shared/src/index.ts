@@ -9,7 +9,12 @@ export interface RoomSettings {
   maxPlayers: number;
   /** Seconds a human gets per decision before the server plays a safe default. 0 = no limit. */
   turnSeconds: number;
+  /** How the match ends: after a number of rounds, on the clock, or when someone hits a target. */
+  end: EndMode;
+  rounds: number;
+  target: number;
 }
+export type EndMode = 'rounds' | 'time' | 'target';
 export type TileKind =
   | 'start'
   | 'property'
@@ -279,6 +284,8 @@ export interface GameState {
   guesses: Record<string, 'high' | 'low'>;
   /** Per player: no new offers before `until` (after a rejection); last round a bot offered. */
   tradeMemo: Record<string, { until: number; round: number }>;
+  /** 终局冲刺: the last stretch of the match, when rent is raised to force a decision. */
+  finale: boolean;
   events: GameEvent[];
   nextEvent: number;
   lastDice: number[];
@@ -469,7 +476,12 @@ export const settingsSchema = z.object({
     .int()
     .refine((n) => TURN_SECONDS.includes(n), '无效的操作时限')
     .default(0),
+  end: z.enum(['rounds', 'time', 'target']).default('rounds'),
+  rounds: z.number().int().min(4).max(40).default(12),
+  target: z.number().int().min(5000).max(100000).default(15000),
 });
+/** Whatever the end mode, a match never runs longer than this. */
+export const HARD_CAP_MINUTES = 90;
 export const DEFAULT_SETTINGS: RoomSettings = {
   mapId: 'town',
   mode: 'free',
@@ -477,6 +489,9 @@ export const DEFAULT_SETTINGS: RoomSettings = {
   initialCash: 3000,
   maxPlayers: 6,
   turnSeconds: 0,
+  end: 'rounds',
+  rounds: 12,
+  target: 15000,
 };
 export interface CommandResult {
   id: string;

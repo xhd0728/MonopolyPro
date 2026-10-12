@@ -227,7 +227,9 @@ export function MatchHud({
   return (
     <div className="match-hud">
       <span className="hud-route">
-        {map.name} · 第 {game.round} 轮{game.pot > 0 && <em>停车场奖池 {money(game.pot)}</em>}
+        {map.name} · 第 {game.round}
+        {game.settings.end === 'rounds' ? ` / ${game.settings.rounds}` : ''} 轮
+        {game.pot > 0 && <em>停车场奖池 {money(game.pot)}</em>}
       </span>
       {news && (
         <span className="hud-news" title={news.text}>

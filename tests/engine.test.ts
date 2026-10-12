@@ -767,3 +767,41 @@ test('bots value colour groups: they buy the last square they need and refuse ch
   g.trade!.giveCash = 1000;
   assert.equal(botAction(g, 'p1')?.type, 'tradeAccept');
 });
+test('end conditions: a fixed number of rounds, a net-worth target, and the final stretch', () => {
+  // Rounds: the match settles after the last round, with a final stretch first.
+  let g = createGame({ ...DEFAULT_SETTINGS, end: 'rounds', rounds: 4 }, seats(2), 'r', env);
+  propertyAt(g, 1)!.owner = 'p1';
+  const base = rentOf(g, propertyAt(g, 1)!);
+  let steps = 0;
+  while (g.phase !== 'finished' && steps++ < 500) {
+    const actor = g.trade?.to ?? actingPlayerId(g)!;
+    g = applyAction(g, actor, botAction(g, actor)!, env);
+    if (g.round === 3 && g.phase !== 'finished') {
+      assert.equal(g.finale, true, 'the last two rounds are the final stretch');
+      assert.ok(rentOf(g, propertyAt(g, 1)!) >= Math.round(base * 1.5) - 1);
+    }
+  }
+  assert.equal(g.phase, 'finished');
+  assert.match(g.finishReason, /4 轮/);
+  assert.ok(g.events.some((e) => e.text.includes('终局冲刺')));
+  // Target: the first player to the target wins at once.
+  g = createGame({ ...DEFAULT_SETTINGS, end: 'target', target: 6000 }, seats(3), 't', env);
+  g.players[2].deposit = 3100;
+  g = act(g, { type: 'end' }, 'p0');
+  assert.equal(g.phase, 'finished');
+  assert.deepEqual(g.winners, ['p2']);
+  assert.match(g.finishReason, /率先达到目标/);
+  // 80% of the target starts the final stretch.
+  g = createGame({ ...DEFAULT_SETTINGS, end: 'target', target: 10000 }, seats(3), 't2', env);
+  g.players[1].deposit = 5100;
+  g = act(g, { type: 'ability' });
+  assert.equal(g.finale, true);
+  // Time: the classic clock, with the last five minutes as the final stretch.
+  g = createGame({ ...DEFAULT_SETTINGS, end: 'time', minutes: 20 }, seats(2), 'c', env);
+  assert.equal(g.endsAt, env.now + 20 * 60000);
+  const later = tickGame(g, { ...env, now: g.endsAt - 4 * 60000 });
+  assert.equal(later?.finale, true);
+  // Rounds and target modes still stop at the 90-minute cap.
+  g = createGame(DEFAULT_SETTINGS, seats(2), 'cap', env);
+  assert.equal(g.endsAt, env.now + 90 * 60000);
+});

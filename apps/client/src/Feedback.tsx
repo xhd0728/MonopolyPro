@@ -321,7 +321,7 @@ export function EmoteBar({ send, disabled }: { send: (emote: Emote) => void; dis
         aria-label="发送表情"
         onClick={() => setOpen(!open)}
       >
-        😊 表情
+        😊<span className="emote-label"> 表情</span>
       </button>
       {open && (
         <span className="emote-menu" role="menu">
