@@ -78,7 +78,6 @@ const explanations: Record<string, string> = {
   dice: '按骰子点数前进并处理落点，角色天赋可能改变步数。',
   jail: '拘留所：缴纳保释金、使用「自由通行」或掷出 6 点出狱；否则停留一回合。',
   payment: '税费、维护费和保释金进入免费停车场奖池，下一位停车的玩家全部领取。',
-  event: '旅途机遇随机发生：奖金、卡牌、护盾、后退、遣返或生日礼金。',
 };
 function explainEvent(event: GameView['events'][number]) {
   if (event.kind === 'card') {

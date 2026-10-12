@@ -13,7 +13,8 @@ export type TileKind =
   | 'property'
   | 'bank'
   | 'shop'
-  | 'event'
+  | 'chance'
+  | 'fate'
   | 'tax'
   | 'jail'
   | 'parking'
@@ -93,6 +94,67 @@ export interface CardDefinition {
   price: number;
   icon: string;
 }
+/** 机会 (chance) leans on surprise movement; 命运 (fate) on money and the whole table. */
+export type DeckId = 'chance' | 'fate';
+export type DeckEffect =
+  | 'gain'
+  | 'pay'
+  | 'advanceTo'
+  | 'move'
+  | 'jail'
+  | 'jailCard'
+  | 'repairs'
+  | 'payEach'
+  | 'collectEach'
+  | 'shield'
+  | 'drawCard'
+  | 'upgradeRandom'
+  | 'everyone'
+  | 'robinHood'
+  | 'potHalf';
+export interface DeckCardDefinition {
+  id: string;
+  deck: DeckId;
+  name: string;
+  text: string;
+  icon: string;
+  effect: DeckEffect;
+  amount: number;
+  /** Destination for advanceTo: a square index or a named rule. */
+  target?: number | 'start' | 'parking' | 'priciest' | 'nearestEmpty';
+  /** How good the card is for the drawer (0–5); used by the trailing player's best-of-two draw. */
+  value: number;
+}
+/** World news flipped at the start of every round; effects last for that round only. */
+export type NewsEffect =
+  | 'calm'
+  | 'groupBoom'
+  | 'groupSlump'
+  | 'rateCut'
+  | 'rateHike'
+  | 'buildSale'
+  | 'taxHoliday'
+  | 'landRush'
+  | 'landSale'
+  | 'doubleSalary'
+  | 'strictCustoms'
+  | 'festival'
+  | 'wealthTax'
+  | 'luckyDraw';
+export interface NewsDefinition {
+  id: string;
+  name: string;
+  text: string;
+  icon: string;
+  effect: NewsEffect;
+  amount: number;
+}
+export interface NewsState {
+  id: string;
+  round: number;
+  /** Colour group affected by groupBoom / groupSlump. */
+  group?: number;
+}
 export interface PropertyState {
   tile: number;
   owner: string | null;
@@ -121,6 +183,8 @@ export interface PlayerState {
   discount: boolean;
   abilityRound: number;
   bot: boolean;
+  /** Correct free roll guesses this match (rewarded up to a small cap). */
+  prophet: number;
 }
 /** Moments every seat should notice; the client spotlights them on the board. */
 export type SpotKind =
@@ -181,7 +245,7 @@ export interface TradeOffer {
   expiresAt: number;
 }
 export interface GameState {
-  version: 2;
+  version: 3;
   id: string;
   revision: number;
   settings: RoomSettings;
@@ -200,6 +264,11 @@ export interface GameState {
   traps: Record<number, { owner: string; until: number; amount: number }>;
   /** Free Parking jackpot: taxes, public fees and bail collected by the bank. */
   pot: number;
+  /** Remaining draw order of each deck; drawn cards return to the bottom. */
+  decks: Record<DeckId, string[]>;
+  news: NewsState | null;
+  /** Waiting players' free guesses on the current player's next roll. */
+  guesses: Record<string, 'high' | 'low'>;
   events: GameEvent[];
   nextEvent: number;
   lastDice: number[];

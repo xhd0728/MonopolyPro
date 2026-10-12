@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { CommandResult, RoomRecord } from '../../../packages/shared/src/index.ts';
+import { migrateGame } from '../../../packages/engine/src/index.ts';
 
 export class Store {
   readonly db: DatabaseSync;
@@ -30,8 +31,10 @@ export class Store {
     }[]) {
       const record = JSON.parse(row.snapshot) as RoomRecord;
       const gameVersion = (record.game as { version?: number } | null)?.version;
-      if (record.version !== 1 || (record.game && gameVersion !== 1 && gameVersion !== 2))
+      if (record.version !== 1 || (record.game && ![1, 2, 3].includes(gameVersion ?? 0)))
         throw new Error('Unsupported snapshot version');
+      // Version 2 games share the 36-square board; fill in decks, news and guesses.
+      if (record.game && gameVersion !== 1) migrateGame(record.game);
       if (gameVersion === 1) {
         // Version 1 games used the 28-tile, two-dice board; positions cannot be carried over.
         record.game = null;

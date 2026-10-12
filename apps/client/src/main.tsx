@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client';
 import {
   BOARD,
+  DECK_CARDS,
   MAPS,
   CHARACTERS,
   CARDS,
@@ -45,7 +46,8 @@ const kindNames = {
   property: '可购买的地产',
   bank: '银行 · 每轮利息 3%',
   shop: '卡牌商店 · 最多 8 张',
-  event: '旅途机遇',
+  chance: '机会 · 抽一张机会卡（多为移动与惊喜）',
+  fate: '命运 · 抽一张命运卡（多为现金与全场事件）',
   tax: '公共税费 · 进入停车场奖池',
   jail: '拘留所 · 路过只是探访',
   parking: '免费停车场 · 领取全部奖池',
@@ -1808,7 +1810,7 @@ function App() {
       {dialog === 'rules' && (
         <Modal title="旅途图鉴" close={() => setDialog(null)}>
           <div className="panel-tabs">
-            {['规则', '地图', '角色', '卡牌'].map((t) => (
+            {['规则', '地图', '角色', '卡牌', '机会命运'].map((t) => (
               <button
                 key={t}
                 className={t === rulesTab ? 'selected' : ''}
@@ -1875,6 +1877,27 @@ function App() {
                 <p>{m.description}</p>
               </article>
             ))
+          ) : rulesTab === '机会命运' ? (
+            <div className="deck-atlas">
+              {(['chance', 'fate'] as const).map((deck) => (
+                <section key={deck}>
+                  <h3>{deck === 'chance' ? '机会卡 · 移动与惊喜' : '命运卡 · 现金与全场事件'}</h3>
+                  <div className="catalog-grid">
+                    {DECK_CARDS.filter((c) => c.deck === deck).map((c) => (
+                      <div className={`deck-card ${deck}`} key={c.id}>
+                        <span>{c.icon}</span>
+                        <h4>{c.name}</h4>
+                        <p>{c.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ))}
+              <p className="hint">
+                两副牌各 16
+                张，开局洗牌，抽过的牌放回牌底。现金最少且明显落后的玩家抽牌时会翻开两张，保留更好的一张。
+              </p>
+            </div>
           ) : rulesTab === '角色' ? (
             CHARACTERS.map((c) => (
               <article className="encyclopedia" key={c.id}>

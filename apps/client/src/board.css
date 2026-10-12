@@ -249,8 +249,11 @@
   font-weight: 900;
   line-height: 1;
 }
-.country-tile.event .tile-seal {
+.country-tile.chance .tile-seal {
   background: #7a4fc4;
+}
+.country-tile.fate .tile-seal {
+  background: #0e8f86;
 }
 .country-tile.bank .tile-seal,
 .country-tile.transit .tile-seal {
@@ -761,9 +764,24 @@
 .headline:is(.tone-jail, .tone-bankrupt) .headline-mark {
   background: #fbe3df;
 }
+.headline.tone-chance .headline-mark {
+  background: #7a4fc4;
+}
+.headline.tone-fate .headline-mark {
+  background: #0e8f86;
+}
+.headline.tone-news .headline-mark {
+  background: #163a5c;
+}
 .headline:is(.tone-chance, .tone-fate, .tone-news) .headline-mark {
-  background: #efe6fb;
-  color: #7a4fc4;
+  color: #fff;
+  border-radius: calc(var(--u) * 0.12);
+}
+.headline.tone-chance {
+  background: #f6f1fd;
+}
+.headline.tone-fate {
+  background: #eefaf8;
 }
 /* Ticker lines fade out on their own instead of blinking away together. */
 .action-announcements > div {

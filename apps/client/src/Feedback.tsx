@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { CARDS, countryFlag } from '../../../packages/content/src/index.ts';
+import { CARDS, countryFlag, deckCardById } from '../../../packages/content/src/index.ts';
 import type {
   GameEvent,
   GameView,
@@ -92,14 +92,19 @@ export function Headlines({
       if (!e.spot) continue;
       const tile = e.tile === undefined ? undefined : map.tiles[e.tile];
       const card = e.card ? CARDS.find((c) => c.id === e.card) : undefined;
+      const drawn = e.card ? deckCardById(e.card) : undefined;
+      const who = game.players.find((p) => p.id === e.actor);
       next.push({
         key: `e${e.id}`,
         tone: e.spot,
-        title: SPOT_TITLES[e.spot],
-        text: e.text,
+        // A drawn card reads like the card itself: deck, name, then what it does.
+        title: drawn ? `${SPOT_TITLES[e.spot]} · ${drawn.name}` : SPOT_TITLES[e.spot],
+        text: drawn
+          ? `${who?.id === game.viewerId ? '你' : (who?.name ?? '')}：${drawn.text}`
+          : e.text,
         ...(e.amount !== undefined ? { amount: e.amount } : {}),
         color: playerColor(playerIndex(game, e.actor)),
-        mark: countryFlag(tile?.countryCode) || card?.icon || SPOT_SEALS[e.spot],
+        mark: drawn?.icon || countryFlag(tile?.countryCode) || card?.icon || SPOT_SEALS[e.spot],
       });
     }
     const key = `${game.id}:${game.round}:${game.turn}`;
@@ -122,7 +127,9 @@ export function Headlines({
   useEffect(() => {
     if (!current) return;
     // Busy queues move faster so headlines never lag far behind the board.
-    const timer = setTimeout(() => setQueue((q) => q.slice(1)), queue.length > 2 ? 1300 : 2300);
+    // Drawn cards stay a little longer so everyone can read them.
+    const read = ['chance', 'fate', 'news'].includes(current.tone) ? 3200 : 2300;
+    const timer = setTimeout(() => setQueue((q) => q.slice(1)), queue.length > 2 ? 1300 : read);
     return () => clearTimeout(timer);
   }, [current?.key, queue.length > 2]);
   if (!current) return null;

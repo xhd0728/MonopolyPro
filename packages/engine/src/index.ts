@@ -1,6 +1,17 @@
-import { BOARD, CARDS, cardById, characterById, mapById } from '../../content/src/index.ts';
+import {
+  BOARD,
+  CARDS,
+  CHANCE_CARDS,
+  FATE_CARDS,
+  cardById,
+  characterById,
+  deckCardById,
+  mapById,
+} from '../../content/src/index.ts';
 import type {
   ActionOption,
+  DeckCardDefinition,
+  DeckId,
   GameEvent,
   GameAction,
   GameState,
@@ -86,6 +97,28 @@ export function buildCost(g: GameState, p: PlayerState, property: PropertyState)
       (p.discount ? 0.5 : 1),
   );
 }
+function shuffle<T>(items: T[], env: EngineEnvironment): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = env.randomInt(i + 1);
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+/**
+ * Bring a stored version-2/3 game up to the current shape. Idempotent: fields added later in
+ * version 3 (decks, news, guesses, prophet counts) get neutral defaults.
+ */
+export function migrateGame(state: GameState): GameState {
+  const g = state as GameState & Partial<Pick<GameState, 'decks' | 'news' | 'guesses'>>;
+  g.version = 3;
+  g.pot ??= 0;
+  g.decks ??= { chance: CHANCE_CARDS.map((c) => c.id), fate: FATE_CARDS.map((c) => c.id) };
+  g.news ??= null;
+  g.guesses ??= {};
+  for (const p of g.players) (p as Partial<PlayerState>).prophet ??= 0;
+  return g as GameState;
+}
 export function createGame(
   settings: RoomSettings,
   seats: Seat[],
@@ -110,6 +143,7 @@ export function createGame(
           taxShield: 0,
           skipTurns: 0,
           jailTurns: 0,
+          prophet: 0,
           nextDice: null,
           discount: false,
           abilityRound: -2,
@@ -125,7 +159,7 @@ export function createGame(
       '团队模式需要均分的 2v2 或 3v3 队伍',
     );
   const g: GameState = {
-    version: 2,
+    version: 3,
     id,
     revision: 0,
     settings,
@@ -153,6 +187,18 @@ export function createGame(
     trade: null,
     traps: {},
     pot: 0,
+    decks: {
+      chance: shuffle(
+        CHANCE_CARDS.map((c) => c.id),
+        env,
+      ),
+      fate: shuffle(
+        FATE_CARDS.map((c) => c.id),
+        env,
+      ),
+    },
+    news: null,
+    guesses: {},
     events: [],
     nextEvent: 1,
     lastDice: [],
@@ -395,51 +441,8 @@ function land(g: GameState, env: EngineEnvironment) {
     }
     return;
   }
-  if (tile.kind === 'event') {
-    const event = env.randomInt(8);
-    if (event === 0)
-      reward(
-        g,
-        p,
-        Math.round((150 + env.randomInt(150)) * (p.characterId === 'explorer' ? 1.25 : 1)),
-        env,
-        '街区奇遇',
-      );
-    else if (event === 1) drawCard(g, p, env);
-    else if (event === 2) {
-      p.shield++;
-      log(g, env, 'event', `${p.name}得到市民保险，一次租金护盾`, p.id);
-    } else if (event === 3) charge(g, p, 100, null, env, '公共设施维护');
-    else if (event === 4) {
-      const size = mapById(g.settings.mapId).tiles.length;
-      const path = [1, 2, 3].map((n) => (p.position - n + size) % size);
-      p.position = path[2];
-      log(
-        g,
-        env,
-        'move',
-        `${p.name}遇到逆风，后退 3 格至${tileAt(g, p.position).name}`,
-        p.id,
-        undefined,
-        path,
-      );
-      land(g, env);
-    } else if (event === 5) sendToJail(g, p, env, '护照过期');
-    else if (event === 6) {
-      p.position = BOARD.start;
-      log(g, env, 'move', `${p.name}搭上免费航班，直飞起点`, p.id, undefined, [BOARD.start]);
-      reward(g, p, BOARD.salary, env, '抵达起点');
-    } else {
-      let total = 0;
-      for (const other of g.players.filter((x) => !x.bankrupt && enemy(g, p, x))) {
-        const amount = Math.min(other.cash, 30);
-        other.cash -= amount;
-        total += amount;
-      }
-      p.cash += total;
-      log(g, env, 'event', `${p.name}举办旅途生日会，收到对手礼金 ${total}`, p.id, total);
-    }
-  } else if (tile.kind === 'tax') {
+  if (tile.kind === 'chance' || tile.kind === 'fate') drawDeck(g, p, tile.kind, env);
+  else if (tile.kind === 'tax') {
     if (p.taxShield > 0) {
       p.taxShield--;
       log(g, env, 'shield', `${p.name}使用税务减免`, p.id);
@@ -458,6 +461,228 @@ function land(g: GameState, env: EngineEnvironment) {
   } else if (tile.kind === 'jail') log(g, env, 'map', `${p.name}只是路过拘留所探访`, p.id);
   else if (tile.kind === 'transit')
     log(g, env, 'map', `港口已靠岸，可支付 ${FERRY_FARE} 乘船前往对岸港口。`, p.id);
+}
+/** Walk the ring square by square (ignoring forks) to a card's destination, then land. */
+function walkTo(g: GameState, p: PlayerState, target: number, env: EngineEnvironment, why: string) {
+  const size = mapById(g.settings.mapId).tiles.length;
+  const path: number[] = [];
+  for (let at = p.position; at !== target;) {
+    at = (at + 1) % size;
+    path.push(at);
+    if (at === BOARD.start) reward(g, p, BOARD.salary, env, '经过起点');
+  }
+  p.position = target;
+  log(g, env, 'move', `${p.name}${why}，抵达${tileAt(g, target).name}`, p.id, undefined, path);
+  land(g, env);
+}
+function walkBack(
+  g: GameState,
+  p: PlayerState,
+  steps: number,
+  env: EngineEnvironment,
+  why: string,
+) {
+  const size = mapById(g.settings.mapId).tiles.length;
+  const path = Array.from({ length: steps }, (_, n) => (p.position - n - 1 + size) % size);
+  p.position = path.at(-1)!;
+  log(
+    g,
+    env,
+    'move',
+    `${p.name}${why}，后退至${tileAt(g, p.position).name}`,
+    p.id,
+    undefined,
+    path,
+  );
+  land(g, env);
+}
+const DECK_NAMES: Record<DeckId, string> = { chance: '机会', fate: '命运' };
+/**
+ * Catch-up: the poorest player who is clearly behind (under 70% of the leader's net worth,
+ * with at least three players still in) gets visible help. Open to anyone who falls behind.
+ */
+export function isTrailing(g: GameState, p: PlayerState): boolean {
+  const alive = g.players.filter((x) => !x.bankrupt);
+  if (alive.length < 3 || p.bankrupt) return false;
+  const worth = alive.map((x) => assetsOf(g, x));
+  const mine = assetsOf(g, p);
+  return mine === Math.min(...worth) && mine < Math.max(...worth) * 0.7;
+}
+function drawDeck(g: GameState, p: PlayerState, deck: DeckId, env: EngineEnvironment) {
+  const order = g.decks[deck];
+  let id = order.shift()!;
+  if (isTrailing(g, p)) {
+    // Best of two: turn over the next card as well and keep the better one.
+    const other = order.shift()!;
+    const keep = deckCardById(other)!.value > deckCardById(id)!.value ? other : id;
+    const skip = keep === id ? other : id;
+    log(
+      g,
+      env,
+      'card',
+      `${p.name}落后补偿：翻开「${deckCardById(id)!.name}」和「${deckCardById(other)!.name}」，保留更好的一张`,
+      p.id,
+    );
+    order.push(skip);
+    id = keep;
+  }
+  order.push(id);
+  const card = deckCardById(id)!;
+  log(
+    g,
+    env,
+    'card',
+    `${p.name}抽到${DECK_NAMES[deck]}卡「${card.name}」：${card.text}`,
+    p.id,
+    undefined,
+    undefined,
+    { spot: deck, card: card.id, tile: p.position },
+  );
+  applyDeckCard(g, p, card, env);
+}
+function applyDeckCard(
+  g: GameState,
+  p: PlayerState,
+  card: DeckCardDefinition,
+  env: EngineEnvironment,
+) {
+  const map = mapById(g.settings.mapId);
+  const rivals = g.players.filter((x) => !x.bankrupt && enemy(g, p, x));
+  switch (card.effect) {
+    case 'gain':
+      // The explorer's passive boosts cash rewards from chance and fate.
+      reward(
+        g,
+        p,
+        Math.round(card.amount * (p.characterId === 'explorer' ? 1.25 : 1)),
+        env,
+        card.name,
+      );
+      break;
+    case 'pay':
+      charge(g, p, card.amount, null, env, card.name);
+      break;
+    case 'advanceTo': {
+      let target: number | undefined;
+      if (card.target === 'start') target = BOARD.start;
+      else if (card.target === 'parking') target = BOARD.parking;
+      else if (card.target === 'priciest')
+        target = map.tiles.reduce(
+          (best, t) => (t.price > map.tiles[best].price ? t.index : best),
+          0,
+        );
+      else if (card.target === 'nearestEmpty')
+        for (let n = 1; n < map.tiles.length && target === undefined; n++) {
+          const at = (p.position + n) % map.tiles.length;
+          if (propertyAt(g, at) && !propertyAt(g, at)!.owner) target = at;
+        }
+      else if (typeof card.target === 'number') target = card.target;
+      if (target === undefined) reward(g, p, card.amount, env, `${card.name}：已无空地`);
+      else walkTo(g, p, target, env, `凭「${card.name}」`);
+      break;
+    }
+    case 'move':
+      if (card.amount > 0)
+        walkTo(g, p, (p.position + card.amount) % map.tiles.length, env, `凭「${card.name}」`);
+      else walkBack(g, p, -card.amount, env, `遇到${card.name}`);
+      break;
+    case 'jail':
+      sendToJail(g, p, env, `抽到「${card.name}」`);
+      break;
+    case 'jailCard':
+      if (p.cards.length < 8) {
+        p.cards.push('rescue');
+        log(g, env, 'card', `${p.name}获得一张「自由通行」`, p.id);
+      } else reward(g, p, card.amount, env, `${card.name}（手牌已满）`);
+      break;
+    case 'repairs': {
+      const levels = g.properties.filter((x) => x.owner === p.id).reduce((n, x) => n + x.level, 0);
+      if (levels) charge(g, p, levels * card.amount, null, env, `${card.name}（${levels} 级建筑）`);
+      else log(g, env, 'card', `${p.name}没有建筑，${card.name}无须付费`, p.id);
+      break;
+    }
+    case 'payEach':
+      for (const other of rivals) {
+        if (g.debt) break;
+        charge(g, p, card.amount, other.id, env, `${card.name}：付给${other.name}`);
+      }
+      break;
+    case 'collectEach': {
+      let total = 0;
+      for (const other of rivals) {
+        const amount = Math.min(other.cash, card.amount);
+        other.cash -= amount;
+        total += amount;
+      }
+      p.cash += total;
+      log(g, env, 'money', `${p.name}：${card.name}，收到对手共 ${total}`, p.id, total);
+      break;
+    }
+    case 'shield':
+      p.shield++;
+      log(g, env, 'shield', `${p.name}获得 1 次租金护盾`, p.id);
+      if (card.amount) reward(g, p, card.amount, env, card.name);
+      break;
+    case 'drawCard':
+      if (p.cards.length < 8) drawCard(g, p, env);
+      else reward(g, p, 80, env, `${card.name}（手牌已满）`);
+      break;
+    case 'upgradeRandom': {
+      const lots = g.properties.filter((x) => x.owner === p.id && !x.mortgaged && x.level < 3);
+      if (!lots.length) {
+        reward(g, p, card.amount, env, `${card.name}（暂无可升级地产）`);
+        break;
+      }
+      const lot = lots[env.randomInt(lots.length)];
+      lot.level++;
+      log(
+        g,
+        env,
+        'build',
+        `${p.name}的${tileAt(g, lot.tile).name}免费升至 ${lot.level} 级`,
+        p.id,
+        undefined,
+        undefined,
+        { spot: 'build', tile: lot.tile },
+      );
+      break;
+    }
+    case 'everyone':
+      for (const x of g.players.filter((x) => !x.bankrupt))
+        reward(g, x, card.amount, env, card.name);
+      break;
+    case 'robinHood': {
+      const alive = g.players.filter((x) => !x.bankrupt);
+      const rich = alive.reduce((a, b) => (b.cash > a.cash ? b : a));
+      const poor = alive.reduce((a, b) => (b.cash < a.cash ? b : a));
+      if (rich.id === poor.id || rich.cash === poor.cash) {
+        log(g, env, 'card', `${card.name}：大家现金相同，无事发生`, p.id);
+        break;
+      }
+      const amount = Math.min(rich.cash, card.amount);
+      rich.cash -= amount;
+      poor.cash += amount;
+      log(
+        g,
+        env,
+        'money',
+        `${card.name}：${rich.name}向${poor.name}转赠 ${amount}`,
+        poor.id,
+        amount,
+      );
+      break;
+    }
+    case 'potHalf': {
+      const half = Math.floor(g.pot / 2);
+      g.pot -= half;
+      p.cash += half;
+      log(g, env, 'money', `${p.name}领取一半奖池 +${half}`, p.id, half, undefined, {
+        spot: 'pot',
+        tile: BOARD.parking,
+      });
+      break;
+    }
+  }
 }
 function move(g: GameState, steps: number, env: EngineEnvironment, existingPath: number[] = []) {
   const p = currentPlayer(g),

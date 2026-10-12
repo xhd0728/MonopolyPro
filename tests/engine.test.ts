@@ -14,9 +14,17 @@ import {
   assetsOf,
   log,
   VIEW_EVENTS,
+  isTrailing,
 } from '../packages/engine/src/index.ts';
 import { botAction } from '../packages/engine/src/bot.ts';
-import { BOARD, CARDS, CHARACTERS, MAPS, mapById } from '../packages/content/src/index.ts';
+import {
+  BOARD,
+  CARDS,
+  CHARACTERS,
+  DECK_CARDS,
+  MAPS,
+  mapById,
+} from '../packages/content/src/index.ts';
 import {
   DEFAULT_SETTINGS,
   type Seat,
@@ -174,6 +182,11 @@ test('debt can be resolved by emergency withdrawal; bankruptcy clears ownership'
 test('each roll uses exactly one six-sided die; runner adds one step', () => {
   for (let face = 0; face < 6; face++) {
     let g = game();
+    // Square 3 is a chance square; keep a card on top that does not move the player.
+    g.decks.chance = [
+      'chance-dividend',
+      ...g.decks.chance.filter((id) => id !== 'chance-dividend'),
+    ];
     const roll = { now: 1000, randomInt: (max: number) => (max === 6 ? face : 0) };
     g = applyAction(g, 'p0', { type: 'roll' }, roll);
     assert.deepEqual(g.lastDice, [face + 1]);
@@ -293,20 +306,79 @@ test('chance tiles can push players back three squares', () => {
   let g = game();
   g.players[0].position = 2;
   g.players[0].nextDice = 1;
-  // Event roll picks outcome 4 (headwind), every other random draw is 0.
-  let draws = 0;
-  g = applyAction(
-    g,
-    'p0',
-    { type: 'roll' },
-    {
-      now: 1000,
-      randomInt: (max) => (max === 8 && draws++ === 0 ? 4 : 0),
-    },
-  );
+  g.decks.chance = ['chance-headwind', ...g.decks.chance.filter((id) => id !== 'chance-headwind')];
+  g = act(g, { type: 'roll' });
   assert.equal(g.players[0].position, 0);
   const move = [...g.events].reverse().find((e) => e.kind === 'move');
   assert.deepEqual(move?.path, [2, 1, 0]);
+  assert.equal(g.decks.chance.at(-1), 'chance-headwind', 'drawn cards return to the bottom');
+});
+test('every chance and fate card resolves from both deck squares without breaking invariants', () => {
+  for (const card of DECK_CARDS)
+    for (const square of [3, 15, 21, 33]) {
+      const deck = mapById('town').tiles[square].kind as 'chance' | 'fate';
+      if (card.deck !== deck) continue;
+      let g = game('town', 3);
+      propertyAt(g, 1)!.owner = 'p0';
+      propertyAt(g, 1)!.level = 2;
+      propertyAt(g, 2)!.owner = 'p1';
+      g.pot = 300;
+      g.players[0].position = square - 1;
+      g.players[0].nextDice = 1;
+      g.decks[deck] = [card.id, ...g.decks[deck].filter((id) => id !== card.id)];
+      g = act(g, { type: 'roll' });
+      assertInvariants(g);
+      const drawn = g.events.find((e) => e.spot === deck);
+      assert.equal(drawn?.card, card.id, `${card.id} is announced to the table`);
+      assert.equal(g.decks[deck].length, 16);
+    }
+  assert.equal(new Set(DECK_CARDS.map((c) => c.id)).size, 32);
+});
+test('deck effects: repairs tax buildings, relay helps the poorest, immunity frees from jail', () => {
+  let g = game('town', 3);
+  propertyAt(g, 1)!.owner = 'p0';
+  propertyAt(g, 1)!.level = 3;
+  g.players[0].position = 2;
+  g.players[0].nextDice = 1;
+  g.decks.chance = [
+    'chance-renovation',
+    ...g.decks.chance.filter((id) => id !== 'chance-renovation'),
+  ];
+  g = act(g, { type: 'roll' });
+  assert.equal(g.players[0].cash, 3000 - 120);
+  assert.equal(g.pot, 120);
+  g = game('town', 3);
+  g.players[1].cash = 5000;
+  g.players[2].cash = 100;
+  g.players[0].position = 14;
+  g.players[0].nextDice = 1;
+  g.decks.fate = ['fate-relay', ...g.decks.fate.filter((id) => id !== 'fate-relay')];
+  g = act(g, { type: 'roll' });
+  assert.deepEqual([g.players[1].cash, g.players[2].cash], [4900, 200]);
+  g = game();
+  g.players[0].position = 2;
+  g.players[0].nextDice = 1;
+  g.decks.chance = ['chance-immunity', ...g.decks.chance.filter((id) => id !== 'chance-immunity')];
+  g = act(g, { type: 'roll' });
+  assert.ok(g.players[0].cards.includes('rescue'));
+});
+test('a clearly trailing player draws two chance cards and keeps the better one', () => {
+  let g = game('town', 3);
+  g.players[0].cash = 400;
+  g.players[1].cash = 3000;
+  g.players[0].position = 2;
+  g.players[0].nextDice = 1;
+  g.decks.chance = [
+    'chance-passport',
+    'chance-maturity',
+    ...g.decks.chance.filter((id) => !['chance-passport', 'chance-maturity'].includes(id)),
+  ];
+  assert.equal(isTrailing(g, g.players[0]), true);
+  g = act(g, { type: 'roll' });
+  assert.equal(g.players[0].jailTurns, 0, 'the worse card (passport) is skipped');
+  assert.equal(g.players[0].cash, 400 + 250);
+  assert.ok(g.events.some((e) => e.text.includes('落后补偿')));
+  assert.equal(isTrailing(g, g.players[1]), false, 'the leader never gets help');
 });
 test('all 30 controlled card effects execute with valid targets', () => {
   assert.equal(CARDS.length, 30);

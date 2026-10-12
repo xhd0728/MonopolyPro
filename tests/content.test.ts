@@ -24,6 +24,11 @@ test('content catalog identities, targets and all connected map nodes are valid'
       ['0:0', '9:0', '9:9', '0:9'],
     );
     assert.ok(map.tiles.every((t) => t.x === 0 || t.x === 9 || t.z === 0 || t.z === 9));
+    assert.deepEqual(
+      map.tiles.filter((t) => t.kind === 'chance' || t.kind === 'fate').map((t) => t.kind),
+      ['chance', 'fate', 'chance', 'fate'],
+      'two chance and two fate squares, alternating around the ring',
+    );
     // Eight colour groups of two or three lots, priced in route order.
     const groups = new Map<number, number>();
     for (const t of countriesOf(map)) groups.set(t.group, (groups.get(t.group) ?? 0) + 1);

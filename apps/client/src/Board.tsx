@@ -22,7 +22,8 @@ const SEALS: Partial<Record<TileDefinition['kind'], string>> = {
   bank: '银',
   shop: '卡',
   tax: '税',
-  event: '?',
+  chance: '机',
+  fate: '命',
   transit: '港',
 };
 
@@ -62,8 +63,10 @@ function tileCaption(t: TileDefinition, game: GameView | null | undefined) {
       return '缴税';
     case 'transit':
       return '船票 80';
-    case 'event':
-      return '抽取机遇';
+    case 'chance':
+      return '抽机会卡';
+    case 'fate':
+      return '抽命运卡';
     default:
       return '';
   }
