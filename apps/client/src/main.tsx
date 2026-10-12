@@ -370,7 +370,9 @@ function App() {
       selectedCard && g
         ? cardTargetReason(selectedCard, g, me, target.id) ||
           (selectedCard.effect === 'remoteBuy' &&
-          (me?.cash ?? 0) < map.tiles[Number(target.id)]?.price
+          (me?.cash ?? 0) <
+            (g.properties.find((p) => p.tile === Number(target.id))?.price ??
+              map.tiles[Number(target.id)]?.price)
             ? '现金不足'
             : '')
         : '',

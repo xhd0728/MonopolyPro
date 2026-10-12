@@ -7,6 +7,8 @@ import {
   characterById,
   deckCardById,
   mapById,
+  NEWS,
+  newsById,
 } from '../../content/src/index.ts';
 import type {
   ActionOption,
@@ -88,14 +90,84 @@ export function rentOf(g: GameState, property: PropertyState, payer?: PlayerStat
   if (payer?.characterId === 'guardian') rent *= 0.85;
   if (property.boostUntil >= g.round) rent *= 1.5;
   if (property.cutUntil >= g.round) rent *= 0.5;
+  const news = newsNow(g);
+  if (news && g.news!.group === tile.group) {
+    if (news.effect === 'groupBoom') rent *= 1.5;
+    if (news.effect === 'groupSlump') rent *= 0.6;
+  }
   return Math.max(0, Math.round(rent));
 }
 export function buildCost(g: GameState, p: PlayerState, property: PropertyState): number {
   return Math.round(
     tileAt(g, property.tile).buildCost *
       (p.characterId === 'builder' ? 0.85 : 1) *
-      (p.discount ? 0.5 : 1),
+      (p.discount ? 0.5 : 1) *
+      (newsNow(g)?.effect === 'buildSale' ? 0.7 : 1),
   );
+}
+/** This round's world news, if any. */
+export function newsNow(g: Pick<GameState, 'news' | 'round'>) {
+  return g.news && g.news.round === g.round ? newsById(g.news.id) : undefined;
+}
+export const salaryOf = (g: GameState) =>
+  BOARD.salary * (newsNow(g)?.effect === 'doubleSalary' ? 2 : 1);
+export const bailOf = (g: GameState) =>
+  BOARD.bail * (newsNow(g)?.effect === 'strictCustoms' ? 2 : 1);
+/** Price of unowned land this round (land rush / land sale news). */
+export function landPrice(g: GameState, tile: number) {
+  const effect = newsNow(g)?.effect;
+  return Math.round(
+    tileAt(g, tile).price * (effect === 'landRush' ? 1.2 : effect === 'landSale' ? 0.8 : 1),
+  );
+}
+const interestRate = (g: GameState) => {
+  const effect = newsNow(g)?.effect;
+  return effect === 'rateCut' ? 0 : effect === 'rateHike' ? 0.06 : 0.03;
+};
+function groupNames(g: GameState, group: number) {
+  return mapById(g.settings.mapId)
+    .tiles.filter((t) => t.kind === 'property' && t.group === group)
+    .map((t) => t.name)
+    .join('、');
+}
+function flipNews(g: GameState, env: EngineEnvironment) {
+  const choices = NEWS.filter((n) => n.id !== g.news?.id);
+  const news = choices[env.randomInt(choices.length)];
+  const group = ['groupBoom', 'groupSlump'].includes(news.effect) ? env.randomInt(8) : undefined;
+  g.news = { id: news.id, round: g.round, ...(group !== undefined ? { group } : {}) };
+  const detail =
+    group !== undefined
+      ? `${groupNames(g, group)}本轮租金${news.effect === 'groupBoom' ? ' +50%' : ' −40%'}`
+      : news.text;
+  log(
+    g,
+    env,
+    'news',
+    `第 ${g.round} 轮世界新闻「${news.name}」：${detail}`,
+    undefined,
+    undefined,
+    undefined,
+    {
+      spot: 'news',
+    },
+  );
+  const alive = g.players.filter((p) => !p.bankrupt);
+  if (news.effect === 'festival') for (const p of alive) reward(g, p, news.amount, env, news.name);
+  if (news.effect === 'wealthTax' && alive.length > 1) {
+    const rich = alive.reduce((a, b) => (assetsOf(g, b) > assetsOf(g, a) ? b : a));
+    const average = alive.reduce((n, x) => n + assetsOf(g, x), 0) / alive.length;
+    // Only a clear leader pays: at least 20% above the table's average net worth.
+    const tax =
+      assetsOf(g, rich) >= average * 1.2
+        ? Math.min(300, Math.round((rich.cash * news.amount) / 100))
+        : 0;
+    if (!tax) log(g, env, 'news', '暂无明显领先的富豪，本轮无人缴纳富豪税');
+    else {
+      rich.cash -= tax;
+      g.pot += tax;
+      log(g, env, 'payment', `${rich.name}缴纳富豪税 −${tax}，进入停车场奖池`, rich.id, -tax);
+    }
+  }
 }
 function shuffle<T>(items: T[], env: EngineEnvironment): T[] {
   const out = [...items];
@@ -208,6 +280,8 @@ export function createGame(
   for (const p of players)
     for (let i = 0; i < (p.characterId === 'dealer' ? 3 : 2); i++) drawCard(g, p, env);
   log(g, env, 'start', '富翁之旅开始了！先使用卡牌或天赋，再掷骰出发。');
+  // Everyone starts level, so the first round is calm; world news begins in round two.
+  g.news = { id: 'calm', round: 1 };
   return g;
 }
 function setPhase(g: GameState, phase: GameState['phase'], env: EngineEnvironment) {
@@ -315,9 +389,12 @@ function advanceTurn(g: GameState, env: EngineEnvironment) {
   for (let i = 0; i < g.players.length * 2; i++) {
     g.turn = (g.turn + 1) % g.players.length;
     if (g.turn === 0) {
+      // Interest uses the news of the round that just ended.
+      const rate = interestRate(g);
       g.round++;
       for (const p of g.players.filter((p) => !p.bankrupt && p.deposit > 0))
-        reward(g, p, Math.floor(p.deposit * 0.03), env, '银行利息');
+        if (Math.floor(p.deposit * rate) > 0)
+          reward(g, p, Math.floor(p.deposit * rate), env, '银行利息');
       const map = mapById(g.settings.mapId);
       if (map.mechanic === 'gates')
         log(
@@ -326,11 +403,7 @@ function advanceTurn(g: GameState, env: EngineEnvironment) {
           'map',
           g.round % 2 === 0 ? '丝路商路开放，可选择跨洲快线。' : '丝路商路关闭，沿常规环线前进。',
         );
-      if (g.round % 4 === 0) {
-        const amount = 70 + env.randomInt(80);
-        for (const p of g.players.filter((p) => !p.bankrupt))
-          reward(g, p, amount, env, '环球庆典奖励');
-      }
+      flipNews(g, env);
     }
     const p = currentPlayer(g);
     if (p.bankrupt) continue;
@@ -345,7 +418,7 @@ function advanceTurn(g: GameState, env: EngineEnvironment) {
         g,
         env,
         'jail',
-        `轮到${p.name}，仍在${tileAt(g, BOARD.jail).name}：缴纳 ${BOARD.bail} 保释金、使用「自由通行」或掷出 ${BOARD.jailEscapeFace} 点出狱`,
+        `轮到${p.name}，仍在${tileAt(g, BOARD.jail).name}：缴纳 ${bailOf(g)} 保释金、使用「自由通行」或掷出 ${BOARD.jailEscapeFace} 点出狱`,
         p.id,
       );
       return;
@@ -443,7 +516,9 @@ function land(g: GameState, env: EngineEnvironment) {
   }
   if (tile.kind === 'chance' || tile.kind === 'fate') drawDeck(g, p, tile.kind, env);
   else if (tile.kind === 'tax') {
-    if (p.taxShield > 0) {
+    if (newsNow(g)?.effect === 'taxHoliday')
+      log(g, env, 'shield', `${p.name}赶上税务假期，本次免税`, p.id);
+    else if (p.taxShield > 0) {
       p.taxShield--;
       log(g, env, 'shield', `${p.name}使用税务减免`, p.id);
     } else charge(g, p, 120 + g.round * 5, null, env, '公共税费');
@@ -469,7 +544,7 @@ function walkTo(g: GameState, p: PlayerState, target: number, env: EngineEnviron
   for (let at = p.position; at !== target;) {
     at = (at + 1) % size;
     path.push(at);
-    if (at === BOARD.start) reward(g, p, BOARD.salary, env, '经过起点');
+    if (at === BOARD.start) reward(g, p, salaryOf(g), env, '经过起点');
   }
   p.position = target;
   log(g, env, 'move', `${p.name}${why}，抵达${tileAt(g, target).name}`, p.id, undefined, path);
@@ -539,6 +614,7 @@ function drawDeck(g: GameState, p: PlayerState, deck: DeckId, env: EngineEnviron
     { spot: deck, card: card.id, tile: p.position },
   );
   applyDeckCard(g, p, card, env);
+  if (newsNow(g)?.effect === 'luckyDraw' && !p.bankrupt) reward(g, p, 50, env, '幸运日抽卡奖励');
 }
 function applyDeckCard(
   g: GameState,
@@ -696,7 +772,7 @@ function move(g: GameState, steps: number, env: EngineEnvironment, existingPath:
     }
     p.position = exits[0];
     path.push(p.position);
-    if (p.position === BOARD.start) reward(g, p, BOARD.salary, env, '经过起点');
+    if (p.position === BOARD.start) reward(g, p, salaryOf(g), env, '经过起点');
   }
   g.pendingPath = null;
   log(g, env, 'move', `${p.name}抵达${tileAt(g, p.position).name}`, p.id, undefined, path);
@@ -838,7 +914,7 @@ function cardAction(
       break;
     case 'teleport':
       p.position = BOARD.start;
-      reward(g, p, BOARD.salary, env, '回到起点');
+      reward(g, p, salaryOf(g), env, '回到起点');
       break;
     case 'dice':
       requireRule(
@@ -894,7 +970,7 @@ function cardAction(
       property!.boostUntil = g.round + card.amount - 1;
       break;
     case 'remoteBuy': {
-      const price = tileAt(g, property!.tile).price;
+      const price = landPrice(g, property!.tile);
       requireRule(p.cash >= price, `需要 ${price} 现金`);
       p.cash -= price;
       property!.owner = p.id;
@@ -1001,17 +1077,11 @@ export function applyAction(
     }
     case 'bail': {
       requireRule(currentPlayer(g).id === p.id && g.phase === 'jail', '现在不在拘留所');
-      requireRule(p.cash >= BOARD.bail, `保释金需要 ${BOARD.bail} 现金`);
-      p.cash -= BOARD.bail;
-      g.pot += BOARD.bail;
-      log(
-        g,
-        env,
-        'payment',
-        `${p.name}：缴纳保释金 −${BOARD.bail}，计入停车场奖池`,
-        p.id,
-        -BOARD.bail,
-      );
+      const bail = bailOf(g);
+      requireRule(p.cash >= bail, `保释金需要 ${bail} 现金`);
+      p.cash -= bail;
+      g.pot += bail;
+      log(g, env, 'payment', `${p.name}：缴纳保释金 −${bail}，计入停车场奖池`, p.id, -bail);
       releaseFromJail(g, p, env, '缴纳保释金');
       break;
     }
@@ -1061,7 +1131,7 @@ export function applyAction(
       );
       const pending = g.pendingPath!;
       p.position = action.tile;
-      if (p.position === BOARD.start) reward(g, p, BOARD.salary, env, '经过起点');
+      if (p.position === BOARD.start) reward(g, p, salaryOf(g), env, '经过起点');
       move(g, pending.remaining - 1, env, [...pending.path, p.position]);
       break;
     }
@@ -1069,20 +1139,15 @@ export function applyAction(
       requireRule(currentPlayer(g).id === p.id && g.phase === 'purchase', '现在没有待购买的地产');
       const property = propertyAt(g, p.position)!,
         tile = tileAt(g, p.position);
-      requireRule(!property.owner && p.cash >= tile.price, `需要 ${tile.price} 现金`);
-      p.cash -= tile.price;
+      const price = landPrice(g, p.position);
+      requireRule(!property.owner && p.cash >= price, `需要 ${price} 现金`);
+      p.cash -= price;
       property.owner = p.id;
       setPhase(g, 'manage', env);
-      log(
-        g,
-        env,
-        'purchase',
-        `${p.name}买下${tile.name}，花费 ${tile.price}`,
-        p.id,
-        -tile.price,
-        undefined,
-        { spot: 'purchase', tile: p.position },
-      );
+      log(g, env, 'purchase', `${p.name}买下${tile.name}，花费 ${price}`, p.id, -price, undefined, {
+        spot: 'purchase',
+        tile: p.position,
+      });
       break;
     }
     case 'pass':
@@ -1418,11 +1483,12 @@ export function actionsFor(g: GameState, id: string): ActionOption[] {
     return options;
   }
   if (g.phase === 'purchase') {
-    const tile = tileAt(g, p.position);
-    if (p.cash >= tile.price)
+    const tile = tileAt(g, p.position),
+      price = landPrice(g, p.position);
+    if (p.cash >= price)
       add(
         { type: 'buy' },
-        `购买 · ${tile.price}`,
+        `购买 · ${price}`,
         `基础租金 ${tile.rent}，标准建设费 ${tile.buildCost}`,
         true,
       );
@@ -1437,8 +1503,8 @@ export function actionsFor(g: GameState, id: string): ActionOption[] {
       `掷出 ${BOARD.jailEscapeFace} 点立即出狱并前进；否则本回合留下，下回合自由`,
       true,
     );
-    if (p.cash >= BOARD.bail)
-      add({ type: 'bail' }, `缴纳保释金 · ${BOARD.bail}`, '出狱后正常掷骰；保释金进入停车场奖池');
+    if (p.cash >= bailOf(g))
+      add({ type: 'bail' }, `缴纳保释金 · ${bailOf(g)}`, '出狱后正常掷骰；保释金进入停车场奖池');
   }
   if (g.phase === 'manage' && ferryTarget(g, p.position) !== undefined && p.cash >= FERRY_FARE)
     add({ type: 'ferry' }, `轮渡捷径 · ${FERRY_FARE}`, '抵达另一座码头后再次掷骰');
@@ -1513,6 +1579,7 @@ export function viewFor(g: GameState, viewerId: string | null): GameView {
       const owner = property.owner ? playerById(g, property.owner) : undefined;
       return {
         ...property,
+        price: landPrice(g, property.tile),
         rent: rentOf(g, property),
         payableRent:
           owner &&

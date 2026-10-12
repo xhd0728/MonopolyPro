@@ -1,6 +1,6 @@
-import { BOARD, cardById } from '../../content/src/index.ts';
+import { cardById } from '../../content/src/index.ts';
 import type { GameAction, GameState } from '../../shared/src/index.ts';
-import { actionsFor, actingPlayerId, assetsOf, propertyAt } from './index.ts';
+import { actionsFor, actingPlayerId, assetsOf, bailOf, propertyAt } from './index.ts';
 
 /** Uses only public opponent information and this seat's own cards. No network/LLM calls. */
 export function botAction(g: GameState, id: string): GameAction | null {
@@ -41,7 +41,7 @@ export function botAction(g: GameState, id: string): GameAction | null {
     if (rescue) return { type: 'playCard', cardId: rescue };
     // Leaving early matters most while unowned land is still on the board.
     const landLeft = g.properties.some((x) => !x.owner);
-    return p.cash >= BOARD.bail + (landLeft ? 500 : 1500) &&
+    return p.cash >= bailOf(g) + (landLeft ? 500 : 1500) &&
       options.some((x) => x.action.type === 'bail')
       ? { type: 'bail' }
       : { type: 'jailRoll' };

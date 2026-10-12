@@ -15,6 +15,10 @@ import {
   log,
   VIEW_EVENTS,
   isTrailing,
+  salaryOf,
+  bailOf,
+  landPrice,
+  buildCost,
 } from '../packages/engine/src/index.ts';
 import { botAction } from '../packages/engine/src/bot.ts';
 import {
@@ -23,6 +27,7 @@ import {
   CHARACTERS,
   DECK_CARDS,
   MAPS,
+  NEWS,
   mapById,
 } from '../packages/content/src/index.ts';
 import {
@@ -494,4 +499,86 @@ test('a jailed opponent cannot be swapped out of the jail corner', () => {
   g = act(g, { type: 'playCard', cardId: 'swap', targetId: 'p1' });
   assert.equal(g.players[0].position, BOARD.jail);
   assert.equal(g.players[0].jailTurns, 0, 'standing on the jail square is only visiting');
+});
+test('world news flips every round, never repeats back to back, and changes that round only', () => {
+  let g = game();
+  assert.deepEqual(g.news, { id: 'calm', round: 1 }, 'round one opens calm and level');
+  let seed = 11;
+  const randomInt = (max: number) => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) % max;
+  const seen: string[] = [g.news!.id];
+  for (let i = 0; i < 40 && g.phase !== 'finished'; i++) {
+    const actor = g.trade?.to ?? actingPlayerId(g)!;
+    const before = g.round;
+    g = applyAction(g, actor, botAction(g, actor)!, { now: 1000, randomInt });
+    if (g.round !== before) {
+      assert.equal(g.news!.round, g.round);
+      assert.notEqual(g.news!.id, seen.at(-1), 'no repeat on consecutive rounds');
+      seen.push(g.news!.id);
+    }
+  }
+  assert.ok(seen.length > 3);
+});
+test('news effects: boom rent, tax holiday, payday, customs bail, land sale, build sale', () => {
+  const at = (id: string, group?: number) => {
+    const g = game();
+    g.news = { id, round: g.round, ...(group !== undefined ? { group } : {}) };
+    return g;
+  };
+  let g = at('boom', 0);
+  propertyAt(g, 1)!.owner = 'p0'; // builder: no rent passive
+  const base = mapById('town').tiles[1].rent;
+  assert.equal(rentOf(g, propertyAt(g, 1)!), Math.round(base * 1.5));
+  g.news!.round = g.round - 1;
+  assert.equal(rentOf(g, propertyAt(g, 1)!), base, 'expired news has no effect');
+  g = at('tax-holiday');
+  g.players[0].position = 5;
+  g.players[0].nextDice = 1;
+  g = act(g, { type: 'roll' });
+  assert.equal(g.players[0].cash, 3000);
+  g = at('payday');
+  assert.equal(salaryOf(g), BOARD.salary * 2);
+  g = at('customs');
+  assert.equal(bailOf(g), BOARD.bail * 2);
+  g = at('land-sale');
+  assert.equal(landPrice(g, 1), Math.round(mapById('town').tiles[1].price * 0.8));
+  assert.equal(viewFor(g, 'p0').properties.find((p) => p.tile === 1)!.price, landPrice(g, 1));
+  g.players[0].position = 1;
+  g.phase = 'purchase';
+  g = act(g, { type: 'buy' });
+  assert.equal(g.players[0].cash, 3000 - landPrice(g, 1));
+  g = at('build-sale');
+  propertyAt(g, 1)!.owner = 'p0';
+  assert.equal(
+    buildCost(g, g.players[0], propertyAt(g, 1)!),
+    Math.round(mapById('town').tiles[1].buildCost * 0.85 * 0.7),
+  );
+});
+
+test('the wealth tax only charges a clear leader', () => {
+  const flip = (g: GameState) => {
+    g.news = { id: 'payday', round: g.round };
+    g.phase = 'manage';
+    g.turn = g.players.length - 1;
+    // Force the next flip to draw the wealth tax.
+    return applyAction(
+      g,
+      g.players[g.turn].id,
+      { type: 'end' },
+      {
+        now: 1000,
+        randomInt: (max: number) =>
+          max === NEWS.length - 1
+            ? NEWS.filter((n) => n.id !== 'payday').findIndex((n) => n.id === 'wealth-tax')
+            : 0,
+      },
+    );
+  };
+  let g = flip(game('town', 3));
+  assert.equal(g.news!.id, 'wealth-tax');
+  assert.equal(g.pot, 0, 'equal tables pay nothing');
+  g = game('town', 3);
+  g.players[1].cash = 6000;
+  g = flip(g);
+  assert.equal(g.pot, 300);
+  assert.equal(g.players[1].cash, 5700);
 });

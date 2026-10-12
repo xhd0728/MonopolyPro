@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { GameView, MapDefinition, RoomView } from '../../../packages/shared/src/index.ts';
 import { money, playerColor } from './game-ui.ts';
-import { CARDS } from '../../../packages/content/src/index.ts';
+import { CARDS, countryFlag, newsById } from '../../../packages/content/src/index.ts';
 import './match.css';
 import { ActionTicker } from './Feedback.tsx';
 const pips: Record<number, number[]> = {
@@ -98,7 +98,7 @@ export function phaseGuide(game: GameView, map: MapDefinition): { title: string;
   if (game.phase === 'purchase')
     return {
       title: `${prefix}抵达${map.tiles[actor?.position ?? 0].name}`,
-      text: `地价 ${money(map.tiles[actor?.position ?? 0].price)}。直接购买，或放弃购买让所有人公开竞拍。`,
+      text: `地价 ${money(game.properties.find((p) => p.tile === actor?.position)?.price ?? map.tiles[actor?.position ?? 0].price)}。直接购买，或放弃购买让所有人公开竞拍。`,
     };
   if (game.phase === 'auction')
     return {
@@ -154,6 +154,7 @@ export function MatchHud({
 }) {
   const game = room.game!,
     guide = phaseGuide(game, map);
+  const news = game.news && game.news.round === game.round ? newsById(game.news.id) : undefined;
   const thinking =
     room.aiActivity?.state === 'thinking'
       ? game.players.find((p) => p.id === room.aiActivity!.playerId)?.name
@@ -163,6 +164,23 @@ export function MatchHud({
       <span className="hud-route">
         {map.name} · 第 {game.round} 轮{game.pot > 0 && <em>停车场奖池 {money(game.pot)}</em>}
       </span>
+      {news && (
+        <span className="hud-news" title={news.text}>
+          {news.icon} 本轮新闻：{news.name}
+          {game.news!.group !== undefined ? (
+            <>
+              {' '}
+              {map.tiles
+                .filter((t) => t.kind === 'property' && t.group === game.news!.group)
+                .map((t) => countryFlag(t.countryCode))
+                .join('')}{' '}
+              租金{news.effect === 'groupBoom' ? ' +50%' : ' −40%'}
+            </>
+          ) : (
+            <small>{news.text}</small>
+          )}
+        </span>
+      )}
       <DiceView game={game} rolling={rolling} />
       <div className="phase-guide" aria-label="本阶段说明">
         <h3>{guide.title}</h3>

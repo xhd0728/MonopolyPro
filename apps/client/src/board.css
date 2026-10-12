@@ -817,3 +817,52 @@
     animation: none;
   }
 }
+
+/* ---------- World news on the board ---------- */
+.hud-news {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: baseline;
+  gap: 0 calc(var(--u) * 0.12);
+  max-width: calc(var(--u) * 6.4);
+  padding: calc(var(--u) * 0.06) calc(var(--u) * 0.22);
+  border-radius: 999px;
+  background: #0e2f4ccc;
+  color: #fff;
+  font-size: clamp(11px, calc(var(--u) * 0.19), 15px);
+  font-weight: 700;
+}
+.hud-news small {
+  font-weight: 400;
+  color: #b9d6ea;
+  font-size: clamp(10px, calc(var(--u) * 0.16), 13px);
+}
+.country-tile.news-boom {
+  box-shadow:
+    inset 0 0 0 calc(var(--u) * 0.045) #f08c2e,
+    0 0 calc(var(--u) * 0.2) #f08c2e88;
+}
+.country-tile.news-slump {
+  filter: saturate(0.6);
+}
+.tile-news {
+  position: absolute;
+  top: calc(var(--u) * 0.04);
+  left: calc(var(--u) * 0.05);
+  padding: 0 calc(var(--u) * 0.05);
+  border-radius: calc(var(--u) * 0.05);
+  background: #f08c2e;
+  color: #fff;
+  font-size: max(9px, calc(var(--u) * 0.15));
+  font-weight: 900;
+  line-height: 1.3;
+}
+.news-slump .tile-news {
+  background: #5d6b78;
+}
+@container (max-width: 560px) {
+  .hud-news small {
+    display: none;
+  }
+}

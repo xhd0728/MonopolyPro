@@ -92,6 +92,11 @@ const TileGrid = memo(function TileGrid({
     if (!p.bankrupt) occupants.set(p.position, [...(occupants.get(p.position) ?? []), p.name]);
   const gates = new Map(map.shortcuts.map(([from, to]) => [from, to]));
   const gatesOpen = map.mechanic !== 'gates' || (game?.round ?? 1) % 2 === 0;
+  // This round's news may lift or cut one colour group's rent.
+  const newsGroup =
+    game?.news && game.news.round === game.round && game.news.group !== undefined
+      ? { group: game.news.group, boom: game.news.id === 'boom' }
+      : undefined;
   const forkChoices = new Set(
     game?.phase === 'path' && game.activeId === game.viewerId ? game.pendingPath!.choices : [],
   );
@@ -117,6 +122,9 @@ const TileGrid = memo(function TileGrid({
               active?.position === t.index && 'current',
               property?.mortgaged && 'mortgaged',
               owner !== undefined && 'owned',
+              newsGroup?.group === t.group &&
+                t.kind === 'property' &&
+                (newsGroup.boom ? 'news-boom' : 'news-slump'),
             ]
               .filter(Boolean)
               .join(' ')}
@@ -162,7 +170,7 @@ const TileGrid = memo(function TileGrid({
                     ? '抵押'
                     : owner !== undefined
                       ? `租 ${property!.rent}`
-                      : t.price}
+                      : (property?.price ?? t.price)}
                 </span>
               </>
             ) : (
@@ -173,6 +181,11 @@ const TileGrid = memo(function TileGrid({
                 <b className="tile-name">{t.name}</b>
                 <span className="tile-price">{tileCaption(t, game)}</span>
               </>
+            )}
+            {newsGroup?.group === t.group && t.kind === 'property' && (
+              <span className="tile-news" aria-hidden="true">
+                {newsGroup.boom ? '旺' : '淡'}
+              </span>
             )}
             {trap && (
               <span className="tile-trap" title={`施工点：对手停靠支付 ${trap.amount}`}>

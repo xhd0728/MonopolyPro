@@ -288,6 +288,8 @@ export type PlayerView = Omit<PlayerState, 'cards' | 'nextDice'> & {
   lastAction: string | null;
 };
 export interface PropertyView extends PropertyState {
+  /** Current purchase price for unowned land, after this round's news. */
+  price: number;
   rent: number;
   payableRent: number;
   upgradeCost: number;
