@@ -15,6 +15,8 @@ import {
   log,
   VIEW_EVENTS,
   isTrailing,
+  isBehind,
+  taxFor,
   salaryOf,
   bailOf,
   landPrice,
@@ -581,4 +583,35 @@ test('the wealth tax only charges a clear leader', () => {
   g = flip(g);
   assert.equal(g.pot, 300);
   assert.equal(g.players[1].cash, 5700);
+});
+
+test('catch-up rules: subsidy for players far behind, wealth-scaled tax, travel stipend', () => {
+  let g = game('town', 3);
+  g.players[1].cash = 9000;
+  assert.equal(isBehind(g, g.players[0]), true);
+  assert.equal(isBehind(g, g.players[1]), false);
+  g.players[0].position = BOARD.tiles - 1;
+  g.players[0].nextDice = 2;
+  g = act(g, { type: 'roll' });
+  assert.equal(g.players[0].cash, 3000 + BOARD.salary * 1.5, 'salary plus 50% catch-up subsidy');
+  assert.ok(g.events.some((e) => e.text.includes('追赶补贴')));
+  // Tax: the rich pay 4% of net worth once that beats the base tax.
+  assert.equal(taxFor(g, g.players[1]), Math.round(9000 * 0.04));
+  assert.equal(taxFor(g, g.players[2]), 120 + g.round * 5);
+  // Stipend every four rounds: 60, or 140 for players far behind.
+  g = game('town', 3);
+  g.players[1].cash = 9000;
+  g.round = 3;
+  g.turn = 2;
+  g.phase = 'manage';
+  g = applyAction(g, 'p2', { type: 'end' }, { now: 1000, randomInt: () => 0 });
+  assert.equal(g.round, 4);
+  assert.ok(
+    g.events.some((e) => e.actor === 'p0' && e.text.includes('追赶加倍') && e.amount === 140),
+  );
+  assert.ok(
+    g.events.some(
+      (e) => e.actor === 'p1' && e.text === 'P1：环球补助 +60'.replace('P1', g.players[1].name),
+    ),
+  );
 });

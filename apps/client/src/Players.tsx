@@ -45,6 +45,7 @@ export const PlayerRoster = memo(function PlayerRoster({
 }) {
   const g = room.game!;
   const gallery = useRef<HTMLDivElement>(null);
+  const leaderWorth = Math.max(...g.players.filter((p) => !p.bankrupt).map((p) => p.assets));
   // Floating +/− on every card whenever a player's cash and savings change.
   const totals = useRef<{ gameId: string; by: Map<string, number> }>({ gameId: '', by: new Map() });
   const [deltas, setDeltas] = useState<{ key: string; id: string; amount: number }[]>([]);
@@ -161,6 +162,14 @@ export const PlayerRoster = memo(function PlayerRoster({
                   手牌 <b>{p.cardCount}</b>
                 </span>
                 {p.debt > 0 && <span className="debt-label">待付 {money(p.debt)}</span>}
+                {!p.bankrupt && p.assets < leaderWorth * 0.6 && (
+                  <span
+                    className="catchup-label"
+                    title="净资产低于领先者的 60%：经过起点多领 50%，环球补助加倍"
+                  >
+                    追赶中
+                  </span>
+                )}
               </div>
               <span className="player-last-action" title={p.lastAction ?? '尚未行动'}>
                 {p.lastAction?.replace(p.name, '').replace(/^[：:，,\s]+/, '') || '等待出发'}

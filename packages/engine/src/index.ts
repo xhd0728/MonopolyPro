@@ -404,6 +404,16 @@ function advanceTurn(g: GameState, env: EngineEnvironment) {
           g.round % 2 === 0 ? '丝路商路开放，可选择跨洲快线。' : '丝路商路关闭，沿常规环线前进。',
         );
       flipNews(g, env);
+      // Travel stipend every four rounds keeps cash flowing; players far behind get more.
+      if (g.round % 4 === 0)
+        for (const x of g.players.filter((x) => !x.bankrupt))
+          reward(
+            g,
+            x,
+            isBehind(g, x) ? 140 : 60,
+            env,
+            isBehind(g, x) ? '环球补助（追赶加倍）' : '环球补助',
+          );
     }
     const p = currentPlayer(g);
     if (p.bankrupt) continue;
@@ -521,7 +531,7 @@ function land(g: GameState, env: EngineEnvironment) {
     else if (p.taxShield > 0) {
       p.taxShield--;
       log(g, env, 'shield', `${p.name}使用税务减免`, p.id);
-    } else charge(g, p, 120 + g.round * 5, null, env, '公共税费');
+    } else charge(g, p, taxFor(g, p), null, env, '公共税费');
   } else if (tile.kind === 'gotojail') sendToJail(g, p, env, '在海关接受检查');
   else if (tile.kind === 'parking') {
     if (g.pot > 0) {
@@ -544,7 +554,7 @@ function walkTo(g: GameState, p: PlayerState, target: number, env: EngineEnviron
   for (let at = p.position; at !== target;) {
     at = (at + 1) % size;
     path.push(at);
-    if (at === BOARD.start) reward(g, p, salaryOf(g), env, '经过起点');
+    if (at === BOARD.start) paySalary(g, p, env);
   }
   p.position = target;
   log(g, env, 'move', `${p.name}${why}，抵达${tileAt(g, target).name}`, p.id, undefined, path);
@@ -572,6 +582,21 @@ function walkBack(
   land(g, env);
 }
 const DECK_NAMES: Record<DeckId, string> = { chance: '机会', fate: '命运' };
+/** Below 60% of the leader's net worth: eligible for the catch-up salary. */
+export function isBehind(g: GameState, p: PlayerState): boolean {
+  const alive = g.players.filter((x) => !x.bankrupt);
+  if (alive.length < 2 || p.bankrupt) return false;
+  return assetsOf(g, p) < Math.max(...alive.map((x) => assetsOf(g, x))) * 0.6;
+}
+/** Start salary, plus a visible +50% catch-up subsidy for players who are far behind. */
+function paySalary(g: GameState, p: PlayerState, env: EngineEnvironment) {
+  const behind = isBehind(g, p);
+  reward(g, p, salaryOf(g), env, '经过起点');
+  if (behind) reward(g, p, Math.round(salaryOf(g) / 2), env, '追赶补贴（落后于领先者 40% 以上）');
+}
+/** Tax squares charge the round's base tax or 4% of net worth, whichever is higher. */
+export const taxFor = (g: GameState, p: PlayerState) =>
+  Math.max(120 + g.round * 5, Math.round(assetsOf(g, p) * 0.04));
 /**
  * Catch-up: the poorest player who is clearly behind (under 70% of the leader's net worth,
  * with at least three players still in) gets visible help. Open to anyone who falls behind.
@@ -772,7 +797,7 @@ function move(g: GameState, steps: number, env: EngineEnvironment, existingPath:
     }
     p.position = exits[0];
     path.push(p.position);
-    if (p.position === BOARD.start) reward(g, p, salaryOf(g), env, '经过起点');
+    if (p.position === BOARD.start) paySalary(g, p, env);
   }
   g.pendingPath = null;
   log(g, env, 'move', `${p.name}抵达${tileAt(g, p.position).name}`, p.id, undefined, path);
@@ -1131,7 +1156,7 @@ export function applyAction(
       );
       const pending = g.pendingPath!;
       p.position = action.tile;
-      if (p.position === BOARD.start) reward(g, p, salaryOf(g), env, '经过起点');
+      if (p.position === BOARD.start) paySalary(g, p, env);
       move(g, pending.remaining - 1, env, [...pending.path, p.position]);
       break;
     }
