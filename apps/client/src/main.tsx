@@ -35,6 +35,7 @@ import {
   type HudAction,
 } from './GameHud.tsx';
 import { api, Connection, type Credentials } from './network.ts';
+import { createCommandId } from './command-id.ts';
 import { Clock, serverTime, setServerOffset } from './clock.tsx';
 import { EmoteBar, Headlines, useLiveEmotes, useTurnAttention } from './Feedback.tsx';
 import { setSoundEnabled, soundEnabled, unlockSound } from './sound.ts';
@@ -376,9 +377,16 @@ function App() {
   function command(action: GameAction) {
     const g = roomRef.current?.game;
     if (!g || pending || status !== '已同步') return;
+    let id: string;
+    try {
+      id = createCommandId();
+    } catch {
+      notify('操作未能发送，请刷新后重试');
+      return;
+    }
     setPending(true);
     pendingAction.current = action;
-    connection.current!.command({ id: crypto.randomUUID(), revision: g.revision, action });
+    connection.current!.command({ id, revision: g.revision, action });
   }
   async function leave() {
     if (!connected || busy || pending) {

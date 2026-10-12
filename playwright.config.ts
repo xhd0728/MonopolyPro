@@ -20,6 +20,7 @@ export default defineConfig({
       HOST: '127.0.0.1',
       DATA_DIR: `artifacts/ui-server-${Date.now()}`,
       NODE_ENV: 'test',
+      PUBLIC_ORIGIN: 'http://monopolypro.test:8792',
       BOT_STEP_MS: '250',
       DISCONNECT_TAKEOVER_MS: '1500',
     },
