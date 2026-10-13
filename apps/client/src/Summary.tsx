@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { countryFlag } from '../../../packages/content/src/index.ts';
 import type { GameView, MapDefinition, PlayerView } from '../../../packages/shared/src/index.ts';
 import { money, playerColor } from './game-ui.ts';
@@ -36,15 +36,22 @@ export function MatchSummary({
   const ranked = [...game.players].sort((a, b) => b.assets - a.assets);
   const top = Math.max(1, ranked[0]?.assets ?? 1);
   const titles = titlesFor(game);
+  const [folded, setFolded] = useState(false);
+  const played =
+    game.settings.end === 'rounds' ? Math.min(game.round, game.settings.rounds) : game.round;
+  if (folded)
+    return (
+      <button className="settlement-reopen primary" onClick={() => setFolded(false)}>
+        🏁 查看旅程纪念册
+      </button>
+    );
   const prized = (p: PlayerView) => {
     const owned = game.properties.filter((x) => x.owner === p.id);
     return owned.sort((a, b) => b.rent - a.rent)[0];
   };
   return (
     <section className="settlement paper" aria-label="旅程纪念册">
-      <div className="eyebrow">
-        旅程纪念册 · 共 {game.settings.end === 'rounds' ? game.settings.rounds : game.round} 轮
-      </div>
+      <div className="eyebrow">旅程纪念册 · 共 {played} 轮</div>
       <h2>
         {game.players
           .filter((p) => game.winners.includes(p.id))
@@ -97,11 +104,18 @@ export function MatchSummary({
           ))}
         </div>
       )}
-      {isHost && (
-        <button className="primary" onClick={restart}>
-          再开启一段旅程 →
+      <div className="settlement-actions">
+        <button className="secondary" onClick={() => setFolded(true)}>
+          收起，看看棋盘
         </button>
-      )}
+        {isHost ? (
+          <button className="primary" onClick={restart}>
+            再开启一段旅程 →
+          </button>
+        ) : (
+          <span className="hint">等待房主开启新的一局</span>
+        )}
+      </div>
     </section>
   );
 }

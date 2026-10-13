@@ -32,10 +32,11 @@ export function useShortcuts(options: Shortcuts) {
       let action: ActionOption | undefined;
       const key = e.key.toLowerCase();
       if (key === ' ' || key === 'enter') {
-        // Space and Enter press the main action, unless a button already has focus.
+        // Space and Enter press the main action, unless a button already has focus. Buying
+        // spends money, so it needs its own key (B): a second Space to roll never buys.
         if (e.target instanceof HTMLButtonElement) return;
         action = o.actions.find(
-          (a) => a.primary && ['roll', 'jailRoll', 'buy', 'end'].includes(a.action.type),
+          (a) => a.primary && ['roll', 'jailRoll', 'end'].includes(a.action.type),
         );
       } else if (key === 'b') action = find('buy');
       else if (key === 'p') action = find('pass', 'auctionPass');

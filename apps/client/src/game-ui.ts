@@ -26,7 +26,9 @@ export function cardTargetReason(
   if (card.effect === 'swap' && game.players.find((p) => p.id === target)?.jailTurns)
     return '对手正在拘留所';
   if (card.effect === 'stealCard') {
-    if (!game.players.find((p) => p.id === target)?.cardCount) return '对手没有手牌';
+    const victim = game.players.find((p) => p.id === target);
+    if (!victim || victim.cardCount - (victim.lockedCards ?? 0) <= 0)
+      return victim?.cardCount ? '对手的卡都是本回合新得的，还不能取走' : '对手没有手牌';
   }
   const property = game.properties.find((p) => String(p.tile) === target);
   if (!property) return '';

@@ -212,7 +212,8 @@ export function Headlines({
     }, 200);
     return () => clearInterval(timer);
   }, [busy]);
-  if (!current) return null;
+  // Once the match is over, a leftover offer or turn banner would only confuse.
+  if (!current || game.phase === 'finished') return null;
   return (
     <div className="headline-slot" aria-live="polite" aria-label="全场提示">
       <div
@@ -288,7 +289,7 @@ export function ActionTicker({
     );
     return () => clearTimeout(timer);
   }, [items]);
-  if (!enabled || !items.length) return null;
+  if (!enabled || !items.length || game.phase === 'finished') return null;
   return (
     <div className="action-announcements" aria-live="polite" aria-label="实时行动提示">
       {items.map(({ e }, i) => (

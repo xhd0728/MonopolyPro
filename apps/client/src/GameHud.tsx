@@ -99,11 +99,17 @@ export function phaseGuide(game: GameView, map: MapDefinition): { title: string;
   const actor = game.players.find((p) => p.id === game.activeId),
     mine = actor?.id === game.viewerId;
   const prefix = mine ? '你' : (actor?.name ?? '伙伴');
-  if (game.trade)
+  if (game.trade) {
+    const t = game.trade;
+    const turn = game.players[game.turn]?.id;
+    const side = turn === game.viewerId && ![t.from, t.to].includes(turn);
     return {
-      title: `${game.players.find((p) => p.id === game.trade!.to)?.name}收到交易提案`,
-      text: '先检查双方现金和地产；接受后同时交换，拒绝则资产不变。',
+      title: `${game.players.find((p) => p.id === t.to)?.name}收到交易提案`,
+      text: side
+        ? '这笔交易与你无关：可以在右侧点「跳过，继续我的回合」。'
+        : '先检查双方现金和地产；接受后同时交换，拒绝则资产不变。',
     };
+  }
   if (game.phase === 'purchase')
     return {
       title: `${prefix}抵达${map.tiles[actor?.position ?? 0].name}`,
@@ -240,7 +246,8 @@ export function MatchHud({
   return (
     <div className="match-hud">
       <span className="hud-route">
-        {map.name} · 第 {game.round}
+        {map.name} · 第{' '}
+        {game.settings.end === 'rounds' ? Math.min(game.round, game.settings.rounds) : game.round}
         {game.settings.end === 'rounds' ? ` / ${game.settings.rounds}` : ''} 轮
         {game.pot > 0 && <em>停车场奖池 {money(game.pot)}</em>}
       </span>

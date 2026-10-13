@@ -169,9 +169,7 @@ export function Assets({
           </div>
         </div>
       ))}
-      {me && !owned.length && (
-        <p className="hint">还没有地产。抵达待售国家后购买，或参与公开拍卖。</p>
-      )}
+      {me && !owned.length && <p className="hint">还没有地产。停在待售国家时可以购买。</p>}
     </>
   );
 }

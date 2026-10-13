@@ -159,8 +159,8 @@ export function TradeDialog({
       <ol className="trade-steps">
         <li>选对象</li>
         <li>勾选双方的现金和地产</li>
-        <li>发出后对方在时限内（涉及当前玩家 60 秒，旁人之间 30 秒）接受、拒绝或还价</li>
-        <li>对手间不能单方面赠送，双方价值差距不超过一倍</li>
+        <li>对方限时回应：60 秒（旁人之间 30 秒）</li>
+        <li>对手间不能白送，双方价值差距不超过一倍</li>
       </ol>
       {!d.counter && (
         <label>
@@ -283,6 +283,7 @@ export function TradeOfferCard({
       </div>
       {mineIn && (
         <div className="trade-offer-actions">
+          {(t.depth ?? 0) >= 2 && <span className="hint">已来回还价两次，只能接受或拒绝。</span>}
           <button
             className="primary"
             disabled={disabled}
@@ -293,6 +294,7 @@ export function TradeOfferCard({
           <button
             className="secondary"
             disabled={disabled}
+            hidden={(t.depth ?? 0) >= 2}
             onClick={() =>
               // A counter starts from the reverse of what was offered.
               counter({

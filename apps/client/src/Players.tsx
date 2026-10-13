@@ -158,6 +158,11 @@ export const PlayerRoster = memo(function PlayerRoster({
                 )}
                 {g.settings.mode === 'team' && <span> · {p.team === 0 ? '青' : '橙'}队</span>}
                 {g.activeId === p.id && <b>{g.phase === 'auction' ? '正在竞拍' : '当前回合'}</b>}
+                {/* Shown where the inventory row is hidden (tablet roster strip). */}
+                <span className="player-compact" aria-hidden="true">
+                  🏠{p.propertyCount} 🃏{p.cardCount}
+                  {p.shield > 0 && ' 🛡'}
+                </span>
               </div>
               <div className="player-metrics">
                 <span>
@@ -177,6 +182,16 @@ export const PlayerRoster = memo(function PlayerRoster({
                 <span>
                   手牌 <b>{p.cardCount}</b>
                 </span>
+                {p.shield > 0 && (
+                  <span className="shield-chip" title="下一次对手的租金免付">
+                    🛡 护盾
+                  </span>
+                )}
+                {p.taxShield > 0 && (
+                  <span className="shield-chip" title="下一次公共税费免缴">
+                    📋 免税
+                  </span>
+                )}
                 {p.debt > 0 && <span className="debt-label">待付 {money(p.debt)}</span>}
                 {!p.bankrupt && p.assets < leaderWorth * 0.6 && (
                   <span

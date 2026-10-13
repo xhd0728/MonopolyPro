@@ -1696,7 +1696,7 @@ export function applyAction(
     }
     case 'buyCard': {
       manageAllowed(g, p);
-      requireRule(tileAt(g, p.position).kind === 'shop', '请在卡牌商店购买');
+      requireRule(tileAt(g, p.position).kind === 'shop', '请先停在卡牌市场');
       // Only on the turn you arrive: standing on the market at the start of the next turn
       // does not give a second draw.
       requireRule(g.phase === 'manage', '抵达卡牌市场后才能抽卡');
@@ -2108,6 +2108,8 @@ export function viewFor(g: GameState, viewerId: string | null): GameView {
       return {
         ...pub,
         cardCount: cards.length + newCards.length,
+        // Public count of cards still locked until next turn (which ones stays private).
+        lockedCards: newCards.length,
         ...(p.id === viewerId ? { cards: [...cards], newCards: [...newCards], nextDice } : {}),
         assets,
         propertyValue: assets - p.cash - p.deposit + debt,

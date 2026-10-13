@@ -39,7 +39,8 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
   guest.on('pageerror', (e) => errors.push(e.message));
   const code = await create(host, '小筑');
   await guest.goto(`/?room=${code}`);
-  await guest.getByRole('button', { name: '加入房间', exact: true }).click();
+  // The invite link opens the join form by itself.
+  await expect(guest.getByLabel('游客昵称')).toBeVisible();
   await guest.getByLabel('游客昵称').fill('飞飞');
   await guest.getByRole('button', { name: '加入房间', exact: true }).last().click();
   await expect(guest.getByRole('heading', { name: '准备出发' })).toBeVisible();

@@ -338,6 +338,8 @@ export type PlayerView = Omit<PlayerState, 'cards' | 'newCards' | 'nextDice'> & 
   cards?: string[];
   newCards?: string[];
   cardCount: number;
+  /** Cards gained this turn that unlock next turn (count only). */
+  lockedCards: number;
   nextDice?: number | null;
   assets: number;
   propertyValue: number;

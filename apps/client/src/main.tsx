@@ -78,8 +78,8 @@ const kindNames = {
 const NO_EMOTES: RoomView['emotes'] = [];
 /** End-condition choices for the lobby, encoded as mode:value. */
 const END_CHOICES: [string, string][] = [
-  ['rounds:10', '10 轮（快速，约 20 分钟，绕行约 1 圈）'],
-  ['rounds:16', '16 轮（默认，约 30 分钟，绕行约 1.5 圈）'],
+  ['rounds:10', '10 轮 · 快速，约 20 分钟'],
+  ['rounds:16', '16 轮 · 默认，约 30 分钟'],
   ['rounds:20', '20 轮（约 40 分钟）'],
   ['rounds:30', '30 轮（长局）'],
   ['time:15', '限时 15 分钟'],
@@ -304,6 +304,7 @@ function App() {
     );
   useEffect(() => {
     const raw = localStorage.getItem('mp-seat');
+    const invited = new URLSearchParams(location.search).get('room');
     if (raw) {
       try {
         const c = JSON.parse(raw) as Credentials;
@@ -312,6 +313,8 @@ function App() {
         localStorage.removeItem('mp-seat');
       }
     }
+    // An invite link opens the join form straight away, with the room code filled in.
+    if (invited && !raw) setDialog('join');
     void refresh();
     return () => {
       connection.current?.stop();
@@ -447,7 +450,9 @@ function App() {
     map = mapById(room?.settings.mapId ?? settings.mapId, room?.settings.size ?? settings.size),
     active = g?.players.find((p) => p.id === g.activeId),
     myTurn = !!g && g.activeId === room?.viewerId && !me?.bankrupt,
-    canManage = myTurn && ['roll', 'manage'].includes(g!.phase) && !g!.trade;
+    canManage = myTurn && ['roll', 'manage'].includes(g!.phase) && !g!.trade,
+    // Cards also work in the jail phase (自由通行), unlike building or the market.
+    canPlay = myTurn && ['roll', 'manage', 'jail'].includes(g!.phase) && !g!.trade;
   const connected = status === '已同步',
     disabled = pending || !connected;
   const selected = selectedTile === null ? null : map.tiles[selectedTile],
@@ -496,6 +501,22 @@ function App() {
         : '',
   }));
   const drawPrice = me?.characterId === 'dealer' ? BOARD.dealerDraw : BOARD.cardDraw;
+  // After the last round the counter has already moved on; never show "第 11 / 10 轮".
+  const shownRound =
+    g && g.settings.end === 'rounds' ? Math.min(g.round, g.settings.rounds) : (g?.round ?? 1);
+  // Cards you gain are private: tell only you which ones arrived.
+  const seenNew = useRef<{ game: string; ids: string[] }>({ game: '', ids: [] });
+  const newIds = me?.newCards?.join(',') ?? '';
+  useEffect(() => {
+    const ids = me?.newCards ?? [];
+    const before = seenNew.current;
+    const fresh = before.game === g?.id ? ids.slice(Math.min(before.ids.length, ids.length)) : [];
+    seenNew.current = { game: g?.id ?? '', ids: [...ids] };
+    if (fresh.length && ids.length > before.ids.length)
+      notify(
+        `你获得了${fresh.map((id) => `「${cardById(id)?.name ?? id}」`).join('、')}，下回合可以使用`,
+      );
+  }, [g?.id, newIds]);
   const chosenCardReason = me?.cardPlayed
     ? '本回合已经用过一张卡，下回合再用。'
     : selectedCard?.effect === 'shield' && me && me.shield > 0
@@ -503,7 +524,7 @@ function App() {
       : selectedCard?.effect === 'taxShield' && me && me.taxShield > 0
         ? '已经持有税务减免。'
         : (cardTargets.find((t) => t.id === cardTarget)?.reason ?? '');
-  const jailedMove = !!me?.jailTurns && selectedCard?.category === 'move';
+  const jailedMove = (!!me?.jailTurns || !!me?.heldInJail) && selectedCard?.category === 'move';
   const bidReason = !validMoney(bid)
     ? '请输入整数竞价金额'
     : bid < (g?.auction?.highBid ?? 0) + 10
@@ -553,12 +574,19 @@ function App() {
         openTrade(g.players.find((p) => p.id !== me.id && !p.bankrupt)?.id ?? '');
     },
     guess:
-      g && me && !me.bankrupt && g.phase === 'roll' && g.activeId !== me.id && !g.trade
+      g &&
+      me &&
+      !me.bankrupt &&
+      g.phase === 'roll' &&
+      g.activeId !== me.id &&
+      !g.trade &&
+      !g.guesses[me.id] &&
+      !disabled
         ? (pick) => command({ type: 'guess', pick })
         : undefined,
     help: () =>
       notify(
-        '快捷键：空格/回车 主操作 · B 购买 · P 放弃购买/退出竞拍 · E 结束回合 · T 交易 · 1–3 选择岔路 · ↑/↓ 猜大/猜小',
+        '快捷键：空格/回车 掷骰或结束回合 · B 购买 · P 放弃购买/退出竞拍 · E 结束回合 · T 交易 · 1–3 选择岔路 · ↑/↓ 猜大/猜小',
       ),
   });
   const canGuess =
@@ -1000,9 +1028,14 @@ function App() {
                         })
                       }
                     >
-                      <option value="off">关闭（默认）· 只有停在这里的人能买</option>
-                      <option value="on">开启 · 放弃购买后全员公开竞拍</option>
+                      <option value="off">关闭（默认）</option>
+                      <option value="on">开启</option>
                     </select>
+                    <small className="field-hint">
+                      {room.settings.auction
+                        ? '放弃购买的空地进入全员公开竞拍'
+                        : '只有停在空地上的人能买，放弃则继续空置'}
+                    </small>
                   </label>
                   <label>
                     结束方式
@@ -1248,19 +1281,23 @@ function App() {
                             >
                               <span className="eyebrow">
                                 {myTurn
-                                  ? `轮到你了 · 第 ${g.round} 轮`
+                                  ? `轮到你了 · 第 ${shownRound} 轮`
                                   : me?.bankrupt
                                     ? '继续观战'
-                                    : `第 ${g.round} 轮 · 等待时也能查看地图`}
+                                    : g.phase === 'finished'
+                                      ? `共 ${shownRound} 轮`
+                                      : `第 ${shownRound} 轮 · 等待时也能查看地图`}
                               </span>
                               <h2>
                                 {g.phase === 'finished'
                                   ? '这段旅程，圆满落幕'
                                   : g.trade
                                     ? '交易提案待处理'
-                                    : myTurn
-                                      ? phaseNames[g.phase]
-                                      : `${active?.name ?? '伙伴'}正在操作`}
+                                    : myTurn && g.phase === 'debt' && g.debt && me
+                                      ? `需支付 ${money(g.debt.amount)}，现金 ${money(me.cash)}`
+                                      : myTurn
+                                        ? phaseNames[g.phase]
+                                        : `${active?.name ?? '伙伴'}正在操作`}
                               </h2>
                               {adviceFor(g, map) ? (
                                 <p className="turn-tip">💡 建议：{adviceFor(g, map)}</p>
@@ -1387,10 +1424,20 @@ function App() {
                               .map((a, i) => (
                                 <button
                                   key={i}
-                                  className="secondary full"
+                                  className={`${a.action.type === 'surrender' ? 'danger' : 'secondary'} full`}
                                   disabled={disabled}
                                   title={a.hint}
-                                  onClick={() => command(a.action)}
+                                  onClick={() => {
+                                    // Bankruptcy cannot be undone: ask once.
+                                    if (
+                                      a.action.type === 'surrender' &&
+                                      !window.confirm(
+                                        '确定宣布破产吗？你的资产将交给债权人或银行，无法撤销。',
+                                      )
+                                    )
+                                      return;
+                                    command(a.action);
+                                  }}
                                 >
                                   {a.label}
                                   <small>{a.hint}</small>
@@ -1423,15 +1470,15 @@ function App() {
                                     ⇄ 发起交易
                                   </button>
                                   <button
-                                    disabled={
-                                      !canManage ||
-                                      disabled ||
-                                      map.tiles[me.position].kind !== 'shop'
+                                    className={
+                                      g.actions.some((a) => a.action.type === 'buyCard')
+                                        ? 'ready'
+                                        : ''
                                     }
                                     title={
-                                      map.tiles[me.position].kind !== 'shop'
-                                        ? '抵达卡牌市场后可抽卡'
-                                        : `随机抽一张，${drawPrice} 现金，每回合一次`
+                                      g.actions.some((a) => a.action.type === 'buyCard')
+                                        ? `现在可以随机抽一张，${drawPrice} 现金`
+                                        : '查看卡池；停在卡牌市场的那个回合可以抽卡'
                                     }
                                     onClick={() => setDialog('shop')}
                                   >
@@ -1448,7 +1495,7 @@ function App() {
                                   <small>
                                     {me.cardPlayed
                                       ? '本回合已用过一张卡'
-                                      : canManage
+                                      : canPlay
                                         ? '每回合可用一张，点击选择目标'
                                         : '自己的可操作阶段可使用'}
                                   </small>
@@ -1461,7 +1508,7 @@ function App() {
                                         key={`${id}-${i}`}
                                         className={`card-mini ${c.category}`}
                                         onClick={() => openCard(id)}
-                                        title={`${c.description}；${!canManage ? '等待自己的掷骰或经营阶段' : me.cardPlayed ? '本回合已用过一张卡' : '点击查看目标与效果'}`}
+                                        title={`${c.description}；${!canPlay ? '等待自己的回合' : me.cardPlayed ? '本回合已用过一张卡' : '点击查看目标与效果'}`}
                                       >
                                         <span>{c.icon}</span>
                                         <b>{c.name}</b>
@@ -1486,7 +1533,7 @@ function App() {
                                   })}
                                   {!me.cardCount && (
                                     <p className="hint">
-                                      手牌用完了，可在商店补充，或通过奇遇获得。
+                                      手牌用完了，可在卡牌市场抽卡，或从机会、命运卡获得。
                                     </p>
                                   )}
                                 </div>
@@ -1697,7 +1744,7 @@ function App() {
                 </div>
                 <div>
                   <span>{owner ? '当前租金' : '基础租金'}</span>
-                  <strong>{money(property?.rent ?? selected.rent)}</strong>
+                  <strong>{money(owner && property ? property.rent : selected.rent)}</strong>
                 </div>
                 <div>
                   <span>建设费用</span>
@@ -1930,15 +1977,19 @@ function App() {
               ? '远程购买会额外扣除目标地产的完整地价。'
               : selectedCard.effect === 'move'
                 ? '移动后正常处理落点，可能触发租金、税费或岔路。'
-                : '请选择有效目标；使用后消耗这张卡牌。'}
+                : selectedCard.target === 'self'
+                  ? selectedCard.effect === 'insure' && me && me.shield > 0
+                    ? '你已有护盾，这次只会拿到现金。确认后消耗这张卡牌。'
+                    : '确认后立即生效，并消耗这张卡牌。'
+                  : '请选择有效目标；使用后消耗这张卡牌。'}
           </p>
-          {(!canManage ||
+          {(!canPlay ||
             jailedMove ||
             chosenCardReason ||
             (selectedCard.target !== 'self' && !cardTargets.some((t) => !t.reason))) && (
             <p className="field-error">
-              {!canManage
-                ? '等待自己的掷骰或经营阶段使用；现在可以查看卡牌效果。'
+              {!canPlay
+                ? '轮到自己时才能使用；现在可以查看卡牌效果。'
                 : jailedMove
                   ? '拘留中不能使用移动类卡牌；出狱后再用。'
                   : chosenCardReason || '当前没有可用目标，请保留到合适的时机。'}
@@ -1948,7 +1999,7 @@ function App() {
             className="primary full"
             disabled={
               disabled ||
-              !canManage ||
+              !canPlay ||
               jailedMove ||
               !!chosenCardReason ||
               (selectedCard.target !== 'self' && !cardTarget)
@@ -2071,15 +2122,16 @@ function App() {
               <h3>04 / 卡牌、银行与交易</h3>
               <p>
                 手牌最多 {BOARD.handLimit} 张，每回合只能使用一张。卡牌市场花 {BOARD.cardDraw}{' '}
-                随机抽一张（每回合一次），稀有卡更难抽到；新得到的卡下回合才能用。租金护盾只能靠随机卡获得，最多持有
+                随机抽一张（卡牌魔术师只需 {BOARD.dealerDraw}
+                ），只能在停到市场的那个回合抽一次，稀有卡更难抽到；新得到的卡下回合才能用。租金护盾只能靠随机卡获得，最多持有
                 1 次。每个角色有被动与每 3 轮一次的天赋。银行可存取现金，存款每轮带来{' '}
                 {BOARD.interest * 100}%
                 现金利息。没钱付租金或税费时，先取款、卖建筑或抵押；无法筹齐可破产，将资产清算给债权人或银行。交易随时可以发起（购买、拍卖、选路和筹款时除外）：点「⇄
                 发起交易」、玩家资料或国家详情里的「求购 /
-                出售」，勾选双方的现金和任意多处无建筑、未抵押的地产。对方 60
-                秒内可以接受、拒绝或还价；被拒绝后需等 15
-                秒才能再发起。交易进行时其他操作暂停，接受后双方资产同时交换。对手之间不能单方面赠送，现金最多为所换地产地价的
-                2
+                出售」，勾选双方的现金和任意多处无建筑、未抵押的地产。对方限时回应（涉及当前玩家 60
+                秒，旁人之间 30 秒），可以接受、拒绝或还价，最多来回还价两次；被拒绝后需等 15
+                秒才能再发起。交易进行时其他操作暂停，接受后双方资产同时交换。对手之间不能单方面赠送，双方给出的价值（现金
+                + 地价）差距不能超过一倍，现金最多为所换地产地价的 2
                 倍，交易也不能让任何一方直接达到目标净资产；不在自己回合时每轮只能发起一次交易，正在行动的玩家可以跳过旁人的交易。
               </p>
               <h3>05 / 世界新闻与追赶机制</h3>
