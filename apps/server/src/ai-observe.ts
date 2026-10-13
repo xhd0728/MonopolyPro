@@ -154,19 +154,15 @@ const CUSTOM = new Set<GameAction['type']>(['tradeOffer', 'tradeCounter', 'bid',
  * Check an action against the real rules without committing it. Returns null when legal,
  * otherwise the engine's reason, which goes back to the model so it can correct itself.
  */
-export function validator(game: GameState, seatId: string, now: number) {
+export function validator(game: GameState, seatId: string, now: () => number) {
   return (action: GameAction, custom = false): string | null => {
     if (custom && !CUSTOM.has(action.type))
       return `自定义动作只支持 ${[...CUSTOM].join(' / ')}，其他动作请从候选中选择`;
-    if (
-      custom &&
-      action.type === 'tradeOffer' &&
-      game.tradeMemo[seatId]?.round === game.round &&
-      actingPlayerId(game) !== seatId
-    )
+    // One self-written offer per round, so a model cannot keep the table waiting on offers.
+    if (custom && action.type === 'tradeOffer' && game.tradeMemo[seatId]?.round === game.round)
       return '本轮你已经发起过交易';
     try {
-      applyAction(game, seatId, action, { now, randomInt: () => 0 });
+      applyAction(game, seatId, action, { now: now(), randomInt: () => 0 });
       return null;
     } catch (error) {
       return (error as Error).message;

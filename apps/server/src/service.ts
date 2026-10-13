@@ -19,7 +19,7 @@ import {
   endMatch,
   SIDE_TRADE_MS,
 } from '../../../packages/engine/src/index.ts';
-import { botAction, botDecision } from '../../../packages/engine/src/bot.ts';
+import { botAction, botDecision, squareValue } from '../../../packages/engine/src/bot.ts';
 import {
   AI_DECISION_CAP_MS,
   commandSchema,
@@ -116,12 +116,19 @@ export class GameService {
     }
   >();
   private aiActivity = new Map<string, NonNullable<RoomView['aiActivity']>>();
-  /** When an LLM seat started waiting for a free model slot, per room. */
-  private queuedSince = new Map<string, number>();
+  /** When an LLM seat started waiting for a free model slot, per room (for one decision). */
+  private queuedSince = new Map<string, { key: string; since: number }>();
   /** Follow-up moves an LLM seat planned for the rest of its turn, per room. */
   private plans = new Map<
     string,
-    { gameId: string; seatId: string; round: number; turn: number; actions: GameAction[] }
+    {
+      gameId: string;
+      seatId: string;
+      round: number;
+      turn: number;
+      phase: string;
+      actions: GameAction[];
+    }
   >();
   private dirtyRooms = new Set<string>();
   private takeoverSignatures = new Map<string, string>();
@@ -200,7 +207,28 @@ export class GameService {
     this.botJobs.get(record.code)?.controller.abort();
     this.botJobs.delete(record.code);
     this.aiActivity.delete(record.code);
+    this.plans.delete(record.code);
+    this.queuedSince.delete(record.code);
     this.save(record);
+  }
+  /**
+   * Whether a trade an AI seat wrote gives away clearly more than it gets, judged like the
+   * rule bot judges offers (colour-group completion counts extra).
+   */
+  private givesAway(
+    g: NonNullable<RoomRecord['game']>,
+    seatId: string,
+    action: Extract<GameAction, { type: 'tradeOffer' | 'tradeCounter' }>,
+  ) {
+    const other = action.type === 'tradeOffer' ? action.to : g.trade?.from;
+    if (!other) return false;
+    const gives =
+      action.giveCash +
+      (action.giveTiles ?? []).reduce((n, t) => n + squareValue(g, t, other, true), 0);
+    const gets =
+      action.wantCash +
+      (action.wantTiles ?? []).reduce((n, t) => n + squareValue(g, t, seatId, true), 0);
+    return gives > gets * 1.3 + 50;
   }
   private newSeat(input: unknown, index: number, spectator = false): { seat: Seat; token: string } {
     const data = z
@@ -861,6 +889,8 @@ export class GameService {
                   plan.gameId === g.id &&
                   plan.round === g.round &&
                   plan.turn === g.turn &&
+                  plan.phase === g.phase &&
+                  !g.trade &&
                   plan.actions.length
                 ) {
                   const next = plan.actions.shift()!;
@@ -887,16 +917,20 @@ export class GameService {
                   // Not legal right now; the model chooses from the rest.
                 }
               if (choices.length > 1) {
+                // One decision is this seat at this revision; a new decision waits afresh.
+                const key = `${seat.id}:${r.game.revision}`;
+                const queued = this.queuedSince.get(code);
+                const since = queued?.key === key ? queued.since : this.now();
                 if (this.botJobs.size < (this.options.aiMaxConcurrent ?? 4)) {
                   this.queuedSince.delete(code);
-                  this.startBotJob(r, seat, choices, action, decision?.reason);
+                  // The two-minute cap counts the time spent queueing.
+                  this.startBotJob(r, seat, choices, action, decision?.reason, since);
                   feedback = true;
                   if (changed) this.save(r);
                   return changed || feedback;
                 }
                 // Every model slot is busy: wait a little instead of handing over at once.
-                const since = this.queuedSince.get(code) ?? this.now();
-                this.queuedSince.set(code, since);
+                this.queuedSince.set(code, { key, since });
                 if (this.now() - since < AI_QUEUE_MAX_MS) {
                   this.aiActivity.set(code, {
                     playerId: seat.id,
@@ -980,9 +1014,12 @@ export class GameService {
     choices: GameAction[],
     fallback: GameAction,
     fallbackReason?: string,
+    queuedAt = this.now(),
   ) {
     const game = r.game!,
       code = r.code;
+    const fullCap = this.options.aiDecisionCapMs ?? AI_DECISION_CAP_MS;
+    const capMs = Math.max(Math.min(fullCap, 5000), fullCap - (this.now() - queuedAt));
     const job = {
       controller: new AbortController(),
       gameId: game.id,
@@ -997,7 +1034,7 @@ export class GameService {
     const cap = setTimeout(() => {
       job.capped = true;
       job.controller.abort();
-    }, this.options.aiDecisionCapMs ?? AI_DECISION_CAP_MS);
+    }, capMs);
     job.controller.signal.addEventListener('abort', () => clearTimeout(cap), { once: true });
     const clearCap = () => clearTimeout(cap);
     this.aiActivity.set(code, {
@@ -1026,8 +1063,9 @@ export class GameService {
       // check has the final word on accepting one.
       if (
         decision.source === 'llm' &&
-        decision.action.type === 'tradeAccept' &&
-        fallback.type === 'tradeReject'
+        ((decision.action.type === 'tradeAccept' && fallback.type === 'tradeReject') ||
+          ((decision.action.type === 'tradeOffer' || decision.action.type === 'tradeCounter') &&
+            this.givesAway(latest.game!, seat.id, decision.action)))
       )
         decision = {
           action: fallback,
@@ -1065,6 +1103,7 @@ export class GameService {
             seatId: seat.id,
             round: latest.game!.round,
             turn: latest.game!.turn,
+            phase: latest.game!.phase,
             actions: [...decision.plan],
           });
         log(
@@ -1110,9 +1149,9 @@ export class GameService {
         level: seat.botLevel ?? 'normal',
         observation: observe(game, seat.id),
         labels: labelActions(game, seat.id, choices),
-        validate: validator(game, seat.id, this.now()),
+        validate: validator(game, seat.id, () => this.now()),
         ...(advice >= 0 ? { advice } : {}),
-        deadline: Date.now() + (this.options.aiDecisionCapMs ?? AI_DECISION_CAP_MS) - 5000,
+        deadline: Date.now() + capMs - 5000,
         ...(fallbackReason ? { fallbackReason } : {}),
         onStep: (label, steps) => {
           if (this.botJobs.get(code) !== job) return;
@@ -1198,6 +1237,8 @@ export class GameService {
   }
   private forget(code: string) {
     this.store.remove(code);
+    this.plans.delete(code);
+    this.queuedSince.delete(code);
     this.takeoverSignatures.delete(code);
     this.botJobs.get(code)?.controller.abort();
     this.botJobs.delete(code);

@@ -264,7 +264,8 @@ export function salvage(text: string): Call[] {
     if ('choice' in obj || 'custom' in obj || 'act' in obj)
       return [{ id: 'salvaged', name: 'act', args: safeJson(obj.act ?? obj) }];
   }
-  const bare = cleaned.match(/\ba(\d{1,3})\b/);
+  // The last id mentioned is the one the model settled on ("a2 or a3 … I choose a3").
+  const bare = [...cleaned.matchAll(/\ba(\d{1,3})\b/g)].at(-1);
   if (bare) return [{ id: 'salvaged', name: 'act', args: { choice: `a${bare[1]}`, reason: '' } }];
   return [];
 }
@@ -309,8 +310,14 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
   const canForce =
     config.mode !== 'chat' || !!config.disableThinking || config.reasoningEffort === 'none';
 
-  function wire(turns: Turn[], specs: ToolSpec[], force: string | null, temperature: number) {
-    const json = protocol === 'json';
+  function wire(
+    turns: Turn[],
+    specs: ToolSpec[],
+    force: string | null,
+    temperature: number,
+    proto: 'tools' | 'json',
+  ) {
+    const json = proto === 'json';
     const asText = (t: Turn): { role: 'user' | 'assistant'; content: string } =>
       t.role === 'assistant'
         ? {
@@ -361,7 +368,9 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
     if (config.mode === 'responses') {
       const input: unknown[] = [{ role: 'system', content: system }];
       for (const t of rest) {
-        if (!json && t.role === 'assistant' && t.native) input.push(...(t.raw as unknown[]));
+        // Reasoning items cannot be replayed with store:false; only echo calls and messages.
+        if (!json && t.role === 'assistant' && t.native)
+          input.push(...(t.raw as { type?: string }[]).filter((x) => x.type !== 'reasoning'));
         else if (!json && t.role === 'tool' && t.native)
           input.push({ type: 'function_call_output', call_id: t.id, output: t.text });
         else input.push(asText(t));
@@ -482,6 +491,8 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
     temperature: number,
     deadline: number,
     signal: AbortSignal,
+    proto: 'tools' | 'json',
+    first: boolean,
   ) {
     for (let attempt = 0; ; attempt++) {
       const left = deadline - Date.now();
@@ -498,7 +509,7 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
         const response = await request(base.endsWith(path) ? base : base + path, {
           method: 'POST',
           headers,
-          body: JSON.stringify(wire(turns, specs, force, temperature)),
+          body: JSON.stringify(wire(turns, specs, force, temperature, proto)),
           signal: combined,
         });
         // Bound untrusted provider output instead of retaining a potentially huge response.
@@ -519,8 +530,15 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
           }
         output += decoder.decode();
         if (!response.ok) {
+          // Only a first request refused because tools are unsupported means "no tools here";
+          // other 400s mentioning tools are ordinary wire errors.
           const toolsRejected =
-            response.status === 400 && protocol === 'tools' && /tool|function/i.test(output);
+            first &&
+            response.status === 400 &&
+            proto === 'tools' &&
+            /(tools?|function[ _]?call(ing)?|tool_choice)[^"]{0,60}(not supported|unsupported|not allowed|unknown|unrecognized|invalid)|(does not|doesn't) support (tools|function)/i.test(
+              output,
+            );
           throw new ProviderError(
             `HTTP ${response.status}`,
             [408, 409, 425, 429, 500, 502, 503, 504].includes(response.status),
@@ -605,7 +623,7 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
         const problem = hooks.validate?.(action, custom) ?? null;
         if (problem) return { error: `这个动作不合法：${problem}` };
         const plan =
-          L.plan && Array.isArray(args.then)
+          L.plan && view.phase === 'manage' && Array.isArray(args.then)
             ? (args.then as unknown[])
                 .filter((x): x is string => typeof x === 'string' && ids.includes(x))
                 .map((x) => choices[ids.indexOf(x)])
@@ -627,7 +645,9 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
           ...(plan.length ? { plan } : {}),
         };
       };
-      const run = async () => {
+      const run = async (proto: 'tools' | 'json') => {
+        steps.length = 0;
+        repairs = 0;
         const specs: ToolSpec[] = [
           ACT,
           ...readNames.map((n) => ({
@@ -637,7 +657,7 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
           })),
         ];
         const turns: Turn[] = [
-          { role: 'system', text: systemPrompt(level, reads, protocol === 'json') },
+          { role: 'system', text: systemPrompt(level, reads, proto === 'json') },
           {
             role: 'user',
             text: `局面：${JSON.stringify(observation)}\n候选动作：\n${candidates.join('\n')}\n${reads ? `可用只读工具：${readNames.join('、')}（最多 ${reads} 次）` : '请直接 act。'}`,
@@ -647,12 +667,26 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
         for (let round = 0; round < reads + 4; round++) {
           const force = used >= reads && canForce ? 'act' : null;
           const offered = used >= reads ? [ACT] : specs;
-          const reply = await send(turns, offered, force, L.temperature, deadline, signal);
-          const native = reply.calls.length > 0 && protocol === 'tools';
+          const reply = await send(
+            turns,
+            offered,
+            force,
+            L.temperature,
+            deadline,
+            signal,
+            proto,
+            turns.length === 2,
+          );
+          const native = reply.calls.length > 0 && proto === 'tools';
           const calls = native ? reply.calls : salvage(reply.text);
           if (!calls.length) {
             if (++repairs > 2) throw new OutputError(reply.truncated ? 'truncated' : 'no call');
-            turns.push({ role: 'assistant', text: reply.text, calls: [], native: false });
+            turns.push({
+              role: 'assistant',
+              text: reply.text || '（没有调用工具）',
+              calls: [],
+              native: false,
+            });
             turns.push({ role: 'user', text: '没有收到工具调用。请调用 act 给出决定。' });
             continue;
           }
@@ -688,6 +722,7 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
             // Previews take a candidate id; the tool works with indices.
             if (typeof args.choice === 'string' && ids.includes(args.choice))
               args.choice = ids.indexOf(args.choice);
+            else if (typeof args.choice === 'number') args.choice = args.choice - 1;
             const label = tool.label(args);
             steps.push(label);
             hooks.onStep?.(label, [...steps]);
@@ -698,12 +733,12 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
       };
       try {
         try {
-          return await run();
+          return await run(protocol);
         } catch (error) {
           // The endpoint does not take tool definitions: switch to the JSON protocol for good.
           if (error instanceof ProviderError && error.toolsRejected) {
             protocol = 'json';
-            return await run();
+            return await run('json');
           }
           throw error;
         }

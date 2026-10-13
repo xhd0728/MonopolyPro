@@ -67,7 +67,7 @@ const hooksFor = (
   level,
   observation: observe(game, seatId),
   labels: labelActions(game, seatId, choices),
-  validate: validator(game, seatId, 1000),
+  validate: validator(game, seatId, () => 1000),
 });
 test('native tool calls in all three wire formats, with a compact observation and no secrets', async () => {
   const { store, service, c, bot } = fixture();
@@ -518,4 +518,53 @@ test('busy model slots queue the seat instead of handing over at once; planned m
   assert.notEqual(svc.record(c.code).game!.turn, turn, 'the planned end of turn was played');
   svc.dispose();
   s2.close();
+});
+test('review fixes: one self-written offer per round, lopsided AI offers are vetoed', async () => {
+  const store = new Store(':memory:');
+  let offer: any = null;
+  const service = new GameService(store, {
+    now: () => 1000,
+    brain: {
+      model: 'fixture',
+      choose: async (_v, choices) => ({
+        action: offer ?? choices[0],
+        source: 'llm',
+        message: 'ok',
+      }),
+    },
+  });
+  const c = service.create({ name: '真人' });
+  service.connected(c.code, c.seatId);
+  service.lobby(c.code, c.seatId, { type: 'addBot', botMode: 'llm' });
+  service.lobby(c.code, c.seatId, { type: 'start' });
+  const r = service.record(c.code);
+  const bot = r.seats[1].id;
+  r.game!.turn = 1;
+  r.game!.phase = 'manage';
+  r.game!.properties.find((x) => x.tile === 4)!.owner = c.seatId;
+  r.game!.players[1].cash = 5000;
+  store.save(r);
+  const game = service.record(c.code).game!;
+  const check = validator(game, bot, () => 1000);
+  const fair: any = {
+    type: 'tradeOffer',
+    to: c.seatId,
+    giveCash: 240,
+    wantCash: 0,
+    giveTiles: [],
+    wantTiles: [4],
+  };
+  assert.equal(check(fair, true), null);
+  const after = applyAction(game, bot, fair, { now: 1000, randomInt: () => 0 });
+  after.trade = null;
+  assert.match(validator(after, bot, () => 1000)(fair, true)!, /本轮你已经发起过交易/);
+  // A model that pays 480 for a 240 square is overruled by the rule bot.
+  offer = { ...fair, giveCash: 480 };
+  service.tick(c.code);
+  await new Promise((done) => setTimeout(done, 0));
+  const latest = service.record(c.code).game!;
+  assert.equal(latest.trade, null, 'the lopsided offer was not sent');
+  assert.ok(latest.events.some((e) => e.kind === 'ai' && e.detail?.startsWith('规则')));
+  service.dispose();
+  store.close();
 });
