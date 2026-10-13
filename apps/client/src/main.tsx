@@ -1,3 +1,4 @@
+import './flags.ts';
 import './style.css';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';

@@ -17,6 +17,9 @@ importers:
       '@colyseus/ws-transport':
         specifier: 0.18.4
         version: 0.18.4(@colyseus/core@0.18.18)(express@5.3.0)
+      country-flag-emoji-polyfill:
+        specifier: 0.1.10
+        version: 0.1.10
       express:
         specifier: 5.3.0
         version: 5.3.0
@@ -723,6 +726,9 @@ packages:
   cookie@0.7.2:
     resolution: {integrity: sha512-yki5XnKuf750l50uGTllt6kKILY4nQ1eNIQatoXEByZ5dWgnKqbnqmTrBE5B4N7lrMJKQ2ytWMiTO2o0v6Ew/w==}
     engines: {node: '>= 0.6'}
+
+  country-flag-emoji-polyfill@0.1.10:
+    resolution: {integrity: sha512-5O50p2mq/d8+4AfHz3monRQaBA4TIQ0XcKqJUhCYR6SMsLqlO4m8f87og6R1D68Z1sNXGkjLkcEccuzC6T9i5g==}
 
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
@@ -1543,6 +1549,8 @@ snapshots:
   cookie-signature@1.2.2: {}
 
   cookie@0.7.2: {}
+
+  country-flag-emoji-polyfill@0.1.10: {}
 
   csstype@3.2.3: {}
 

@@ -15,11 +15,19 @@
   --seal: #d8432f;
   --green: #163a5c;
   --gold: #f5b62e;
-  --num: 'DIN Alternate', 'DIN Condensed', Bahnschrift, 'Roboto Condensed', sans-serif;
+  --num:
+    'Twemoji Country Flags', 'DIN Alternate', 'DIN Condensed', Bahnschrift, 'Roboto Condensed',
+    sans-serif;
   color: var(--ink);
   background: var(--desk);
+  /* The flag font is only defined where the system lacks flag emoji (see flags.ts). */
   font-family:
-    -apple-system, BlinkMacSystemFont, 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei',
+    'Twemoji Country Flags',
+    -apple-system,
+    BlinkMacSystemFont,
+    'PingFang SC',
+    'HarmonyOS Sans SC',
+    'Microsoft YaHei',
     sans-serif;
 }
 body {

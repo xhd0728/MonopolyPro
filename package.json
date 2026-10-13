@@ -24,6 +24,7 @@
     "@colyseus/core": "0.18.18",
     "@colyseus/sdk": "0.18.5",
     "@colyseus/ws-transport": "0.18.4",
+    "country-flag-emoji-polyfill": "0.1.10",
     "express": "5.3.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",

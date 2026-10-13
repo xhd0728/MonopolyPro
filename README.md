@@ -39,3 +39,7 @@ pnpm start
 恢复凭证只保存在本机浏览器；对手和观众不接收私有手牌。每个动作携带 UUID 与状态版本；确认前，将状态、事件和去重结果原子写入数据库。
 
 公网部署、备份和回滚见 [部署文档](docs/DEPLOY.md)，检查结果见 [验收记录](docs/VALIDATION.md)，本轮界面与规则 review 见 [Review 记录](docs/REVIEW.md)。编译包只需安装生产依赖并运行 `pnpm start`；工程检查请在源码目录执行。公网部署和真实外网验收由部署者执行；本地测试不代表已上线。
+
+## 第三方素材
+
+Windows 上的 Chrome / Edge 不带彩色国旗 emoji，会把国旗显示成「CN」这样的字母。客户端在检测到缺少国旗时，会加载 [country-flag-emoji-polyfill](https://github.com/talkjs/country-flag-emoji-polyfill)（MIT）随包分发的国旗字体；字体图案来自 [Twemoji](https://github.com/twitter/twemoji)，按 [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/) 使用。字体自托管、只覆盖国旗码位，已有国旗 emoji 的系统不会加载。
