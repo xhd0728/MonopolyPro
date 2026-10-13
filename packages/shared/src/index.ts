@@ -371,6 +371,8 @@ export interface GameView extends Omit<GameState, 'players' | 'traps' | 'propert
   activeId: string | null;
   traps: Record<number, { until: number; amount: number }>;
 }
+/** Bot playing strength. */
+export type BotLevel = 'easy' | 'normal' | 'hard';
 export interface Seat {
   id: string;
   name: string;
@@ -378,6 +380,8 @@ export interface Seat {
   team: number;
   bot: boolean;
   botMode?: 'rule' | 'llm';
+  /** Playing strength for bot seats (default normal). */
+  botLevel?: BotLevel;
   ready: boolean;
   spectator: boolean;
   tokenHash: string;
@@ -428,7 +432,7 @@ export interface RoomView {
   emotes: EmoteView[];
   aiActivity: {
     playerId: string;
-    state: 'thinking' | 'ready' | 'fallback';
+    state: 'thinking' | 'queued' | 'ready' | 'fallback';
     message: string;
     /** Public labels of the tools an AI seat has used so far this decision. */
     steps?: string[];

@@ -1204,3 +1204,28 @@ test('review fixes: balanced rival trades, lasting off-turn quota, bots skip sid
   assert.equal(g.players[0].cash + g.players[0].deposit, 430);
   assert.equal(g.players[1].cash, 3100);
 });
+test('bot difficulty levels play legal moves and differ in strength', () => {
+  const levels = ['easy', 'normal', 'hard'] as const;
+  let seed = 5;
+  const randomInt = (max: number) => (
+    (seed = (seed * 1103515245 + 12345) % 2147483648),
+    seed % max
+  );
+  const wins = { easy: 0, normal: 0, hard: 0 };
+  for (let i = 0; i < 30; i++) {
+    let now = 1000;
+    let g = createGame(DEFAULT_SETTINGS, seats(3), `lv${i}`, { now, randomInt });
+    const order = levels.map((_, k) => levels[(k + i) % 3]);
+    for (let step = 0; step < 20000 && g.phase !== 'finished'; step++) {
+      const actor = g.trade?.to ?? actingPlayerId(g)!;
+      g = applyAction(g, actor, botAction(g, actor, order[Number(actor.slice(1))])!, {
+        now: (now += 700),
+        randomInt,
+      });
+      assertInvariants(g);
+    }
+    assert.equal(g.phase, 'finished');
+    for (const w of g.winners) wins[order[Number(w.slice(1))]]++;
+  }
+  assert.ok(wins.hard > wins.easy, `hard ${wins.hard} should beat easy ${wins.easy}`);
+});

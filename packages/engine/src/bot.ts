@@ -1,5 +1,6 @@
 import { cardById, mapById } from '../../content/src/index.ts';
 import type {
+  BotLevel,
   CardDefinition,
   GameAction,
   GameState,
@@ -25,8 +26,83 @@ export interface BotDecision {
 }
 
 /** Uses only public opponent information and this seat's own cards. No network/LLM calls. */
-export function botAction(g: GameState, id: string): GameAction | null {
-  return botDecision(g, id)?.action ?? null;
+export function botAction(g: GameState, id: string, level: BotLevel = 'normal'): GameAction | null {
+  return botDecision(g, id, level)?.action ?? null;
+}
+/** Deterministic "dice" for a decision, so easy bots vary without making the engine random. */
+function noise(g: GameState, id: string, salt: string) {
+  let h = 2166136261;
+  for (const c of `${g.id}:${g.revision}:${id}:${salt}`)
+    h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+  return ((h >>> 0) % 1000) / 1000;
+}
+/** Rounds still to play in a rounds match (a large number otherwise). */
+const roundsLeft = (g: GameState) =>
+  g.settings.end === 'rounds' ? g.settings.rounds - g.round + 1 : 99;
+const primaryOf = (g: GameState, id: string) => actionsFor(g, id).find((x) => x.primary)?.action;
+
+/**
+ * Three playing strengths:
+ * - easy: plays by feel. Buys most land it can afford, rarely builds, never proposes trades,
+ *   ignores colour groups when judging offers and always tries to roll out of jail;
+ * - normal: the full heuristic player;
+ * - hard: normal plus aggressive building on a thin cash cushion (even inside sets), a
+ *   smaller purchase cushion, cheaper but more frequent offers for the last square of a set,
+ *   stricter trade acceptance, and no late card draws or late bail.
+ */
+export function botDecision(
+  g: GameState,
+  id: string,
+  level: BotLevel = 'normal',
+): BotDecision | null {
+  return level === 'easy' ? easyDecision(g, id) : normalDecision(g, id, level === 'hard');
+}
+function easyDecision(g: GameState, id: string): BotDecision | null {
+  const base = normalDecision(g, id, false);
+  const p = g.players.find((x) => x.id === id);
+  if (!base || !p) return base;
+  const r = noise(g, id, 'easy');
+  if (g.trade?.to === id) {
+    const t = g.trade;
+    const price = (tiles: number[]) => tiles.reduce((n, x) => n + tileOf(g, x).price, 0);
+    const gets = t.giveCash + price(t.giveTiles),
+      pays = t.wantCash + price(t.wantTiles);
+    return gets >= pays
+      ? { action: { type: 'tradeAccept' }, reason: '看起来不亏，接受' }
+      : { action: { type: 'tradeReject' }, reason: '看起来要吃亏，拒绝' };
+  }
+  if (g.phase === 'purchase') {
+    const can = actionsFor(g, id).some((x) => x.action.type === 'buy');
+    const left = p.cash - landPrice(g, p.position);
+    return can && left >= 300 && r < 0.6
+      ? { action: { type: 'buy' }, reason: '喜欢这里，买下' }
+      : { action: { type: 'pass' }, reason: '这次先不买' };
+  }
+  if (g.phase === 'auction') {
+    const bid = actionsFor(g, id).find((x) => x.action.type === 'bid');
+    const cheap = tileOf(g, g.auction!.tile).price * 0.6;
+    return bid && g.auction!.highBid + 10 <= Math.min(cheap, p.cash - 200)
+      ? { action: bid.action, reason: '价格还便宜，跟一口' }
+      : { action: { type: 'auctionPass' }, reason: '不跟了' };
+  }
+  if (g.phase === 'jail' && base.action.type !== 'playCard')
+    return { action: { type: 'jailRoll' }, reason: '碰碰运气掷 6 点' };
+  const skip = (why: string) => {
+    const primary = primaryOf(g, id);
+    return primary ? { action: primary, reason: why } : base;
+  };
+  switch (base.action.type) {
+    case 'tradeOffer':
+    case 'buyCard':
+      return skip('');
+    case 'build':
+      return r < 0.2 ? base : skip('');
+    case 'playCard': {
+      const card = cardById(base.action.cardId);
+      return card?.target === 'self' || r < 0.5 ? base : skip('');
+    }
+  }
+  return base;
 }
 
 const tileOf = (g: GameState, tile: number) =>
@@ -72,7 +148,7 @@ function landingScore(g: GameState, p: PlayerState, tile: number) {
   return 0;
 }
 
-export function botDecision(g: GameState, id: string): BotDecision | null {
+function normalDecision(g: GameState, id: string, hard: boolean): BotDecision | null {
   const p = g.players.find((x) => x.id === id);
   if (!p || p.bankrupt || g.phase === 'finished') return null;
   if (g.trade?.to === id) {
@@ -82,7 +158,12 @@ export function botDecision(g: GameState, id: string): BotDecision | null {
     const pays = t.wantCash + t.wantTiles.reduce((n, x) => n + squareValue(g, x, t.from, true), 0);
     // Never pay cash that would leave nothing for rent.
     const affordable = p.cash - t.wantCash >= Math.min(reserveFor(g, p), p.cash * 0.5);
-    return gets >= pays * 1.08 + 20 && affordable
+    // Hard bots never sell an opponent the last square of a set cheaply.
+    const completesTheirs = t.wantTiles.some((x) =>
+      groupLots(g, x).every((l) => l.tile === x || l.owner === t.from),
+    );
+    const margin = hard ? (completesTheirs ? 1.6 : 1.2) : 1.08;
+    return gets >= pays * margin + 20 && affordable
       ? { action: { type: 'tradeAccept' }, reason: `估值 ${gets} 对 ${pays}，这笔交易划算` }
       : {
           action: { type: 'tradeReject' },
@@ -135,8 +216,9 @@ export function botDecision(g: GameState, id: string): BotDecision | null {
     if (buy && completes && left >= 100)
       return { action: buy.action, reason: `买下后凑齐色组，租金 +30%` };
     if (buy && blocks && left >= 150) return { action: buy.action, reason: '阻止对手凑齐色组' };
-    // Land is what wins a timed match; keep only a modest cushion for the next rent.
-    const cushion = Math.min(reserve, 250 + g.round * 15);
+    // Land is what wins a timed match; keep only a modest cushion for the next rent. A hard
+    // bot grabs land early in the match on a thinner cushion.
+    const cushion = Math.min(reserve, hard ? 200 : 250);
     if (buy && left >= cushion)
       return { action: buy.action, reason: `买后仍留 ${left} 现金，足够应付租金` };
     return {
@@ -150,7 +232,8 @@ export function botDecision(g: GameState, id: string): BotDecision | null {
       return { action: { type: 'playCard', cardId: rescue }, reason: '用自由通行出狱' };
     // Leaving early matters most while unowned land is still on the board.
     const landLeft = g.properties.some((x) => !x.owner);
-    return p.cash >= bailOf(g) + (landLeft ? 500 : 1500) && has('bail')
+    // Hard bots keep the bail money unless there is still land worth racing for.
+    return p.cash >= bailOf(g) + (landLeft ? 500 : 1500) && has('bail') && !(hard && !landLeft)
       ? { action: { type: 'bail' }, reason: landLeft ? '还有空地，尽早出狱抢地' : '现金充裕，保释' }
       : {
           action: { type: 'jailRoll' },
@@ -168,29 +251,42 @@ export function botDecision(g: GameState, id: string): BotDecision | null {
   if (ability) return { action: ability.action, reason: '天赋已就绪' };
   const card = cardMove(g, p, reserve);
   if (card) return card;
-  // A blind draw at the market when cash is comfortable.
+  // A blind draw at the market when cash is comfortable (hard bots skip it near the end).
   const draw = has('buyCard');
-  if (draw && p.cash > reserve + 600) return { action: draw.action, reason: '现金宽裕，抽一张卡' };
-  const offer = groupOffer(g, p);
+  if (draw && p.cash > reserve + 600 && !(hard && roundsLeft(g) < 3))
+    return { action: draw.action, reason: '现金宽裕，抽一张卡' };
+  const offer = groupOffer(g, p, hard);
   if (offer) return { action: offer, reason: '出价收购凑齐色组所缺的地块' };
-  const build = bestBuild(g, p, reserve);
+  const build = bestBuild(g, p, reserve, hard);
   if (build) return build;
   const primary = options.find((x) => x.primary)?.action;
   return primary ? { action: primary, reason: '' } : null;
 }
 
 /** Upgrade where it pays most: complete groups first, then the highest rent per coin. */
-function bestBuild(g: GameState, p: PlayerState, reserve: number): BotDecision | null {
+function bestBuild(
+  g: GameState,
+  p: PlayerState,
+  reserve: number,
+  hard = false,
+): BotDecision | null {
   if (g.phase !== 'manage') return null;
+  // Buildings count at 75% of their cost: in the very last round they cannot pay back.
+  if (hard && roundsLeft(g) < 2) return null;
   let best: { prop: PropertyState; score: number; cost: number; group: boolean } | null = null;
   for (const prop of g.properties) {
     if (prop.owner !== p.id || prop.mortgaged || prop.level >= 3) continue;
     const cost = buildCost(g, p, prop);
-    if (p.cash - cost < Math.min(reserve, 600) + 150) continue;
     const group = groupLots(g, prop.tile).every((x) => x.owner === p.id);
-    // Outside a complete group, stop at level 2 so cash stays liquid.
-    if (!group && prop.level >= 2) continue;
-    const score = (tileOf(g, prop.tile).rent * (group ? 2 : 1)) / cost;
+    // Rent from buildings is what separates players: hard bots build on a thin cushion and
+    // all the way to level 3 (simulation: about 32% wins against normal bots' 18%).
+    const cushion = Math.min(reserve, 600) * (hard ? 0.2 : 0.5) + (hard ? 50 : 100);
+    if (p.cash - cost < cushion) continue;
+    // Outside a complete group, normal bots stop at level 2 so cash stays liquid.
+    if (!group && prop.level >= (hard ? 3 : 2)) continue;
+    // Build evenly: the lowest level in a set first (hard only).
+    const evenness = hard && group ? 1 / (1 + prop.level) : 1;
+    const score = ((tileOf(g, prop.tile).rent * (group ? 2 : 1)) / cost) * evenness;
     if (!best || score > best.score) best = { prop, score, cost, group };
   }
   if (!best) return null;
@@ -327,18 +423,20 @@ export function squareValue(g: GameState, tile: number, receiver: string, gainin
   return Math.round(price * (gaining && completes && !late ? 1.8 : 1));
 }
 /** Occasionally offer cash for the last square a bot needs to complete a colour group. */
-function groupOffer(g: GameState, p: PlayerState): GameAction | null {
+function groupOffer(g: GameState, p: PlayerState, hard = false): GameAction | null {
   if (g.phase !== 'manage' || g.trade) return null;
   const memo = g.tradeMemo[p.id];
-  // At most one offer every three rounds, and never inside the post-rejection cooldown
-  // (decisionAt is a lower bound for the current time).
-  if (memo && (g.round - memo.round < 3 || memo.until > g.decisionAt)) return null;
+  // At most one offer every three rounds (two for hard bots), and never inside the
+  // post-rejection cooldown (decisionAt is a lower bound for the current time).
+  if (memo && (g.round - memo.round < (hard ? 2 : 3) || memo.until > g.decisionAt)) return null;
+  // A set bought late cannot pay back the premium before the match ends.
+  if (hard && roundsLeft(g) < 5) return null;
   for (const prop of g.properties) {
     if (!prop.owner || prop.owner === p.id || prop.level || prop.mortgaged) continue;
     const owner = g.players.find((x) => x.id === prop.owner)!;
     if (owner.bankrupt || !isEnemy(g, p, owner)) continue;
     if (!groupLots(g, prop.tile).every((x) => x.tile === prop.tile || x.owner === p.id)) continue;
-    const cash = Math.round((tileOf(g, prop.tile).price * 1.7) / 10) * 10;
+    const cash = Math.round((tileOf(g, prop.tile).price * (hard ? 1.4 : 1.7)) / 10) * 10;
     if (p.cash < cash + 500) continue;
     return {
       type: 'tradeOffer',
