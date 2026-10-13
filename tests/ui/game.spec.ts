@@ -197,6 +197,7 @@ test('mobile country express map: real fork selection and auction input advance 
   await page.setViewportSize({ width: 390, height: 844 });
   await create(page, '路线玩家');
   await page.getByLabel('地图', { exact: true }).selectOption('neon');
+  await page.getByLabel('空地拍卖').selectOption('on');
   await page.getByRole('button', { name: '添加机器人' }).click();
   await page.getByRole('button', { name: '我准备好了' }).click();
   await page.getByRole('button', { name: '开始旅程' }).click();
@@ -230,6 +231,8 @@ test('mobile country express map: real fork selection and auction input advance 
         await expect(page.getByRole('button', { name: /^出价/ })).toBeDisabled();
         await expect(page.getByText('竞价不能超过可用现金')).toBeVisible();
         await page.getByLabel('竞价金额').fill('100');
+        // The bid button names the amount actually typed, not the minimum.
+        await expect(page.getByRole('button', { name: /^出价/ })).toHaveText(/出价 100/);
         await accepted(page, page.getByRole('button', { name: /^出价/ }));
         await expect(page.getByRole('button', { name: /^退出竞拍/ })).toBeEnabled();
         await accepted(page, page.getByRole('button', { name: /^退出竞拍/ }));

@@ -107,7 +107,7 @@ export function phaseGuide(game: GameView, map: MapDefinition): { title: string;
   if (game.phase === 'purchase')
     return {
       title: `${prefix}抵达${map.tiles[actor?.position ?? 0].name}`,
-      text: `地价 ${money(game.properties.find((p) => p.tile === actor?.position)?.price ?? map.tiles[actor?.position ?? 0].price)}。直接购买，或放弃购买让所有人公开竞拍。`,
+      text: `地价 ${money(game.properties.find((p) => p.tile === actor?.position)?.price ?? map.tiles[actor?.position ?? 0].price)}。${game.settings.auction ? '直接购买，或放弃购买让所有人公开竞拍。' : '只有停在这里的人能买；放弃则地块继续空置。'}`,
     };
   if (game.phase === 'auction')
     return {
@@ -166,7 +166,10 @@ export function adviceFor(game: GameView, map: MapDefinition): string | null {
       );
       if (rest.length && rest.every((p) => p.owner === me.id))
         return `买下${here.name}即可独占这一组，组内租金全部 +30%。`;
-      if (!can('buy')) return '现金不够买下这里，可以进入拍卖，低价时也能参与竞拍。';
+      if (!can('buy'))
+        return game.settings.auction
+          ? '现金不够买下这里，可以进入拍卖，低价时也能参与竞拍。'
+          : '现金不够买下这里，只能先放弃；地块会继续空置。';
       if (me.cash - price < 300)
         return `买下后只剩 ${money(me.cash - price)} 现金，小心付不起别人的租金。`;
       return '地产是收租的来源，开局多买几处通常更有利。';

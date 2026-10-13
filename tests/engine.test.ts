@@ -77,6 +77,7 @@ test('ownership, exact purchase/build costs, mortgage and redemption', () => {
 });
 test('auction sequential bidding settles once, and all-pass leaves property unowned', () => {
   let g = game();
+  g.settings.auction = true;
   g.phase = 'purchase';
   g.players[0].position = 1;
   g = act(g, { type: 'pass' });
@@ -87,6 +88,7 @@ test('auction sequential bidding settles once, and all-pass leaves property unow
   assert.equal(g.players[0].cash, 2800);
   assert.equal(g.phase, 'manage');
   g = game();
+  g.settings.auction = true;
   g.phase = 'purchase';
   g.players[0].position = 1;
   g = act(g, { type: 'pass' });
@@ -122,6 +124,7 @@ test('trade validates all assets before atomic exchange and freezes turn', () =>
 });
 test('players leaving an auction preserve the active bidder and settle before the next turn', () => {
   let g = game('town', 4);
+  g.settings.auction = true;
   g.phase = 'purchase';
   g.players[0].position = 1;
   g = act(g, { type: 'pass' });
@@ -965,4 +968,16 @@ test('review fixes: trades cannot stall the table, team targets use averages', (
   assert.equal(g.players[1].cash, 0);
   assert.equal(g.players[1].stats.rentIn, 0);
   assertInvariants(g);
+});
+
+test('by default only the player who landed may buy; declining leaves the square unsold', () => {
+  let g = game();
+  g.players[0].position = 1;
+  g.phase = 'purchase';
+  assert.equal(actionsFor(g, 'p0').find((a) => a.action.type === 'pass')?.label, '放弃购买');
+  g = act(g, { type: 'pass' });
+  assert.equal(g.phase, 'manage');
+  assert.equal(g.auction, null);
+  assert.equal(propertyAt(g, 1)!.owner, null);
+  assert.throws(() => act(g, { type: 'bid', amount: 10 }, 'p1'));
 });

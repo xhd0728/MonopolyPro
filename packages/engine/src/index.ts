@@ -226,7 +226,15 @@ export function migrateGame(state: GameState, randomInt?: (max: number) => numbe
   (g as Partial<GameState>).finale ??= false;
   // Games saved before end conditions existed ended on the clock.
   g.settings = Object.assign(
-    { turnSeconds: 0, end: 'time' as const, rounds: 12, target: 15000, size: 36 as const },
+    {
+      turnSeconds: 0,
+      end: 'time' as const,
+      rounds: 12,
+      target: 15000,
+      size: 36 as const,
+      // Games saved before this option used the old auction rule.
+      auction: true,
+    },
     g.settings,
   );
   // Offers saved before multi-square trades carried one square per side.
@@ -1452,7 +1460,18 @@ export function applyAction(
     }
     case 'pass':
       requireRule(currentPlayer(g).id === p.id && g.phase === 'purchase', '现在不能放弃购买');
-      startAuction(g, env);
+      if (g.settings.auction) startAuction(g, env);
+      else {
+        // Only the player who landed here may buy; declining leaves the square for later.
+        setPhase(g, 'manage', env);
+        log(
+          g,
+          env,
+          'purchase',
+          `${p.name}放弃购买${tileAt(g, p.position).name}，地块继续空置`,
+          p.id,
+        );
+      }
       break;
     case 'bid':
     case 'auctionPass': {
@@ -1806,7 +1825,8 @@ export function actionsFor(g: GameState, id: string): ActionOption[] {
         `基础租金 ${tile.rent}，标准建设费 ${tile.buildCost}`,
         true,
       );
-    add({ type: 'pass' }, '进入拍卖', '让所有玩家公开竞价');
+    if (g.settings.auction) add({ type: 'pass' }, '进入拍卖', '让所有玩家公开竞价');
+    else add({ type: 'pass' }, '放弃购买', '地块继续空置，以后停在这里的人可以买');
     return options;
   }
   if (g.phase === 'roll') add({ type: 'roll' }, '掷骰出发', '可先使用卡牌或角色天赋', true);

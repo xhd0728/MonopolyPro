@@ -520,7 +520,7 @@ function App() {
         : undefined,
     help: () =>
       notify(
-        '快捷键：空格/回车 主操作 · B 购买 · P 拍卖/退出竞拍 · E 结束回合 · T 交易 · 1–3 选择岔路 · ↑/↓ 猜大/猜小',
+        '快捷键：空格/回车 主操作 · B 购买 · P 放弃购买/退出竞拍 · E 结束回合 · T 交易 · 1–3 选择岔路 · ↑/↓ 猜大/猜小',
       ),
   });
   const canGuess =
@@ -950,6 +950,22 @@ function App() {
                     </select>
                   </label>
                   <label>
+                    空地拍卖
+                    <select
+                      aria-label="空地拍卖"
+                      value={room.settings.auction ? 'on' : 'off'}
+                      disabled={!room.isHost || disabled}
+                      onChange={(e) =>
+                        lobby('settings', {
+                          settings: { ...room.settings, auction: e.target.value === 'on' },
+                        })
+                      }
+                    >
+                      <option value="off">关闭（默认）· 只有停在这里的人能买</option>
+                      <option value="on">开启 · 放弃购买后全员公开竞拍</option>
+                    </select>
+                  </label>
+                  <label>
                     结束方式
                     <select
                       aria-label="结束方式"
@@ -1257,7 +1273,11 @@ function App() {
                                         )
                                       }
                                     >
-                                      {pending ? '等待确认…' : a.label}
+                                      {pending
+                                        ? '等待确认…'
+                                        : a.action.type === 'bid'
+                                          ? `出价 ${money(bid)}`
+                                          : a.label}
                                     </button>
                                     {hints && <small>{a.hint}</small>}
                                   </div>
@@ -1631,7 +1651,9 @@ function App() {
               <p className="country-owner-description">
                 {owner
                   ? `${owner.name}所有 · ${property?.level} 级建筑${property?.mortgaged ? ' · 已抵押，不收租' : ''}`
-                  : '待售国家地产 · 抵达后可以购买或参与公开拍卖'}
+                  : room?.settings.auction
+                    ? '待售国家地产 · 抵达后可以购买或参与公开拍卖'
+                    : '待售国家地产 · 停在这里的玩家可以购买'}
               </p>
               {owner && me && (
                 <p className="hint">
@@ -1948,9 +1970,9 @@ function App() {
               </p>
               <h3>03 / 国家地产与经济</h3>
               <p>
-                空地可直接购买，放弃则全员轮流竞拍。至少加价 10，退出后不能再出价。地产可升 3
-                级，租金倍率为 1、2.5、5、9；独占街区额外 +30%。抵押获得半价，赎回支付地价的
-                55%。建筑出售返还标准建设费的一半。
+                空地只有停在上面的玩家能买；放弃则继续空置。房主可以开启「空地拍卖」，开启后放弃购买会进入全员轮流竞拍，至少加价
+                10，退出后不能再出价。地产可升 3 级，租金倍率为 1、2.5、5、9；独占街区额外
+                +30%。抵押获得半价，赎回支付地价的 55%。建筑出售返还标准建设费的一半。
               </p>
               <h3>04 / 卡牌、银行与交易</h3>
               <p>
@@ -2153,7 +2175,7 @@ function App() {
               [
                 '点击空位添加机器人，选择角色后点「我准备好了」，再开始旅程。',
                 '点击「掷骰出发」。初始手牌和角色天赋可提前使用。落到空地时出现购买提示。',
-                '点击「购买」获得地产，或「进入拍卖」参与轮流出价。购买失败时会提示具体原因。',
+                '点击「购买」获得地产，或「放弃购买」让它继续空置。购买失败时会提示具体原因。',
                 '在「资产」中升级建筑，提高租金；随后结束回合。注意保留现金支付对手租金。',
                 '试试卡牌、交易、银行与岔路。刷新可恢复席位，规则图鉴随时可查。',
               ][tutorial]

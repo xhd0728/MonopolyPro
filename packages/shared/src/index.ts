@@ -15,6 +15,11 @@ export interface RoomSettings {
   target: number;
   /** Board size: 36 squares (default) or 44. */
   size: 36 | 44;
+  /**
+   * Whether a declined square goes to a public auction. Off by default: only the player who
+   * lands on a square may buy it, so nobody can snipe land cheaply.
+   */
+  auction: boolean;
 }
 export type EndMode = 'rounds' | 'time' | 'target';
 export type TileKind =
@@ -506,6 +511,7 @@ export const settingsSchema = z.object({
   rounds: z.number().int().min(4).max(40).default(16),
   target: z.number().int().min(5000).max(100000).default(15000),
   size: z.union([z.literal(36), z.literal(44)]).default(36),
+  auction: z.boolean().default(false),
 });
 /** Whatever the end mode, a match never runs longer than this. */
 export const HARD_CAP_MINUTES = 90;
@@ -520,6 +526,7 @@ export const DEFAULT_SETTINGS: RoomSettings = {
   rounds: 16,
   target: 15000,
   size: 36,
+  auction: false,
 };
 export interface CommandResult {
   id: string;
