@@ -1128,11 +1128,17 @@ label {
   .match-page .game-sidebar > .action-panel {
     flex: 0 1 auto;
     height: auto;
-    max-height: 62%;
+    max-height: 68%;
   }
   .activity-feed.docked {
     flex: 1 1 0;
-    min-height: 170px;
+    min-height: 150px;
+  }
+  /* The board centre already explains the step and gives the tip; keep the panel to the
+     decision itself so the buttons and the hand stay in view. */
+  .match-page .turn-prompt > p,
+  .match-page .turn-prompt > .untimed {
+    display: none;
   }
 }
 .activity-feed {
@@ -1414,4 +1420,85 @@ label {
 .feed-list {
   /* Scroll position is anchored in code; the browser's own anchoring would fight it. */
   overflow-anchor: none;
+}
+
+/* ---------- Match top strip: one row, every control on the same centre line ---------- */
+.match-page .board-meta {
+  align-items: center;
+}
+.board-meta .text-button {
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+}
+.board-meta .emote-bar {
+  display: inline-flex;
+  align-items: center;
+}
+.board-meta .emote-toggle,
+.board-meta .meta-afk,
+.board-meta .meta-room .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 26px;
+  min-height: 26px;
+  line-height: 1;
+}
+/* The old strip padded every <i>; the progress bar and its fill must start at zero. */
+.board-meta .meta-bar,
+.board-meta .meta-bar > i {
+  padding: 0;
+}
+.board-meta .meta-finale {
+  white-space: nowrap;
+}
+/* Narrower boards: drop the room label (the invite button stays), then other extras. */
+@media (max-width: 1360px) {
+  .board-meta .meta-room .room-label {
+    display: none;
+  }
+}
+@media (max-width: 1100px) {
+  .board-meta .meta-map .badge,
+  .board-meta .emote-label,
+  .board-meta .meta-finale .finale-label {
+    display: none;
+  }
+  .match-page .board-meta {
+    gap: 10px;
+  }
+}
+@media (max-width: 960px) and (min-width: 801px) {
+  .board-meta .afk-label {
+    display: none;
+  }
+  .meta-bar {
+    width: 44px;
+  }
+}
+
+/* Narrow phones: keep the top bar on one line. */
+@media (max-width: 420px) {
+  .topbar .brand span,
+  .topbar nav button {
+    white-space: nowrap;
+  }
+  .topbar nav button {
+    padding-inline: 6px;
+    font-size: 13px;
+  }
+}
+@media (max-width: 379px) {
+  .in-match .topbar .brand > span:not(.brand-mark) {
+    display: none;
+  }
+}
+@media (min-width: 801px) and (max-height: 820px) {
+  .match-page .game-sidebar > .action-panel {
+    max-height: 74%;
+  }
+  .match-page .actions small {
+    display: none;
+  }
 }

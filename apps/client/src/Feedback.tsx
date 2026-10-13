@@ -354,8 +354,23 @@ export function useLiveEmotes(emotes: EmoteView[], enabled: boolean) {
 const EMOTE_LIFE_MS = 3500;
 export function EmoteBar({ send, disabled }: { send: (emote: Emote) => void; disabled: boolean }) {
   const [open, setOpen] = useState(false);
+  const bar = useRef<HTMLSpanElement>(null);
+  // Escape or a click anywhere else closes the menu.
+  useEffect(() => {
+    if (!open) return;
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    const away = (e: PointerEvent) => {
+      if (!bar.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('keydown', key);
+    document.addEventListener('pointerdown', away);
+    return () => {
+      document.removeEventListener('keydown', key);
+      document.removeEventListener('pointerdown', away);
+    };
+  }, [open]);
   return (
-    <span className="emote-bar">
+    <span className="emote-bar" ref={bar}>
       <button
         className="text-button emote-toggle"
         aria-expanded={open}

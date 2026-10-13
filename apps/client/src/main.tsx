@@ -140,7 +140,11 @@ function MatchProgress({ game }: { game: GameView }) {
           <i style={{ width: `${share * 100}%` }} />
         </i>
       )}
-      {game.finale && <em className="meta-finale">🔥 终局冲刺 · 租金 ×1.5</em>}
+      {game.finale && (
+        <em className="meta-finale" title="终局冲刺：所有租金 ×1.5">
+          🔥<span className="finale-label"> 终局冲刺</span> · 租金 ×1.5
+        </em>
+      )}
     </span>
   );
 }
@@ -239,6 +243,11 @@ function App() {
     [panel, setPanel] = useState('操作'),
     [sheetOpen, setSheetOpen] = useState(false),
     wide = useWide();
+  const panelRef = useRef<HTMLElement>(null);
+  // A new tab starts at its top instead of inheriting the previous tab's scroll.
+  useEffect(() => {
+    panelRef.current?.scrollTo({ top: 0 });
+  }, [panel]);
   const [inspectedPlayer, setInspectedPlayer] = useState<string | null>(null);
   const inspectPlayer = useCallback((id: string) => {
     setSelectedTile(null);
@@ -600,9 +609,10 @@ function App() {
             <button onClick={() => setDialog('settings')}>设置</button>
             {room && <button onClick={() => setDialog('exit')}>离开房间</button>}
           </nav>
-          <div className={`connection ${connected ? 'online' : ''}`} aria-live="polite">
+          <div className={`connection ${connected ? 'online' : ''}`}>
             <i />
-            {room ? status : '朋友的下一场聚会'}
+            {/* Only the status is announced; the ping changes every few seconds. */}
+            <span aria-live="polite">{room ? status : '朋友的下一场聚会'}</span>
             {connected && latency !== undefined && (
               <span className={`ping ${pingBand(latency)}`} title="与服务器之间的往返延迟">
                 Ping {latency} ms
@@ -1127,7 +1137,9 @@ function App() {
                             onClick={() => lobby('afk', { afk: !mySeat?.afk })}
                           >
                             {mySeat?.afk ? (
-                              '挂机中 · 回来'
+                              <>
+                                🛋<span className="afk-label"> 挂机中 ·</span> 回来
+                              </>
                             ) : (
                               <>
                                 🛋<span className="afk-label"> 挂机</span>
@@ -1143,7 +1155,9 @@ function App() {
                           />
                         )}
                         <span className="meta-room invite">
-                          房间 <b>{room.code}</b>
+                          <span className="room-label">
+                            房间 <b>{room.code}</b>
+                          </span>
                           <button className="text-button" onClick={invite}>
                             复制邀请
                           </button>
@@ -1192,7 +1206,10 @@ function App() {
                       />
                     </section>
                     <aside className="game-sidebar">
-                      <section className={`paper action-panel ${sheetOpen ? 'sheet-open' : ''}`}>
+                      <section
+                        ref={panelRef}
+                        className={`paper action-panel ${sheetOpen ? 'sheet-open' : ''}`}
+                      >
                         <button
                           className="drawer-close icon-button"
                           aria-label="关闭详情抽屉"
@@ -1251,7 +1268,7 @@ function App() {
                                 <p>{phaseGuide(g, map).text}</p>
                               )}
                               {g.phase !== 'finished' && !g.trade && !room.decisionTimeoutMs && (
-                                <span className="decision-timer">
+                                <span className="decision-timer untimed">
                                   不限时 · 想离开一会儿可以开启挂机托管
                                 </span>
                               )}
