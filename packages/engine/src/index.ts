@@ -94,16 +94,21 @@ function beginTurn(p: PlayerState) {
   p.newCards = [];
   p.cardPlayed = false;
   p.shopped = false;
+  p.heldInJail = false;
 }
+const drawPriceOf = (p: PlayerState) =>
+  p.characterId === 'dealer' ? BOARD.dealerDraw : BOARD.cardDraw;
 export function assetsOf(g: GameState, p: PlayerState): number {
   const propertyValue = g.properties
     .filter((x) => x.owner === p.id)
     .reduce((sum, x) => {
       const tile = tileAt(g, x.tile);
+      // Land counts at its price (a mortgaged lot only at its equity after redemption) and
+      // buildings at three quarters of their cost, so buying land is not a net-worth loss.
       return (
         sum +
-        (x.mortgaged ? 0 : Math.floor(tile.price / 2)) +
-        Math.floor((x.level * tile.buildCost) / 2)
+        (x.mortgaged ? tile.price - Math.ceil(tile.price * 0.55) : tile.price) +
+        Math.floor((x.level * tile.buildCost * 3) / 4)
       );
     }, 0);
   return p.cash + p.deposit + propertyValue - (g.debt?.playerId === p.id ? g.debt.amount : 0);
@@ -152,7 +157,11 @@ export function landPrice(g: GameState, tile: number) {
 }
 const interestRate = (g: GameState) => {
   const effect = newsNow(g)?.effect;
-  return effect === 'rateCut' ? 0 : effect === 'rateHike' ? 0.06 : 0.03;
+  return effect === 'rateCut'
+    ? 0
+    : effect === 'rateHike'
+      ? newsNow(g)!.amount / 100
+      : BOARD.interest;
 };
 function groupNames(g: GameState, group: number) {
   return mapOf(g)
@@ -189,7 +198,7 @@ function flipNews(g: GameState, env: EngineEnvironment) {
     // Only a clear leader pays: at least 20% above the table's average net worth.
     const tax =
       assetsOf(g, rich) >= average * 1.2
-        ? Math.min(300, Math.round((rich.cash * news.amount) / 100))
+        ? Math.min(300, Math.round(((rich.cash + rich.deposit) * news.amount) / 100))
         : 0;
     if (!tax)
       log(
@@ -197,11 +206,14 @@ function flipNews(g: GameState, env: EngineEnvironment) {
         env,
         'news',
         assetsOf(g, rich) >= average * 1.2
-          ? `${rich.name}手头没有现金，本轮富豪税为 0`
+          ? `${rich.name}没有现金和存款，本轮富豪税为 0`
           : '暂无明显领先的富豪，本轮无人缴纳富豪税',
       );
     else {
-      rich.cash -= tax;
+      // Cash first, then savings: parking money in the bank no longer dodges the tax.
+      const fromCash = Math.min(rich.cash, tax);
+      rich.cash -= fromCash;
+      rich.deposit -= tax - fromCash;
       g.pot += tax;
       log(g, env, 'payment', `${rich.name}缴纳富豪税 −${tax}，进入停车场奖池`, rich.id, -tax);
     }
@@ -375,6 +387,12 @@ export function createGame(
   };
   for (const p of players)
     for (let i = 0; i < (p.characterId === 'dealer' ? 3 : 2); i++) drawCard(g, p, env, true);
+  // Moving first is worth real money (first pick of the land); later seats start a little richer.
+  players.forEach((p, i) => {
+    if (i) p.cash += i * BOARD.seatBonus;
+  });
+  if (players.length > 1)
+    log(g, env, 'money', `后手补偿：从第 2 位起，每靠后一位多 ${BOARD.seatBonus} 起始现金`);
   log(g, env, 'start', '富翁之旅开始了！先使用卡牌或天赋，再掷骰出发。');
   // Everyone starts level, so the first round is calm; world news begins in round two.
   g.news = { id: 'calm', round: 1 };
@@ -531,12 +549,15 @@ function targetStandings(g: GameState): { name: string; worth: number }[] {
   const alive = g.players.filter((p) => !p.bankrupt);
   if (g.settings.mode === 'team')
     return [0, 1].flatMap((team) => {
-      const side = alive.filter((p) => p.team === team);
-      return side.length
+      // Average over the whole roster with bankrupt members at 0, so surrendering a seat
+      // never raises a team's score (and the ranking matches the final sum).
+      const roster = g.players.filter((p) => p.team === team);
+      return alive.some((p) => p.team === team)
         ? [
             {
               name: team === 0 ? '青队' : '橙队',
-              worth: side.reduce((n, p) => n + assetsOf(g, p), 0) / side.length,
+              worth:
+                roster.reduce((n, p) => n + (p.bankrupt ? 0 : assetsOf(g, p)), 0) / roster.length,
             },
           ]
         : [];
@@ -722,7 +743,10 @@ function land(g: GameState, env: EngineEnvironment) {
     enemy(g, p, playerById(g, trap.owner)!)
   ) {
     delete g.traps[p.position];
-    charge(g, p, trap.amount, trap.owner, env, '道路施工');
+    // The fee never exceeds the cash in hand, so it cannot open a debt that would cancel the
+    // rest of the landing (the purchase offer or the rent on this square).
+    const fee = Math.min(trap.amount, p.cash);
+    if (fee > 0) charge(g, p, fee, trap.owner, env, '道路施工');
     if (g.debt) return;
   }
   const property = propertyAt(g, p.position);
@@ -946,13 +970,23 @@ function applyDeckCard(
         total += amount;
       }
       p.cash += total;
+      if (p.characterId === 'explorer' && total >= 4) {
+        reward(g, p, Math.round(total * 0.25), env, '探险家加成');
+      }
       log(g, env, 'money', `${p.name}：${card.name}，收到对手共 ${total}`, p.id, total);
       break;
     }
     case 'shield':
       if (!grantShield(g, p, env, card.name))
         reward(g, p, 80, env, `${card.name}（已有护盾，改发现金）`);
-      if (card.amount) reward(g, p, card.amount, env, card.name);
+      if (card.amount)
+        reward(
+          g,
+          p,
+          Math.round(card.amount * (p.characterId === 'explorer' ? 1.25 : 1)),
+          env,
+          card.name,
+        );
       break;
     case 'drawCard':
       if (!handFull(p)) drawCard(g, p, env);
@@ -1094,8 +1128,10 @@ function bankrupt(g: GameState, p: PlayerState, env: EngineEnvironment) {
     g.debt?.playerId === p.id && g.debt.creditorId ? playerById(g, g.debt.creditorId) : undefined;
   if (creditor && !creditor.bankrupt) creditor.cash += p.cash + p.deposit;
   for (const property of g.properties.filter((x) => x.owner === p.id)) {
-    property.owner = creditor && !creditor.bankrupt ? creditor.id : null;
-    property.mortgaged = false;
+    const heir = creditor && !creditor.bankrupt ? creditor : undefined;
+    property.owner = heir ? heir.id : null;
+    // A creditor takes mortgaged land as it is; land returned to the bank is free again.
+    if (!heir) property.mortgaged = false;
     property.level = 0;
     property.boostUntil = 0;
     property.cutUntil = 0;
@@ -1104,6 +1140,7 @@ function bankrupt(g: GameState, p: PlayerState, env: EngineEnvironment) {
   p.cash = 0;
   p.deposit = 0;
   p.cards = [];
+  p.newCards = [];
   p.bankrupt = true;
   for (const [tile, trap] of Object.entries(g.traps))
     if (trap.owner === p.id) delete g.traps[Number(tile)];
@@ -1150,7 +1187,10 @@ function cardAction(
     card && p.newCards.includes(card.id) ? '这张卡本回合刚获得，下回合才能使用' : '没有这张卡牌',
   );
   requireRule(!p.cardPlayed, '每回合只能使用一张卡牌');
-  requireRule(p.jailTurns === 0 || card.category !== 'move', '拘留中不能使用移动类卡牌');
+  requireRule(
+    (p.jailTurns === 0 && !p.heldInJail) || card.category !== 'move',
+    '拘留中不能使用移动类卡牌',
+  );
   let target = p;
   let property: PropertyState | undefined;
   if (card.target === 'player') {
@@ -1176,6 +1216,8 @@ function cardAction(
     case 'teleport':
       p.position = mapOf(g).corners.start;
       paySalary(g, p, env);
+      // Like the move cards, a jump before rolling is this turn's movement.
+      if (g.phase === 'roll') setPhase(g, 'manage', env);
       break;
     case 'dice':
       requireRule(
@@ -1343,6 +1385,19 @@ function proposeTrade(
   const rule = '仅可交易没有建筑、未抵押的地产；先出售建筑或赎回';
   checkTradeSquares(g, p, giveTiles, rule);
   checkTradeSquares(g, target, wantTiles, rule);
+  if (enemy(g, p, target)) {
+    // Between rivals both sides must give something, and cash cannot exceed twice the listed
+    // price of the land it buys: no gifts, no kingmaking through the trade window.
+    requireRule(
+      (giveCash > 0 || giveTiles.length > 0) && (wantCash > 0 || wantTiles.length > 0),
+      '对手之间的交易需要双方都付出现金或地产，不能单方面赠送',
+    );
+    const listed = (tiles: number[]) => tiles.reduce((n, t) => n + tileAt(g, t).price, 0);
+    requireRule(
+      giveCash <= listed(wantTiles) * 2 && wantCash <= listed(giveTiles) * 2,
+      '现金不能超过所换地产标价的 2 倍',
+    );
+  }
   g.trade = {
     id: `${g.id}-${g.revision}`,
     from: p.id,
@@ -1442,6 +1497,7 @@ export function applyAction(
         move(g, die + (p.characterId === 'runner' ? 1 : 0), env);
       } else {
         setPhase(g, 'manage', env);
+        p.heldInJail = true;
         log(
           g,
           env,
@@ -1625,27 +1681,31 @@ export function applyAction(
     case 'buyCard': {
       manageAllowed(g, p);
       requireRule(tileAt(g, p.position).kind === 'shop', '请在卡牌商店购买');
+      // Only on the turn you arrive: standing on the market at the start of the next turn
+      // does not give a second draw.
+      requireRule(g.phase === 'manage', '抵达卡牌市场后才能抽卡');
       requireRule(!p.shopped, '每回合只能在卡牌市场抽一次');
       requireRule(!handFull(p), `手牌已满（最多 ${BOARD.handLimit} 张）`);
-      requireRule(p.cash >= BOARD.cardDraw, `抽卡需要 ${BOARD.cardDraw} 现金`);
+      const drawPrice = drawPriceOf(p);
+      requireRule(p.cash >= drawPrice, `抽卡需要 ${drawPrice} 现金`);
       // A blind draw at a flat price: nobody can buy the exact combo they want.
-      p.cash -= BOARD.cardDraw;
+      p.cash -= drawPrice;
       p.shopped = true;
       const card = randomCard(env.randomInt);
       p.newCards.push(card.id);
-      log(g, env, 'card', `${p.name}在卡牌市场抽了一张卡（下回合可用）`, p.id, -BOARD.cardDraw);
+      log(g, env, 'card', `${p.name}在卡牌市场抽了一张卡（下回合可用）`, p.id, -drawPrice);
       break;
     }
     case 'ability': {
       manageAllowed(g, p);
       requireRule(g.round - p.abilityRound >= 3, '天赋每 3 轮只能使用一次');
       p.abilityRound = g.round;
-      if (p.characterId === 'builder') reward(g, p, 180, env, '建设补助');
+      if (p.characterId === 'builder') reward(g, p, 150, env, '建设补助');
       if (p.characterId === 'landlord') reward(g, p, 150, env, '商业分红');
-      if (p.characterId === 'runner') reward(g, p, 150, env, '旅行补贴');
+      if (p.characterId === 'runner') reward(g, p, 60, env, '旅行补贴');
       if (p.characterId === 'guardian') {
         p.taxShield = 1;
-        reward(g, p, 100, env, '应急金');
+        reward(g, p, 150, env, '应急金');
       }
       if (p.characterId === 'dealer') {
         requireRule(!handFull(p), '手牌已满');
@@ -1654,7 +1714,7 @@ export function applyAction(
       if (p.characterId === 'explorer') {
         p.skipTurns = 0;
         if (p.jailTurns > 0) releaseFromJail(g, p, env, '凭探险家天赋');
-        reward(g, p, 120, env, '探险奖励');
+        reward(g, p, 160, env, '探险奖励');
       }
       log(g, env, 'ability', `${p.name}使用角色天赋`, p.id);
       break;
@@ -1671,7 +1731,15 @@ export function applyAction(
       requireRule(target && target.id !== p.id && !target.bankrupt, '请选择一位仍在经营的玩家');
       const give = tradeSquares(action.giveTiles, action.giveTile),
         want = tradeSquares(action.wantTiles, action.wantTile);
+      // Offers between two players who are not on turn pause the table, so each player gets
+      // one such offer per round.
+      const side = ![p.id, target.id].includes(currentPlayer(g).id);
+      requireRule(
+        !side || g.tradeMemo[p.id]?.side !== g.round,
+        '不在自己回合时，每轮只能发起一次交易',
+      );
       proposeTrade(g, p, target, action.giveCash, action.wantCash, give, want, false, env);
+      if (side) g.tradeMemo[p.id]!.side = g.round;
       break;
     }
     case 'tradeCounter': {
@@ -1700,7 +1768,11 @@ export function applyAction(
       const offer = g.trade;
       requireRule(
         offer &&
-          (offer.to === p.id || (action.type === 'tradeReject' && offer.from === p.id)) &&
+          (offer.to === p.id ||
+            (action.type === 'tradeReject' &&
+              (offer.from === p.id ||
+                // The player on turn may wave away an offer between two others.
+                (currentPlayer(g).id === p.id && offer.to !== p.id)))) &&
           MANAGE_PHASES.includes(g.phase),
         '交易已结束或不属于你',
       );
@@ -1718,6 +1790,10 @@ export function applyAction(
         p.stats.trades++;
         from.stats.trades++;
         for (const t of offer.wantTiles) propertyAt(g, t)!.owner = from.id;
+        requireRule(
+          g.settings.end !== 'target' || !targetReached(g),
+          '交易不能让任何一方直接达到目标净资产',
+        );
         log(
           g,
           env,
@@ -1735,7 +1811,11 @@ export function applyAction(
           g,
           env,
           'trade',
-          offer.from === p.id ? `${p.name}撤回了交易提案` : `${p.name}拒绝了交易提案`,
+          offer.from === p.id
+            ? `${p.name}撤回了交易提案`
+            : offer.to === p.id
+              ? `${p.name}拒绝了交易提案`
+              : `${p.name}要继续回合，跳过了旁人的交易提案`,
           p.id,
         );
         // A short pause before the same player can propose again keeps offers from piling up.
@@ -1929,22 +2009,26 @@ export function actionsFor(g: GameState, id: string): ActionOption[] {
         `${p.deposit} 可用于现金支付`,
       );
     if (g.phase !== 'debt' && p.cash >= 300)
-      add({ type: 'bank', direction: 'deposit', amount: 300 }, '存入 300', '每轮银行利息 3%');
+      add(
+        { type: 'bank', direction: 'deposit', amount: 300 },
+        '存入 300',
+        `每轮银行利息 ${BOARD.interest * 100}%`,
+      );
   }
   if (g.phase === 'debt') {
     add({ type: 'surrender' }, '宣布破产', '退出经营，仍可继续观战');
     return options;
   }
   if (
-    MANAGE_PHASES.includes(g.phase) &&
+    g.phase === 'manage' &&
     tileAt(g, p.position).kind === 'shop' &&
     !p.shopped &&
     !handFull(p) &&
-    p.cash >= BOARD.cardDraw
+    p.cash >= drawPriceOf(p)
   )
     add(
       { type: 'buyCard' },
-      `抽一张卡 · ${BOARD.cardDraw}`,
+      `抽一张卡 · ${drawPriceOf(p)}`,
       '随机抽取，下回合才能使用；每回合限一次',
     );
   if (g.round - p.abilityRound >= 3 && (p.characterId !== 'dealer' || !handFull(p)))

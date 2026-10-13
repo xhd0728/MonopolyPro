@@ -200,6 +200,8 @@ export interface PlayerState {
   /** Turn-scoped limits: one card played and one market draw per turn. */
   cardPlayed: boolean;
   shopped: boolean;
+  /** Failed a jail roll this turn: stays put until the turn ends. */
+  heldInJail?: boolean;
   bankrupt: boolean;
   shield: number;
   taxShield: number;
@@ -322,7 +324,8 @@ export interface GameState {
   /** Waiting players' free guesses on the current player's next roll. */
   guesses: Record<string, 'high' | 'low'>;
   /** Per player: no new offers before `until` (after a rejection); last round a bot offered. */
-  tradeMemo: Record<string, { until: number; round: number }>;
+  /** Per proposer: cooldown end, round of the last offer and of the last off-turn offer. */
+  tradeMemo: Record<string, { until: number; round: number; side?: number }>;
   /** 终局冲刺: the last stretch of the match, when rent is raised to force a decision. */
   finale: boolean;
   events: GameEvent[];

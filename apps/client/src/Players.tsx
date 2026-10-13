@@ -219,7 +219,7 @@ export function PlayerDetails({
           ['净资产', player.assets],
           ['可用现金', player.cash],
           ['银行存款', player.deposit],
-          ['地产回收价值', player.propertyValue],
+          ['地产估值', player.propertyValue],
           ['待付债务', player.debt],
           ['建筑等级合计', player.buildingCount],
         ].map(([label, value]) => (
@@ -230,8 +230,8 @@ export function PlayerDetails({
         ))}
       </div>
       <p className="hint">
-        净资产 = 现金 + 存款 + 地产及建筑回收价值 − 待付债务。抵押地产回收价值为
-        0；私有手牌仅本人可见。
+        净资产 = 现金 + 存款 + 地产估值 − 待付债务。地产按地价计，抵押地产只计赎回后的余值（地价的
+        45%），建筑按建设费的 75% 计；私有手牌仅本人可见。
       </p>
       <div className="section-heading profile-properties-heading">
         <h3>国家地产</h3>

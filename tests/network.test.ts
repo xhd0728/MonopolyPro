@@ -143,7 +143,8 @@ test('real sockets: 2/4/6 seats, spectator privacy, concurrency, duplicate, stal
       first.room.send('command', cmd);
       await until(() => acks.length === 2);
       assert.deepEqual(acks[0], acks[1]);
-      assert.equal(first.view.game!.players[0].cash, 3180);
+      // Seat 1 is a builder: the talent pays a 150 building grant.
+      assert.equal(first.view.game!.players[0].cash, 3150);
       assert.equal(first.view.game!.revision, 1);
       first.room.send('command', { id: randomUUID(), revision: 0, action: { type: 'roll' } });
       await until(() => acks.length === 3);

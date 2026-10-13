@@ -70,6 +70,11 @@ export function TradeDialog({
   const gives = value(map, d.giveCash, d.giveTiles),
     gets = value(map, d.wantCash, d.wantTiles);
   const myGroups = completesGroup(game, map, me.id, d.wantTiles);
+  // Rules the server enforces between rivals (teammates may help each other freely).
+  const rival = !!partner && (game.settings.mode !== 'team' || partner.team !== me.team);
+  const listed = (tiles: number[]) => tiles.reduce((n, t) => n + map.tiles[t].price, 0);
+  const active = game.players[game.turn]?.id;
+  const sideOffer = !d.counter && !!partner && active !== me.id && active !== partner.id;
   const theirGroups = partner ? completesGroup(game, map, partner.id, d.giveTiles) : [];
   const reason = !partner
     ? '请选择交易对象'
@@ -81,7 +86,14 @@ export function TradeDialog({
           ? `${partner.name}只有 ${money(partner.cash)} 现金`
           : !d.giveCash && !d.wantCash && !d.giveTiles.length && !d.wantTiles.length
             ? '至少放入一项现金或地产'
-            : '';
+            : rival && !(d.giveCash || d.giveTiles.length) !== !(d.wantCash || d.wantTiles.length)
+              ? '对手之间的交易需要双方都付出现金或地产，不能单方面赠送'
+              : rival &&
+                  (d.giveCash > listed(d.wantTiles) * 2 || d.wantCash > listed(d.giveTiles) * 2)
+                ? '现金不能超过所换地产标价的 2 倍'
+                : sideOffer && game.tradeMemo[me.id]?.side === game.round
+                  ? '不在自己回合时，每轮只能发起一次交易'
+                  : '';
   // Plain render helpers (not components) so inputs keep focus while typing.
   const squares = (owner: string, side: 'giveTiles' | 'wantTiles') => {
     const list = tradable(game, owner);
@@ -146,6 +158,7 @@ export function TradeDialog({
         <li>选对象</li>
         <li>勾选双方的现金和地产</li>
         <li>发出后对方 60 秒内接受、拒绝或还价</li>
+        <li>对手间不能单方面赠送，现金最多为地价 2 倍</li>
       </ol>
       {!d.counter && (
         <label>
@@ -313,7 +326,20 @@ export function TradeOfferCard({
           </button>
         </div>
       )}
-      {!mineIn && !mineOut && <p className="hint">等待{to.name}回应，交易期间其他操作暂停。</p>}
+      {!mineIn && !mineOut && game.players[game.turn]?.id === game.viewerId ? (
+        <div className="trade-offer-actions">
+          <span className="hint">这是旁人之间的交易，你可以不等。</span>
+          <button
+            className="secondary"
+            disabled={disabled}
+            onClick={() => command({ type: 'tradeReject' })}
+          >
+            跳过，继续我的回合
+          </button>
+        </div>
+      ) : (
+        !mineIn && !mineOut && <p className="hint">等待{to.name}回应，交易期间其他操作暂停。</p>
+      )}
     </div>
   );
 }

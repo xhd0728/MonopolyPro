@@ -76,6 +76,8 @@ test('restart restores trade, auction and path decisions with resume credentials
     let r = service.record(c.code);
     if (phase === 'trade') {
       const other = r.game!.players[1].id;
+      r.game!.properties.find((x) => x.tile === 1)!.owner = other;
+      store.save(r);
       service.command(c.code, c.seatId, {
         id: 'saved-trade',
         revision: 0,
@@ -85,10 +87,11 @@ test('restart restores trade, auction and path decisions with resume credentials
           giveCash: 50,
           wantCash: 0,
           giveTiles: [],
-          wantTiles: [],
+          wantTiles: [1],
         },
       });
     } else if (phase === 'auction') {
+      r.game!.settings.auction = true;
       r.game!.phase = 'purchase';
       r.game!.players[0].position = 1;
       store.save(r);

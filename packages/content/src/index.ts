@@ -13,7 +13,7 @@ export const CHARACTERS: CharacterDefinition[] = [
     name: '林小筑',
     title: '城市建筑师',
     description: '建设费用减少 15%。精打细算，把小屋变成地标。',
-    ability: '每 3 轮领取 180 建设补助',
+    ability: '每 3 轮领取 150 建设补助',
     color: '#eea65b',
     icon: '🏗',
   },
@@ -31,7 +31,7 @@ export const CHARACTERS: CharacterDefinition[] = [
     name: '陆飞飞',
     title: '城市漫游者',
     description: '每次掷骰额外前进 1 格。街头巷尾，都有你的足迹。',
-    ability: '每 3 轮领取 150 旅行补贴',
+    ability: '每 3 轮领取 60 旅行补贴',
     color: '#78afbd',
     icon: '🛵',
   },
@@ -40,7 +40,7 @@ export const CHARACTERS: CharacterDefinition[] = [
     name: '苏安心',
     title: '风险管理师',
     description: '支付租金减少 15%。稳健经营，笑到最后。',
-    ability: '每 3 轮领取 100 应急金和 1 次税务减免',
+    ability: '每 3 轮领取 150 应急金和 1 次税务减免',
     color: '#7fa889',
     icon: '🛡',
   },
@@ -48,7 +48,7 @@ export const CHARACTERS: CharacterDefinition[] = [
     id: 'dealer',
     name: '唐奇奇',
     title: '卡牌魔术师',
-    description: '开局额外获得 1 张卡。用组合与时机改变牌局。',
+    description: '开局额外获得 1 张卡，卡牌市场抽卡只需 100。用组合与时机改变牌局。',
     ability: '每 3 轮抽取 1 张卡',
     color: '#a894c6',
     icon: '🃏',
@@ -58,7 +58,7 @@ export const CHARACTERS: CharacterDefinition[] = [
     name: '白星星',
     title: '好运探险家',
     description: '机会、命运卡的现金奖励增加 25%。惊喜总在下一个路口。',
-    ability: '每 3 轮领取 120 现金，并解除停留或拘留',
+    ability: '每 3 轮领取 160 现金；身在拘留所时立即出狱',
     color: '#d4bc68',
     icon: '✦',
   },
@@ -79,8 +79,13 @@ export const BOARD = {
   guessCap: 5,
   /** Cards held at once, counting cards that unlock next turn. */
   handLimit: 5,
-  /** Price of one random draw at the card market (one draw per turn). */
+  /** Price of one random draw at the card market (one draw per turn); the dealer pays less. */
   cardDraw: 150,
+  dealerDraw: 100,
+  /** Bank interest per round on deposits (world news can double or cancel it). */
+  interest: 0.015,
+  /** Starting cash added per seat after the first, offsetting the first-move advantage. */
+  seatBonus: 100,
   /** Rent shields cannot stack: a player holds at most this many. */
   shieldCap: 1,
 } as const;
@@ -500,10 +505,46 @@ function card(
   };
 }
 export const CARDS: CardDefinition[] = [
-  card('step', '轻巧一步', 'move', 'move', 1, 'self', '立即前进 1 格，并结算落点。', '👟'),
-  card('sprint', '城市快跑', 'move', 'move', 3, 'self', '立即前进 3 格，并结算落点。', '🛵'),
-  card('express', '快线通行', 'move', 'move', 6, 'self', '立即前进 6 格，并结算落点。', '🚆'),
-  card('home', '回到起点', 'move', 'teleport', 0, 'self', '回到起点并领取起点薪水。', '🏠'),
+  card(
+    'step',
+    '轻巧一步',
+    'move',
+    'move',
+    1,
+    'self',
+    '立即前进 1 格并结算落点；掷骰前使用会代替本回合掷骰。',
+    '👟',
+  ),
+  card(
+    'sprint',
+    '城市快跑',
+    'move',
+    'move',
+    3,
+    'self',
+    '立即前进 3 格并结算落点；掷骰前使用会代替本回合掷骰。',
+    '🛵',
+  ),
+  card(
+    'express',
+    '快线通行',
+    'move',
+    'move',
+    6,
+    'self',
+    '立即前进 6 格并结算落点；掷骰前使用会代替本回合掷骰。',
+    '🚆',
+  ),
+  card(
+    'home',
+    '回到起点',
+    'move',
+    'teleport',
+    0,
+    'self',
+    '回到起点并领取起点薪水；掷骰前使用会代替本回合掷骰。',
+    '🏠',
+  ),
   card('remote', '遥控骰子', 'move', 'dice', 0, 'self', '指定下一次掷骰的点数为 1–6。', '🎲'),
   card(
     'swap',
@@ -586,7 +627,7 @@ export const CARDS: CardDefinition[] = [
     'remoteBuy',
     0,
     'emptyProperty',
-    '按原价购买一处空地，无须站在地块上。',
+    '按当前地价购买一处空地，无须站在地块上。',
     '📜',
   ),
   card(
@@ -686,7 +727,7 @@ export const CARDS: CardDefinition[] = [
     'cleanse',
     0,
     'self',
-    '解除停留、移除自己所有地产的租金减益。',
+    '移除自己所有地产的租金减益。',
     '🍃',
   ),
   card(
@@ -696,7 +737,7 @@ export const CARDS: CardDefinition[] = [
     'rescue',
     0,
     'self',
-    '立即离开拘留所或解除停留，并获得 100 现金。',
+    '立即离开拘留所，并获得 100 现金。',
     '🔑',
   ),
   card(
@@ -966,8 +1007,8 @@ export const NEWS: NewsDefinition[] = [
     name: '央行加息',
     icon: '📈',
     effect: 'rateHike',
-    amount: 6,
-    text: '本轮结束时存款利息提高到 6%。',
+    amount: 3,
+    text: '本轮结束时存款利息从 1.5% 提高到 3%。',
   },
   {
     id: 'build-sale',
@@ -1031,7 +1072,7 @@ export const NEWS: NewsDefinition[] = [
     icon: '🏛️',
     effect: 'wealthTax',
     amount: 8,
-    text: '净资产最高的玩家缴纳现金的 8%（最多 300）进入停车场奖池。',
+    text: '净资产领先全场平均 20% 以上的玩家，缴纳现金与存款合计的 8%（最多 300）进入停车场奖池。',
   },
   {
     id: 'lucky',

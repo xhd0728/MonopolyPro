@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
+  BOARD,
   characterById,
   countryFlag,
   shortCountryName,
@@ -61,7 +62,7 @@ function tileCaption(t: TileDefinition, game: GameView | null | undefined, salar
     case 'gotojail':
       return '前往拘留所';
     case 'bank':
-      return '利息 3%';
+      return `利息 ${BOARD.interest * 100}%`;
     case 'shop':
       return '随机抽卡';
     case 'tax':

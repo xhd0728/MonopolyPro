@@ -137,7 +137,7 @@ export function phaseGuide(game: GameView, map: MapDefinition): { title: string;
         : '对手可建设、交易和使用卡牌。你可以查看每个人的资产与最近行动。',
     };
   if (game.phase === 'finished')
-    return { title: '旅程结束 · 查看结算', text: '按现金、存款和地产回收价值减去债务计算净资产。' };
+    return { title: '旅程结束 · 查看结算', text: '按现金、存款和地产估值减去债务计算净资产。' };
   return {
     title: mine ? '轮到你了，准备出发' : `${prefix}准备掷骰`,
     text: mine
@@ -202,7 +202,7 @@ export function adviceFor(game: GameView, map: MapDefinition): string | null {
       if (monopoly) return `你已独占${map.tiles[monopoly.tile].name}所在的组，现在升级它最划算。`;
       if (here.kind === 'bank' && me.cash > 800) return '你在银行：多余现金存进去，每轮有利息。';
       if (here.kind === 'shop' && me.cardCount < BOARD.handLimit && !me.shopped)
-        return `你在卡牌市场，可以花 ${BOARD.cardDraw} 随机抽一张卡，下回合可用。`;
+        return `你在卡牌市场，可以花 ${me.characterId === 'dealer' ? BOARD.dealerDraw : BOARD.cardDraw} 随机抽一张卡，下回合可用。`;
       if (can('build') && me.cash > 1200) return '现金充裕，可以升级一处地产提高租金。';
       return '没有更急的事了，点「结束回合」交给下一位。';
     }

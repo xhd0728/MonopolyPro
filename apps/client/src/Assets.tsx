@@ -5,7 +5,7 @@ import type {
   PlayerView,
   MapDefinition,
 } from '../../../packages/shared/src/index.ts';
-import { countryFlag } from '../../../packages/content/src/index.ts';
+import { BOARD, countryFlag } from '../../../packages/content/src/index.ts';
 import { money } from './game-ui.ts';
 export function Assets({
   game: g,
@@ -45,7 +45,7 @@ export function Assets({
               净资产 <strong>{money(me.assets)}</strong>
             </span>
             <span>
-              地产回收价值 <strong>{money(me.propertyValue)}</strong>
+              地产估值 <strong>{money(me.propertyValue)}</strong>
             </span>
             {me.debt > 0 && (
               <span className="debt-label">
@@ -56,7 +56,7 @@ export function Assets({
           <section className="bank-panel" aria-label="银行存取款">
             <div className="section-heading">
               <h3>国际银行</h3>
-              <span>每轮利息 3%</span>
+              <span>每轮利息 {BOARD.interest * 100}%</span>
             </div>
             <div className="bank-balances">
               <span>

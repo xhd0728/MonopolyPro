@@ -314,7 +314,9 @@ export function squareValue(g: GameState, tile: number, receiver: string, gainin
   const price = tileOf(g, tile).price;
   const group = groupLots(g, tile);
   const completes = group.every((x) => x.tile === tile || x.owner === receiver);
-  return Math.round(price * (gaining && completes ? 1.8 : 1));
+  // A set is worth little when there are no rounds left to collect the extra rent.
+  const late = g.settings.end === 'rounds' && g.round >= g.settings.rounds - 1;
+  return Math.round(price * (gaining && completes && !late ? 1.8 : 1));
 }
 /** Occasionally offer cash for the last square a bot needs to complete a colour group. */
 function groupOffer(g: GameState, p: PlayerState): GameAction | null {

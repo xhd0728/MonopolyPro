@@ -107,6 +107,10 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
   expect(await current.locator('.public-property-list button').count()).toBeGreaterThan(0);
   await current.screenshot({ path: 'artifacts/ui/player-assets.png', fullPage: true });
   await current.getByRole('button', { name: '关闭玩家资料' }).click();
+  // Squares with buildings cannot be traded: sell the building bought above first.
+  await openPanel(current, '资产');
+  const sell = current.getByRole('button', { name: /^出售建筑/ }).first();
+  if (await sell.isVisible()) await accepted(current, sell);
   await openPanel(current);
   await current.getByRole('button', { name: '发起交易' }).click();
   await current
@@ -121,7 +125,19 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
   await cashInput.fill('-1');
   await expect(current.getByRole('button', { name: '发出提案' })).toBeDisabled();
   await expect(current.getByText('现金必须是非负整数', { exact: true })).toBeVisible();
+  // Between rivals a one-sided gift is refused; sell a square for a little cash instead.
   await cashInput.fill('50');
+  await expect(current.locator('.field-error', { hasText: '不能单方面赠送' })).toBeVisible();
+  await expect(current.getByRole('button', { name: '发出提案' })).toBeDisabled();
+  await cashInput.fill('0');
+  const dialog = current.getByRole('dialog', { name: '提出一笔交易' });
+  await dialog
+    .locator('.trade-grid section')
+    .first()
+    .locator('input[type="checkbox"]')
+    .first()
+    .check();
+  await dialog.getByLabel('现金', { exact: true }).nth(1).fill('10');
   await current.getByRole('button', { name: '发出提案' }).click();
   await expect(other.getByRole('button', { name: '接受交易' })).toBeVisible();
   await other.getByRole('button', { name: '接受交易' }).click();
@@ -302,8 +318,9 @@ test('six player finances remain readable on desktop and mobile; a second window
     await page.setViewportSize({ width, height: 844 });
     await expect(page.getByRole('button', { name: '快捷掷骰出发' })).toBeVisible();
     await page.getByRole('button', { name: /查看6号玩家/ }).click();
-    await expect(page.getByRole('dialog', { name: 'AI · 6的资产' })).toContainText('地产回收价值');
-    await expect(page.getByLabel('资产明细').locator('strong').first()).toHaveText('3,000');
+    await expect(page.getByRole('dialog', { name: 'AI · 6的资产' })).toContainText('地产估值');
+    // The sixth seat starts with the later-seat bonus.
+    await expect(page.getByLabel('资产明细').locator('strong').first()).toHaveText('3,500');
     await page.keyboard.press('Escape');
     const layout = await page.evaluate(() => ({
       body: document.documentElement.scrollWidth,

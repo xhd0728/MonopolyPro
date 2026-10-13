@@ -65,7 +65,7 @@ const phaseNames = {
 const kindNames = {
   start: '起点 · 经过领取薪水',
   property: '可购买的地产',
-  bank: '银行 · 每轮利息 3%',
+  bank: `银行 · 每轮利息 ${BOARD.interest * 100}%`,
   shop: `卡牌市场 · 抽一张 ${BOARD.cardDraw}`,
   chance: '机会 · 抽一张机会卡（多为移动与惊喜）',
   fate: '命运 · 抽一张命运卡（多为现金与全场事件）',
@@ -486,6 +486,7 @@ function App() {
             : '')
         : '',
   }));
+  const drawPrice = me?.characterId === 'dealer' ? BOARD.dealerDraw : BOARD.cardDraw;
   const chosenCardReason = me?.cardPlayed
     ? '本回合已经用过一张卡，下回合再用。'
     : selectedCard?.effect === 'shield' && me && me.shield > 0
@@ -1060,7 +1061,7 @@ function App() {
                     ✦{' '}
                     {room.settings.mode === 'team'
                       ? '团队需均分为两队，同队地产免租。'
-                      : '到时按现金、存款和地产回收价值，扣除待付债务排名。'}
+                      : '到时按现金、存款和地产估值，扣除待付债务排名。'}
                     <br />
                     断线 {Math.ceil(room.takeoverAfterMs / 1000)} 秒后机器人临时托管，回来即可接手。
                   </div>
@@ -1413,7 +1414,7 @@ function App() {
                                     title={
                                       map.tiles[me.position].kind !== 'shop'
                                         ? '抵达卡牌市场后可抽卡'
-                                        : `随机抽一张，${BOARD.cardDraw} 现金，每回合一次`
+                                        : `随机抽一张，${drawPrice} 现金，每回合一次`
                                     }
                                     onClick={() => setDialog('shop')}
                                   >
@@ -1715,7 +1716,7 @@ function App() {
               )}
               <p className="hint">
                 同色国家组成地产组，独占一组租金 +30%。建筑 0–3 级的租金倍率为 1 / 2.5 / 5 /
-                9；地产及建筑按回收价值计入净资产。
+                9；地产按地价、建筑按建设费的 75% 计入净资产。
               </p>
               {owner && me && owner.id !== me.id && !property?.level && !property?.mortgaged && (
                 <button
@@ -1969,19 +1970,19 @@ function App() {
       {dialog === 'shop' && (
         <Modal title="旅途卡牌市场" close={() => setDialog(null)}>
           <p className="hint">
-            花 {BOARD.cardDraw} 随机抽一张卡，每回合限抽一次；抽到的卡下回合才能使用。手牌最多{' '}
+            花 {drawPrice} 随机抽一张卡，抵达当回合限抽一次；抽到的卡下回合才能使用。手牌最多{' '}
             {BOARD.handLimit} 张（含待解锁的卡），每回合只能使用一张。当前现金 {me?.cash}。
           </p>
           {(() => {
             const why = !me
               ? '观众不能抽卡'
-              : !canManage
-                ? '请在自己的掷骰或经营阶段抽卡'
+              : !canManage || g?.phase !== 'manage'
+                ? '停在卡牌市场的那个回合（掷骰之后）才能抽卡'
                 : me.shopped
                   ? '本回合已经抽过了'
                   : me.cardCount >= BOARD.handLimit
                     ? '手牌已满'
-                    : me.cash < BOARD.cardDraw
+                    : me.cash < drawPrice
                       ? '现金不足'
                       : '';
             return (
@@ -1994,7 +1995,7 @@ function App() {
                     setDialog(null);
                   }}
                 >
-                  🎴 抽一张卡 · {BOARD.cardDraw}
+                  🎴 抽一张卡 · {drawPrice}
                 </button>
                 {why && <p className="field-error">{why}</p>}
               </>
@@ -2032,7 +2033,9 @@ function App() {
             <div className="rule-copy">
               <h3>01 / 出发与经营</h3>
               <p>
-                每回合先用卡牌或天赋，再掷一颗六面骰。处理落点后，可以升级、抵押、交易，再结束回合。岔路由当前玩家选择。真人玩家默认不限时；房主可以设置操作时限，超时由系统执行稳妥的默认操作。机器人最多思考两分钟，超时由规则机器人接手。
+                每回合先用卡牌或天赋，再掷一颗六面骰。处理落点后，可以升级、抵押、交易，再结束回合。岔路由当前玩家选择。先手更容易抢到地，所以从第
+                2 位起每靠后一位多 {BOARD.seatBonus}{' '}
+                起始现金。真人玩家默认不限时；房主可以设置操作时限，超时由系统执行稳妥的默认操作。机器人最多思考两分钟，超时由规则机器人接手。
               </p>
               <h3>02 / 四个角落与拘留所</h3>
               <p>
@@ -2052,12 +2055,15 @@ function App() {
               <p>
                 手牌最多 {BOARD.handLimit} 张，每回合只能使用一张。卡牌市场花 {BOARD.cardDraw}{' '}
                 随机抽一张（每回合一次），稀有卡更难抽到；新得到的卡下回合才能用。租金护盾只能靠随机卡获得，最多持有
-                1 次。每个角色有被动与每 3 轮一次的天赋。银行可存取现金，存款每轮带来 3%
+                1 次。每个角色有被动与每 3 轮一次的天赋。银行可存取现金，存款每轮带来{' '}
+                {BOARD.interest * 100}%
                 现金利息。没钱付租金或税费时，先取款、卖建筑或抵押；无法筹齐可破产，将资产清算给债权人或银行。交易随时可以发起（购买、拍卖、选路和筹款时除外）：点「⇄
                 发起交易」、玩家资料或国家详情里的「求购 /
                 出售」，勾选双方的现金和任意多处无建筑、未抵押的地产。对方 60
                 秒内可以接受、拒绝或还价；被拒绝后需等 15
-                秒才能再发起。交易进行时其他操作暂停，接受后双方资产同时交换。
+                秒才能再发起。交易进行时其他操作暂停，接受后双方资产同时交换。对手之间不能单方面赠送，现金最多为所换地产地价的
+                2
+                倍，交易也不能让任何一方直接达到目标净资产；不在自己回合时每轮只能发起一次交易，正在行动的玩家可以跳过旁人的交易。
               </p>
               <h3>05 / 世界新闻与追赶机制</h3>
               <p>
@@ -2073,7 +2079,7 @@ function App() {
                 房主选择结束方式：固定轮数（默认 16 轮，快速战 10
                 轮）、限时，或谁的净资产先达到目标。无论哪种方式，最多 90 分钟。最后两轮、最后 5
                 分钟，或有人达到目标的 80% 时进入「终局冲刺」，所有租金 ×1.5。结束时按现金 + 存款 +
-                未抵押地产半价 + 建筑回收价 −
+                地产地价（抵押地产按 45%）+ 建筑建设费的 75% −
                 待付债务排名，并列可共同获胜；只剩一方仍在经营时提前结束。团队战要求 2v2 或
                 3v3，同队免租，资产合计结算。
               </p>

@@ -54,8 +54,12 @@ const seats = (n = 2): Seat[] =>
     controlEpoch: 0,
   }));
 const env = { now: 1000, randomInt: (_max: number) => 0 };
-const game = (mapId = 'town', n = 2) =>
-  createGame({ ...DEFAULT_SETTINGS, mapId }, seats(n), 'test', env);
+/** A level start: rule tests ignore the later-seat cash bonus (tested on its own). */
+const game = (mapId = 'town', n = 2) => {
+  const g = createGame({ ...DEFAULT_SETTINGS, mapId }, seats(n), 'test', env);
+  for (const p of g.players) p.cash = DEFAULT_SETTINGS.initialCash;
+  return g;
+};
 const act = (g: GameState, a: GameAction, id = 'p0') => applyAction(g, id, a, env);
 test('ownership, exact purchase/build costs, mortgage and redemption', () => {
   let g = game();
@@ -702,10 +706,10 @@ test('free trading: any player proposes, several squares per side, counter-offer
   assert.deepEqual(g.trade!.giveTiles, [1, 2]);
   assert.ok(g.events.some((e) => e.spot === 'offer'));
   assert.throws(() => act(g, { type: 'roll' }), /交易/);
-  // p2 counters: keeps square 4, asks for both squares plus 100.
+  // p2 counters: keeps square 4 and offers 300 cash for both squares instead.
   g = act(
     g,
-    { type: 'tradeCounter', giveCash: 0, wantCash: 100, giveTiles: [], wantTiles: [1, 2] },
+    { type: 'tradeCounter', giveCash: 300, wantCash: 0, giveTiles: [], wantTiles: [1, 2] },
     'p2',
   );
   assert.equal(g.trade!.from, 'p2');
@@ -714,12 +718,13 @@ test('free trading: any player proposes, several squares per side, counter-offer
   g = act(g, { type: 'tradeAccept' }, 'p1');
   assert.equal(propertyAt(g, 1)!.owner, 'p2');
   assert.equal(propertyAt(g, 2)!.owner, 'p2');
-  assert.equal(g.players[1].cash, 2900, 'p1 pays the 100 p2 asked for');
-  assert.equal(g.players[2].cash, 3100);
+  assert.equal(g.players[1].cash, 3300, 'p1 receives the 300 p2 offered');
+  assert.equal(g.players[2].cash, 2700);
   // A rejected proposer waits before proposing again.
+  propertyAt(g, 10)!.owner = 'p0';
   g = act(
     g,
-    { type: 'tradeOffer', to: 'p0', giveCash: 10, wantCash: 0, giveTiles: [], wantTiles: [] },
+    { type: 'tradeOffer', to: 'p0', giveCash: 10, wantCash: 0, giveTiles: [], wantTiles: [10] },
     'p1',
   );
   g = act(g, { type: 'tradeReject' }, 'p0');
@@ -727,7 +732,7 @@ test('free trading: any player proposes, several squares per side, counter-offer
     () =>
       act(
         g,
-        { type: 'tradeOffer', to: 'p0', giveCash: 10, wantCash: 0, giveTiles: [], wantTiles: [] },
+        { type: 'tradeOffer', to: 'p0', giveCash: 10, wantCash: 0, giveTiles: [], wantTiles: [10] },
         'p1',
       ),
     /稍等/,
@@ -879,13 +884,14 @@ test('match statistics count rent, purchases, builds, laps, jail visits, cards a
   g.players[0].cards = ['bonus'];
   g = act(g, { type: 'playCard', cardId: 'bonus' });
   assert.equal(g.players[0].stats.cards, 1);
+  propertyAt(g, 1)!.owner = 'p1';
   g = act(g, {
     type: 'tradeOffer',
     to: 'p1',
     giveCash: 10,
     wantCash: 0,
     giveTiles: [],
-    wantTiles: [],
+    wantTiles: [1],
   });
   g = act(g, { type: 'tradeAccept' }, 'p1');
   assert.deepEqual(
@@ -898,9 +904,10 @@ test('match statistics count rent, purchases, builds, laps, jail visits, cards a
 test('review fixes: trades cannot stall the table, team targets use averages', () => {
   // Expired offers start the cooldown too, and counters are capped.
   let g = game('town', 3);
+  propertyAt(g, 4)!.owner = 'p2';
   g = act(
     g,
-    { type: 'tradeOffer', to: 'p2', giveCash: 10, wantCash: 0, giveTiles: [], wantTiles: [] },
+    { type: 'tradeOffer', to: 'p2', giveCash: 10, wantCash: 0, giveTiles: [], wantTiles: [4] },
     'p1',
   );
   assert.equal(g.trade!.expiresAt, env.now + 30000, 'side trades hold the table for 30 s');
@@ -912,28 +919,29 @@ test('review fixes: trades cannot stall the table, team targets use averages', (
       applyAction(
         g,
         'p1',
-        { type: 'tradeOffer', to: 'p2', giveCash: 10, wantCash: 0, giveTiles: [], wantTiles: [] },
+        { type: 'tradeOffer', to: 'p2', giveCash: 10, wantCash: 0, giveTiles: [], wantTiles: [4] },
         later,
       ),
     /稍等/,
   );
   g = game('town', 2);
+  propertyAt(g, 4)!.owner = 'p1';
   g = act(g, {
     type: 'tradeOffer',
     to: 'p1',
     giveCash: 10,
     wantCash: 0,
     giveTiles: [],
-    wantTiles: [],
+    wantTiles: [4],
   });
   g = act(
     g,
-    { type: 'tradeCounter', giveCash: 0, wantCash: 20, giveTiles: [], wantTiles: [] },
+    { type: 'tradeCounter', giveCash: 0, wantCash: 20, giveTiles: [4], wantTiles: [] },
     'p1',
   );
   g = act(
     g,
-    { type: 'tradeCounter', giveCash: 15, wantCash: 0, giveTiles: [], wantTiles: [] },
+    { type: 'tradeCounter', giveCash: 15, wantCash: 0, giveTiles: [], wantTiles: [4] },
     'p0',
   );
   assert.throws(
@@ -1038,4 +1046,94 @@ test('hands hold five cards and rent shields never stack or come from talents', 
     assert.ok(p.cash > 3000);
   }
   assert.ok(CARDS.some((c) => c.rarity === 'rare') && CARDS.some((c) => c.rarity === 'common'));
+});
+test('audit fixes: fair start, full land value, no gifts between rivals, no target-crossing trades', () => {
+  // Later seats start a little richer; land counts at its price in net worth.
+  let g = createGame(DEFAULT_SETTINGS, seats(3), 'seats', env);
+  assert.deepEqual(
+    g.players.map((p) => p.cash),
+    [3000, 3000 + BOARD.seatBonus, 3000 + 2 * BOARD.seatBonus],
+  );
+  g = game('town', 3);
+  propertyAt(g, 1)!.owner = 'p0';
+  assert.equal(assetsOf(g, g.players[0]), 3000 + mapById('town').tiles[1].price);
+  // Rivals cannot gift or overpay; teammates may help each other.
+  propertyAt(g, 4)!.owner = 'p1';
+  const offer = (giveCash: number, wantTiles: number[], to = 'p1') =>
+    ({ type: 'tradeOffer', to, giveCash, wantCash: 0, giveTiles: [], wantTiles }) as GameAction;
+  assert.throws(() => act(g, offer(100, [])), /单方面赠送/);
+  const price = mapById('town').tiles[4].price;
+  assert.throws(() => act(g, offer(price * 2 + 10, [4])), /2 倍/);
+  act(g, offer(price * 2, [4]));
+  let t = createGame({ ...DEFAULT_SETTINGS, mode: 'team' }, seats(4), 'team', env);
+  t = act(t, offer(500, [], 'p2'));
+  assert.equal(t.trade!.giveCash, 500, 'teammates may hand over cash');
+  // A trade may not hand anyone the target win.
+  let h = createGame({ ...DEFAULT_SETTINGS, end: 'target', target: 4000 }, seats(2), 'h', env);
+  for (const p of h.players) p.cash = 3000;
+  propertyAt(h, 4)!.owner = 'p1';
+  h.players[1].cash = 4000 - price - 1;
+  h = act(h, offer(price * 2, [4]));
+  assert.throws(() => act(h, { type: 'tradeAccept' }, 'p1'), /目标净资产/);
+});
+test('audit fixes: side offers once per round and dismissable; consistent cards, jail, market and bankruptcy', () => {
+  let g = game('town', 3);
+  propertyAt(g, 4)!.owner = 'p2';
+  const side = {
+    type: 'tradeOffer',
+    to: 'p2',
+    giveCash: 10,
+    wantCash: 0,
+    giveTiles: [],
+    wantTiles: [4],
+  } as GameAction;
+  g = act(g, side, 'p1');
+  // The player on turn waves it away and carries on.
+  g = act(g, { type: 'tradeReject' }, 'p0');
+  assert.equal(g.trade, null);
+  assert.ok(g.events.at(-1)!.text.includes('跳过了旁人的交易提案'));
+  const later = { now: env.now + 20000, randomInt: () => 0 };
+  assert.throws(() => applyAction(g, 'p1', side, later), /每轮只能发起一次/);
+  // 回到起点 before rolling is this turn's move, like the other movement cards.
+  g = game();
+  g.players[0].cards = ['home'];
+  g.players[0].position = 5;
+  g = act(g, { type: 'playCard', cardId: 'home' });
+  assert.equal(g.phase, 'manage');
+  assert.equal(g.players[0].position, 0);
+  // The market sells only on the turn you arrive, after landing.
+  g = game();
+  const shop = mapById('town').tiles.find((t) => t.kind === 'shop')!.index;
+  g.players[0].position = shop;
+  assert.throws(() => act(g, { type: 'buyCard' }), /抵达卡牌市场后/);
+  // After a failed jail roll you stay put for the rest of the turn.
+  g = game();
+  g.players[0].position = mapOf(g).corners.jail;
+  g.players[0].jailTurns = 1;
+  g.players[0].cards = ['sprint'];
+  g.phase = 'jail';
+  g = applyAction(g, 'p0', { type: 'jailRoll' }, { now: 1000, randomInt: () => 0 });
+  assert.equal(g.phase, 'manage');
+  assert.throws(() => act(g, { type: 'playCard', cardId: 'sprint' }), /拘留中/);
+  // Road works take at most the cash in hand, and the landing still offers the square.
+  g = game();
+  g.traps[1] = { owner: 'p1', until: 99, amount: 100 };
+  g.players[0].cash = 40;
+  g.players[0].nextDice = 1;
+  g = act(g, { type: 'roll' });
+  assert.equal(g.players[0].cash, 0);
+  assert.equal(g.debt, null);
+  assert.equal(g.phase, 'purchase');
+  // A creditor takes mortgaged land as it is.
+  g = game('town', 3);
+  propertyAt(g, 2)!.owner = 'p0';
+  propertyAt(g, 2)!.mortgaged = true;
+  propertyAt(g, 1)!.owner = 'p1';
+  propertyAt(g, 1)!.level = 3;
+  g.players[0].cash = 0;
+  g.players[0].nextDice = 1;
+  g = act(g, { type: 'roll' });
+  g = act(g, { type: 'surrender' });
+  assert.equal(propertyAt(g, 2)!.owner, 'p1');
+  assert.equal(propertyAt(g, 2)!.mortgaged, true);
 });
