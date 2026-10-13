@@ -1,6 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { CARDS, countryFlag, deckCardById, newsById } from '../../../packages/content/src/index.ts';
-import type { GameEvent, GameView, MapDefinition } from '../../../packages/shared/src/index.ts';
+import type {
+  GameEvent,
+  GameView,
+  MapDefinition,
+  RoomView,
+} from '../../../packages/shared/src/index.ts';
 import { Clock } from './clock.tsx';
 import { money, playerColor } from './game-ui.ts';
 
@@ -54,6 +59,9 @@ interface Row {
   icon: string;
   title?: string;
   body: string;
+  /** An AI seat's reason for this move, folded in from the 'ai' event that follows it. */
+  why?: string;
+  detail?: string;
 }
 function describe(e: GameEvent, game: GameView, map: MapDefinition): Row {
   const drawn = e.card ? deckCardById(e.card) : undefined;
@@ -93,10 +101,13 @@ function describe(e: GameEvent, game: GameView, map: MapDefinition): Row {
 export function ActivityFeed({
   game,
   map,
+  ai = null,
   className = '',
 }: {
   game: GameView;
   map: MapDefinition;
+  /** Live progress of an AI seat that is thinking right now. */
+  ai?: RoomView['aiActivity'];
   className?: string;
 }) {
   const [filter, setFilter] = useState<Filter>('all');
@@ -110,8 +121,22 @@ export function ActivityFeed({
   const rows = useMemo(() => {
     const out: (Row | { separator: string; key: string })[] = [];
     const events = [...game.events].reverse();
+    // An AI seat logs its reason right after the move; show the two as one line.
+    let thought: GameEvent | null = null;
+    const flush = () => {
+      if (thought && filter !== 'mine') out.push(describe(thought, game, map));
+      thought = null;
+    };
     for (const e of events) {
       if (HIDDEN.has(e.kind)) continue;
+      if (e.kind === 'ai') {
+        flush();
+        thought = e;
+        continue;
+      }
+      const reason = thought && thought.actor === e.actor && e.kind !== 'turn' ? thought : null;
+      if (!reason) flush();
+      thought = null;
       if (e.kind === 'turn') {
         out.push({ separator: e.text, key: `s${e.id}` });
         continue;
@@ -121,8 +146,14 @@ export function ActivityFeed({
         const owner = e.tile !== undefined && game.properties.find((p) => p.tile === e.tile)?.owner;
         if (e.actor !== game.viewerId && owner !== game.viewerId) continue;
       }
-      out.push(describe(e, game, map));
+      const row = describe(e, game, map);
+      if (reason) {
+        row.why = describe(reason, game, map).body;
+        if (reason.detail) row.detail = reason.detail;
+      }
+      out.push(row);
     }
+    flush();
     // Drop separators with nothing under them (filtered views) and a trailing one.
     return out.filter(
       (r, i) => !('separator' in r) || (i + 1 < out.length && !('separator' in out[i + 1])),
@@ -160,6 +191,25 @@ export function ActivityFeed({
           ))}
         </span>
       </header>
+      {ai?.state === 'thinking' && index(ai.playerId) >= 0 && (
+        <div
+          className="feed-thinking"
+          role="status"
+          style={{ '--who': playerColor(index(ai.playerId)) } as CSSProperties}
+        >
+          <i aria-hidden="true" />
+          <span>
+            <b>{game.players[index(ai.playerId)].name}</b> 思考中 · {ai.message}
+            {!!ai.steps?.length && (
+              <span className="feed-steps">
+                {ai.steps.map((s, i) => (
+                  <em key={i}>{s}</em>
+                ))}
+              </span>
+            )}
+          </span>
+        </div>
+      )}
       <div className="feed-list" ref={list} role="log" aria-live="polite">
         {rows.length === 0 && <p className="feed-empty">还没有相关动态。</p>}
         {rows.map((r) =>
@@ -196,6 +246,10 @@ export function ActivityFeed({
                 </span>
                 {r.title && <b className="feed-title">{r.title}</b>}
                 <span className="feed-text">{r.body}</span>
+                {r.why && <span className="feed-why">💭 {r.why}</span>}
+                {(r.detail ?? r.e.detail) && (
+                  <small className="feed-detail">{r.detail ?? r.e.detail}</small>
+                )}
               </span>
               {r.e.amount !== undefined && r.e.amount !== 0 && (
                 <strong className={r.e.amount < 0 ? 'expense' : 'income'}>

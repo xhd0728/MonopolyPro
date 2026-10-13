@@ -419,8 +419,9 @@ test('the complete board and all six players fit one screen; dice and opponent a
   if (await buy.isVisible()) {
     await accepted(page, buy);
     // Purchases are announced to the table and the buyer's card shows the cost.
-    await expect(page.getByLabel('全场提示')).toContainText('新地产');
+    // The cost chip is immediate and short-lived; the headline may wait behind the turn banner.
     await expect(page.locator('.player-card[data-self="true"] .cash-delta.down')).toBeVisible();
+    await expect(page.getByLabel('全场提示')).toContainText('新地产');
     await openPanel(page);
   }
   while (await page.getByRole('button', { name: /^前往/ }).count()) {

@@ -43,6 +43,8 @@ const tileAt = (g: GameState, tile: number) => mapOf(g).tiles[tile];
 const playerById = (g: GameState, id: string) => g.players.find((p) => p.id === id);
 const enemy = (g: GameState, a: PlayerState, b: PlayerState) =>
   a.id !== b.id && (g.settings.mode !== 'team' || a.team !== b.team);
+/** Opponents: everyone else in free play, the other team in team play. */
+export const isEnemy = enemy;
 export function log(
   g: GameState,
   env: EngineEnvironment,
@@ -51,7 +53,7 @@ export function log(
   actor?: string,
   amount?: number,
   path?: number[],
-  meta?: Pick<GameEvent, 'spot' | 'tile' | 'card'>,
+  meta?: Pick<GameEvent, 'spot' | 'tile' | 'card' | 'detail'>,
 ) {
   g.events.push({
     id: g.nextEvent++,
@@ -1950,7 +1952,7 @@ export function actionsFor(g: GameState, id: string): ActionOption[] {
   return options;
 }
 /** Recent events sent to clients; the authoritative log keeps more for persistence. */
-export const VIEW_EVENTS = 48;
+export const VIEW_EVENTS = 60;
 const QUIET_EVENTS = new Set(['turn', 'start', 'move', 'ai']);
 export function viewFor(g: GameState, viewerId: string | null): GameView {
   // Views are serialized immediately. Copy only the small mutable parts instead of the whole

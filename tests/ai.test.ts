@@ -9,6 +9,7 @@ import {
 import { GameService } from '../apps/server/src/service.ts';
 import { Store } from '../apps/server/src/store.ts';
 import { botChoices } from '../apps/server/src/bot-choices.ts';
+import { aiTools } from '../apps/server/src/ai-tools.ts';
 import { viewFor, applyAction } from '../packages/engine/src/index.ts';
 const config = {
   baseUrl: 'http://provider.invalid/v1',
@@ -159,5 +160,121 @@ test('an AI seat that never answers is cut off at the cap and the rule bot plays
   assert.equal(service.record(c.code).game!.revision, 1, 'the rule fallback was applied');
   assert.match(service.view(c.code, c.seatId).aiActivity!.message, /两分钟/);
   service.dispose();
+  store.close();
+});
+
+test('agentic loop: the model calls read-only tools, then decides with a public reason', async () => {
+  const { store, service, c, bot } = fixture();
+  const game = service.record(c.code).game!;
+  const choices = botChoices(game, bot.id);
+  const tools = aiTools(game, bot.id, choices);
+  const replies = [
+    '{"tool":"look_ahead","args":{}}',
+    '{"tool":"square","args":{"index":1}}',
+    '{"choice":0,"reason":"前方风险低，先出发"}',
+  ];
+  const seen: any[] = [];
+  const labels: string[] = [];
+  const brain = createBotBrain({ ...config, maxSteps: 3 }, async (_url, init) => {
+    const wire = JSON.parse(init!.body as string);
+    seen.push(wire);
+    return new Response(
+      JSON.stringify({ choices: [{ message: { content: replies[seen.length - 1] } }] }),
+    );
+  });
+  const result = await brain.choose(
+    viewFor(game, bot.id),
+    choices,
+    choices[0],
+    new AbortController().signal,
+    { tools, onStep: (label) => labels.push(label) },
+  );
+  assert.equal(result.source, 'llm');
+  assert.equal(result.reason, '前方风险低，先出发');
+  assert.deepEqual(result.steps, labels);
+  assert.equal(labels.length, 2);
+  assert.match(labels[0], /前方/);
+  assert.equal(seen.length, 3);
+  // Tool results go back to the model as the next user message.
+  const lastTurn = seen[2].messages.at(-1);
+  assert.equal(lastTurn.role, 'user');
+  assert.equal(JSON.parse(lastTurn.content).tool, 'square');
+  assert.match(seen[0].messages[0].content, /调用工具/);
+  store.close();
+});
+test('agentic loop safety: previews refuse random moves, reasons never name held cards, bad loops fall back', async () => {
+  const { store, service, c, bot } = fixture();
+  const record = service.record(c.code);
+  record.game!.players[1].cards = ['remote', 'bonus'];
+  store.save(record);
+  const game = service.record(c.code).game!;
+  const choices = botChoices(game, bot.id);
+  const tools = aiTools(game, bot.id, choices);
+  const roll = choices.findIndex((a) => a.type === 'roll');
+  assert.ok(roll >= 0);
+  assert.match(JSON.stringify(tools.preview.run({ choice: roll })), /随机/);
+  const bonus = choices.findIndex((a) => a.type === 'playCard' && a.cardId === 'bonus');
+  assert.ok(bonus >= 0);
+  assert.equal(typeof (tools.preview.run({ choice: bonus }) as any).cash, 'number');
+  // A reason that reveals another card still in hand is dropped.
+  const leaky = createBotBrain(
+    config,
+    async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            { message: { content: `{"choice":${bonus},"reason":"留着遥控骰子下回合用"}` } },
+          ],
+        }),
+      ),
+  );
+  const secret = await leaky.choose(
+    viewFor(game, bot.id),
+    choices,
+    choices[0],
+    new AbortController().signal,
+    { tools },
+  );
+  assert.equal(secret.source, 'llm');
+  assert.equal(secret.reason, undefined);
+  // Two unusable loop replies, then a direct choice succeeds.
+  let calls = 0;
+  const shaky = createBotBrain(config, async () => {
+    calls++;
+    const content = calls <= 2 ? '{"tool":"nope"}' : '{"choice":0,"reason":"直接决定"}';
+    return new Response(JSON.stringify({ choices: [{ message: { content } }] }));
+  });
+  const direct = await shaky.choose(
+    viewFor(game, bot.id),
+    choices,
+    choices[0],
+    new AbortController().signal,
+    { tools },
+  );
+  assert.equal(direct.source, 'llm');
+  assert.match(direct.message, /直接选择/);
+  assert.equal(calls, 3);
+  store.close();
+});
+test('rule bots explain notable moves in the shared log', () => {
+  const store = new Store(':memory:');
+  const service = new GameService(store, { now: () => 1000 });
+  const c = service.create({ name: '真人' });
+  service.connected(c.code, c.seatId);
+  service.lobby(c.code, c.seatId, { type: 'addBot', botMode: 'rule' });
+  service.lobby(c.code, c.seatId, { type: 'ready' });
+  service.lobby(c.code, c.seatId, { type: 'start' });
+  const record = service.record(c.code);
+  const bot = record.seats[1];
+  record.game!.turn = 1;
+  record.game!.players[1].position = 1;
+  record.game!.phase = 'purchase';
+  store.save(record);
+  service.tick(c.code);
+  const events = service.record(c.code).game!.events;
+  const last = events.at(-1)!;
+  assert.equal(last.kind, 'ai');
+  assert.equal(last.actor, bot.id);
+  assert.match(last.text, /现金|色组|租金/);
   store.close();
 });

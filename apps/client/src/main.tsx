@@ -1502,10 +1502,17 @@ function App() {
                             disabled={disabled}
                           />
                         ) : (
-                          <ActivityFeed game={g} map={map} className="in-panel" />
+                          <ActivityFeed
+                            game={g}
+                            map={map}
+                            ai={room.aiActivity}
+                            className="in-panel"
+                          />
                         )}
                       </section>
-                      {wide && <ActivityFeed game={g} map={map} className="docked" />}
+                      {wide && (
+                        <ActivityFeed game={g} map={map} ai={room.aiActivity} className="docked" />
+                      )}
                     </aside>
                   </div>
                 </div>

@@ -16,7 +16,7 @@ import {
   viewFor,
   log,
 } from '../../../packages/engine/src/index.ts';
-import { botAction } from '../../../packages/engine/src/bot.ts';
+import { botAction, botDecision } from '../../../packages/engine/src/bot.ts';
 import {
   AI_DECISION_CAP_MS,
   commandSchema,
@@ -37,6 +37,7 @@ import type {
 import { Store } from './store.ts';
 import type { BotBrain, AiDecision } from './ai.ts';
 import { botChoices } from './bot-choices.ts';
+import { aiTools } from './ai-tools.ts';
 
 export const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 const nameSchema = z
@@ -69,6 +70,24 @@ export interface ServiceOptions {
   /** Upper bound for one AI decision (default two minutes). */
   aiDecisionCapMs?: number;
 }
+/** Bot moves whose reason is worth showing to the table (not routine rolls or turn ends). */
+const EXPLAINED = new Set<GameAction['type']>([
+  'buy',
+  'pass',
+  'build',
+  'bid',
+  'auctionPass',
+  'playCard',
+  'buyCard',
+  'bail',
+  'tradeOffer',
+  'tradeAccept',
+  'tradeReject',
+  'mortgage',
+  'downgrade',
+  'surrender',
+  'choosePath',
+]);
 export class GameService {
   private botJobs = new Map<
     string,
@@ -649,17 +668,16 @@ export class GameService {
           this.now() - seat.disconnectedAt >= this.options.takeoverMs;
         const timeout = this.humanTimedOut(r);
         if (seat && (seat.bot || seat.afk || takeover || timeout)) {
-          const action =
-            timeout && !seat.bot && !seat.afk && !takeover
-              ? this.timeoutAction(r.game, seat.id)
-              : botAction(r.game, seat.id);
+          const decision =
+            timeout && !seat.bot && !seat.afk && !takeover ? null : botDecision(r.game, seat.id);
+          const action = decision ? decision.action : this.timeoutAction(r.game, seat.id);
           if (action) {
             if (seat.bot && seat.botMode === 'llm' && this.options.brain) {
               if (!this.botJobs.has(code)) {
                 if (this.botJobs.size < (this.options.aiMaxConcurrent ?? 4)) {
                   const choices = botChoices(r.game, seat.id);
                   if (choices.length > 1) {
-                    this.startBotJob(r, seat, choices, action);
+                    this.startBotJob(r, seat, choices, action, decision?.reason);
                     feedback = true;
                     if (changed) this.save(r);
                     return changed || feedback;
@@ -681,6 +699,8 @@ export class GameService {
             try {
               r.game = applyAction(r.game, seat.id, action, this.env());
               changed = true;
+              if (decision?.reason && EXPLAINED.has(action.type))
+                log(r.game, this.env(), 'ai', `${seat.name}：${decision.reason}`, seat.id);
             } catch (error) {
               console.error(
                 JSON.stringify({
@@ -691,6 +711,15 @@ export class GameService {
                   message: (error as Error).message,
                 }),
               );
+              // Last line of defence: the plain timeout move keeps the table moving.
+              const safe = this.timeoutAction(r.game, seat.id);
+              if (safe && safe.type !== action.type)
+                try {
+                  r.game = applyAction(r.game, seat.id, safe, this.env());
+                  changed = true;
+                } catch {
+                  // Nothing safe to do now; the next tick sees a fresh state.
+                }
             }
           }
         }
@@ -714,7 +743,13 @@ export class GameService {
       (r.game.trade?.to ?? actingPlayerId(r.game)) === seat.id
     );
   }
-  private startBotJob(r: RoomRecord, seat: Seat, choices: GameAction[], fallback: GameAction) {
+  private startBotJob(
+    r: RoomRecord,
+    seat: Seat,
+    choices: GameAction[],
+    fallback: GameAction,
+    fallbackReason?: string,
+  ) {
     const game = r.game!,
       code = r.code;
     const job = {
@@ -760,15 +795,41 @@ export class GameService {
         try {
           latest.game = applyAction(latest.game!, seat.id, decision.action, this.env());
         } catch {
-          latest.game = applyAction(latest.game!, seat.id, fallback, this.env());
-          decision = { action: fallback, source: 'rule', message: '模型操作无效，规则机器人继续' };
+          try {
+            latest.game = applyAction(latest.game!, seat.id, fallback, this.env());
+            decision = {
+              action: fallback,
+              source: 'rule',
+              message: '模型操作无效，规则机器人继续',
+              ...(fallbackReason ? { reason: fallbackReason } : {}),
+              steps: decision.steps ?? [],
+            };
+          } catch {
+            // The state moved under the rule move too: fall back to the plain timeout move.
+            const safe = this.timeoutAction(latest.game!, seat.id);
+            if (!safe) throw Error('no safe move');
+            latest.game = applyAction(latest.game!, seat.id, safe, this.env());
+            decision = { action: safe, source: 'rule', message: '采用保守操作继续' };
+          }
         }
+        const steps = decision.steps ?? [];
         log(
           latest.game,
           this.env(),
           'ai',
-          `${seat.name}：${decision.source === 'llm' ? 'LLM 已完成决策' : '规则机器人接管本次决策'}`,
+          `${seat.name}：${
+            decision.reason ??
+            (decision.source === 'llm' ? 'LLM 已完成决策' : '规则机器人接管本次决策')
+          }`,
           seat.id,
+          undefined,
+          undefined,
+          {
+            detail: [
+              decision.source === 'llm' ? 'LLM' : '规则兜底',
+              ...(steps.length ? [steps.join(' → ')] : []),
+            ].join(' · '),
+          },
         );
         this.save(latest);
         this.aiActivity.set(code, {
@@ -787,8 +848,23 @@ export class GameService {
       }
       this.dirtyRooms.add(code);
     };
+    const tools = aiTools(game, seat.id, choices);
     void this.options
-      .brain!.choose(viewFor(game, seat.id), choices, fallback, job.controller.signal)
+      .brain!.choose(viewFor(game, seat.id), choices, fallback, job.controller.signal, {
+        tools,
+        ...(fallbackReason ? { fallbackReason } : {}),
+        onStep: (label, steps) => {
+          if (this.botJobs.get(code) !== job) return;
+          this.aiActivity.set(code, {
+            playerId: seat.id,
+            state: 'thinking',
+            message: `正在${label}`,
+            steps,
+            at: this.now(),
+          });
+          this.dirtyRooms.add(code);
+        },
+      })
       .then(finish, () =>
         finish({
           action: fallback,
@@ -796,6 +872,7 @@ export class GameService {
           message: job.capped
             ? '模型超过两分钟未决定，规则机器人继续'
             : '模型暂不可用，规则机器人继续',
+          ...(fallbackReason ? { reason: fallbackReason } : {}),
         }),
       );
   }

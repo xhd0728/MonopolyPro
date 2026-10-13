@@ -255,6 +255,8 @@ export interface GameEvent {
   tile?: number;
   /** Deck or hand card id behind the moment. */
   card?: string;
+  /** Secondary line, e.g. the tools an AI seat used before deciding. */
+  detail?: string;
 }
 export interface DebtDecision {
   playerId: string;
@@ -418,6 +420,8 @@ export interface RoomView {
     playerId: string;
     state: 'thinking' | 'ready' | 'fallback';
     message: string;
+    /** Public labels of the tools an AI seat has used so far this decision. */
+    steps?: string[];
     at: number;
   } | null;
 }
