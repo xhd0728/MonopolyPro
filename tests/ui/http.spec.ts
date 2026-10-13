@@ -12,18 +12,14 @@ test('plain HTTP: a six-player match acknowledges ability and dice commands', as
   // Localhost is a secure context even on HTTP; use a non-local hostname to reproduce production.
   expect(await page.evaluate(() => window.isSecureContext)).toBe(false);
   expect(await page.evaluate(() => typeof crypto.randomUUID)).toBe('undefined');
-  await page.getByRole('button', { name: '创建朋友房间' }).click();
-  await page.getByLabel('游客昵称').fill('HTTP玩家');
-  await page.getByLabel('初始角色').selectOption('landlord');
-  await page.getByLabel('席位上限').selectOption('6');
-  await page.getByRole('button', { name: '创建并进入' }).click();
+  await page.getByRole('button', { name: '创建房间', exact: true }).click();
   await expect(page.getByRole('heading', { name: '准备出发' })).toBeVisible();
-  await page.getByLabel('机器人策略').selectOption('rule');
+  await page.getByRole('radio', { name: /顾老板/ }).click();
+  await page.getByLabel('席位上限').selectOption('6');
   for (let i = 0; i < 5; i++) {
-    await page.getByRole('button', { name: '添加机器人' }).first().click();
-    await expect(page.locator('.seat')).toHaveCount(i + 2);
+    await page.getByRole('button', { name: '添加规则机器人' }).first().click();
+    await expect(page.locator('.seat-row:not(.empty)')).toHaveCount(i + 2);
   }
-  await page.getByRole('button', { name: '我准备好了' }).click();
   await page.getByRole('button', { name: '开始旅程' }).click();
   await expect(page.locator('.player-card')).toHaveCount(6);
   const board = page.locator('.board-meta');

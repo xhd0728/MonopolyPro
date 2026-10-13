@@ -16,9 +16,9 @@ import {
 } from '../../../packages/content/src/index.ts';
 import {
   DEFAULT_SETTINGS,
-  TURN_SECONDS,
   type RoomSettings,
   type RoomListing,
+  type RoomSummary,
   type RoomView,
   type GameAction,
   type GameView,
@@ -50,6 +50,7 @@ import { ActivityFeed } from './ActivityFeed.tsx';
 import { setSoundEnabled, soundEnabled, unlockSound } from './sound.ts';
 import { useShortcuts } from './shortcuts.ts';
 import { MatchSummary } from './Summary.tsx';
+import { Lobby } from './Lobby.tsx';
 import { TradeDialog, TradeOfferCard, tradeBlock, type TradeDraft } from './Trade.tsx';
 import './theme.css';
 const phaseNames = {
@@ -77,24 +78,6 @@ const kindNames = {
 };
 const NO_EMOTES: RoomView['emotes'] = [];
 /** End-condition choices for the lobby, encoded as mode:value. */
-const END_CHOICES: [string, string][] = [
-  ['rounds:10', '10 轮 · 快速，约 20 分钟'],
-  ['rounds:16', '16 轮 · 默认，约 30 分钟'],
-  ['rounds:20', '20 轮（约 40 分钟）'],
-  ['rounds:30', '30 轮（长局）'],
-  ['time:15', '限时 15 分钟'],
-  ['time:30', '限时 30 分钟'],
-  ['time:45', '限时 45 分钟'],
-  ['time:60', '限时 60 分钟'],
-  ['target:10000', '净资产先到 10,000'],
-  ['target:15000', '净资产先到 15,000'],
-  ['target:25000', '净资产先到 25,000'],
-];
-const endValue = (s: RoomSettings) => {
-  const end = s.end ?? 'time';
-  const value = `${end}:${end === 'rounds' ? s.rounds : end === 'time' ? s.minutes : s.target}`;
-  return END_CHOICES.some(([v]) => v === value) ? value : END_CHOICES[1][0];
-};
 /** Tablets and desktops dock the activity feed under the controls; phones use a tab. */
 function useWide() {
   const query = '(min-width: 801px)';
@@ -228,7 +211,7 @@ function App() {
   const [name, setName] = useState(localStorage.getItem('mp-name') ?? '旅行家'),
     [code, setCode] = useState(new URLSearchParams(location.search).get('room') ?? ''),
     [password, setPassword] = useState(''),
-    [settings, setSettings] = useState<RoomSettings>(DEFAULT_SETTINGS),
+    [settings, setSettings] = useState<RoomSettings>({ ...DEFAULT_SETTINGS, maxPlayers: 4 }),
     [role, setRole] = useState('builder');
   const [dialog, setDialog] = useState<
       'create' | 'join' | 'rules' | 'settings' | 'trade' | 'card' | 'shop' | 'exit' | null
@@ -253,7 +236,6 @@ function App() {
     setSelectedTile(null);
     setInspectedPlayer(id);
   }, []);
-  const [botMode, setBotMode] = useState<'rule' | 'llm'>('llm');
   const automaticSheet = useRef(false),
     pendingAction = useRef<GameAction | null>(null);
   const [emotesOn, setEmotesOn] = useState(localStorage.getItem('mp-emotes') !== 'false'),
@@ -263,6 +245,21 @@ function App() {
     [tutorial, setTutorial] = useState<number | null>(null),
     [tutorialGame, setTutorialGame] = useState(false);
   const [tradeDraft, setTradeDraft] = useState<TradeDraft | null>(null);
+  // The join form looks the room up as soon as the code is complete.
+  const [joinInfo, setJoinInfo] = useState<RoomSummary | null>(null),
+    [joinError, setJoinError] = useState('');
+  useEffect(() => {
+    setJoinInfo(null);
+    setJoinError('');
+    if (dialog !== 'join' || code.length !== 6) return;
+    let live = true;
+    api<RoomSummary>(`/api/rooms/${code}`)
+      .then((info) => live && setJoinInfo(info))
+      .catch((error: Error) => live && setJoinError(error.message));
+    return () => {
+      live = false;
+    };
+  }, [dialog, code]);
   const roomRef = useRef(room);
   roomRef.current = room;
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined),
@@ -348,11 +345,18 @@ function App() {
       automaticSheet.current = false;
     }
   }, [room?.game?.phase, room?.game?.activeId, room?.game?.trade?.id, room?.viewerId]);
-  async function refresh() {
+  // The home page keeps its room list fresh on its own.
+  const onHome = !room;
+  useEffect(() => {
+    if (!onHome) return;
+    const timer = setInterval(() => void refresh(true), 15000);
+    return () => clearInterval(timer);
+  }, [onHome]);
+  async function refresh(quiet = false) {
     try {
       setList(await api<RoomListing[]>('/api/rooms'));
     } catch {
-      notify('暂时无法读取大厅，请确认服务已启动');
+      if (!quiet) notify('暂时读不到房间列表，请确认服务已启动');
     }
   }
   async function enter(create: boolean, spectator = false, teaching = false) {
@@ -366,7 +370,8 @@ function App() {
       const c = await api<Credentials>(
         create ? '/api/rooms' : `/api/rooms/${code.trim().toUpperCase()}/join`,
         create
-          ? { name, characterId: role, password, settings: chosen }
+          ? // The password, like every other setting, is set inside the room.
+            { name: name.trim() || '旅行家', characterId: role, settings: chosen }
           : { name, password, characterId: role, spectator },
       );
       localStorage.setItem(
@@ -375,6 +380,7 @@ function App() {
       );
       await connection.current!.connect(c);
       setDialog(null);
+      setPassword('');
       history.replaceState({}, '', `?room=${c.code}`);
       setSelectedTile(null);
       if (teaching) {
@@ -538,17 +544,6 @@ function App() {
     setDialog('trade');
   };
   const inspected = g?.players.find((p) => p.id === inspectedPlayer);
-  const lobbyPlayers = room?.seats.filter((s) => !s.spectator) ?? [];
-  const startReason =
-    lobbyPlayers.length < 2
-      ? '需要至少两个席位'
-      : !lobbyPlayers.every((s) => s.ready && (s.connected || s.bot))
-        ? '请等待所有真人连接并准备'
-        : room?.settings.mode === 'team' &&
-            (![4, 6].includes(lobbyPlayers.length) ||
-              lobbyPlayers.filter((s) => s.team === 0).length !== lobbyPlayers.length / 2)
-          ? '团队需均分为 2v2 或 3v3，请补齐人数并调整队伍'
-          : '';
   const mySeat = room?.seats.find((s) => s.id === room.viewerId);
   const quickAction = g?.actions.find((a) => a.primary);
   // This seat must decide something now: its own turn, an auction bid or an incoming trade.
@@ -640,7 +635,7 @@ function App() {
           <div className={`connection ${connected ? 'online' : ''}`}>
             <i />
             {/* Only the status is announced; the ping changes every few seconds. */}
-            <span aria-live="polite">{room ? status : '朋友的下一场聚会'}</span>
+            <span aria-live="polite">{room ? status : '未进入房间'}</span>
             {connected && latency !== undefined && (
               <span className={`ping ${pingBand(latency)}`} title="与服务器之间的往返延迟">
                 Ping {latency} ms
@@ -663,8 +658,13 @@ function App() {
                 经营地产、规划路线，和朋友一起出发。
               </p>
               <div className="hero-actions">
-                <button className="primary" onClick={() => setDialog('create')}>
-                  创建朋友房间 <span>↗</span>
+                <button
+                  className="primary"
+                  disabled={busy}
+                  onClick={() => void enter(true)}
+                  title={`用「${mapById(settings.mapId).name}」开一个房间，进去后再改设置`}
+                >
+                  {busy ? '正在开房…' : '创建房间'}
                 </button>
                 <button className="secondary" onClick={() => setDialog('join')}>
                   加入房间
@@ -733,11 +733,11 @@ function App() {
             <section className="lobby-section">
               <div className="section-heading">
                 <div>
-                  <div className="eyebrow">一起玩更有趣</div>
-                  <h2>朋友们正在这里</h2>
+                  <h2>开着的房间</h2>
+                  <p className="hint">只显示有人在的房间；没人操作的房间会自动结束。</p>
                 </div>
                 <button className="secondary" onClick={() => void refresh()}>
-                  刷新大厅
+                  刷新
                 </button>
               </div>
               {list.length ? (
@@ -751,15 +751,18 @@ function App() {
                       }}
                     >
                       <span className="room-code">
-                        {r.locked ? '▣' : '◇'} {r.code}
+                        {r.locked ? '🔒 ' : ''}
+                        {r.code}
                       </span>
-                      <span>{mapById(r.mapId).name}</span>
                       <span>
+                        {r.host ? `${r.host}的房间` : '朋友的房间'}，{mapById(r.mapId).name}
+                      </span>
+                      <span className={`room-status ${r.status}`}>
                         {r.status === 'waiting'
                           ? '等待组局'
                           : r.status === 'finished'
-                            ? '已结算'
-                            : '对局中 · 可观战'}
+                            ? '刚结束一局'
+                            : '对局中，可观战'}
                       </span>
                       <b>
                         {r.players}/{r.maxPlayers} →
@@ -768,7 +771,9 @@ function App() {
                   ))}
                 </div>
               ) : (
-                <div className="empty-state">还没有房间。邀请朋友，开启今天的第一场旅程。</div>
+                <div className="empty-state">
+                  现在没有开着的房间。创建一个房间，再把邀请链接发给朋友。
+                </div>
               )}
             </section>
             <footer>
@@ -777,360 +782,15 @@ function App() {
           </main>
         ) : (
           <main className={`room-page ${g ? 'match-page' : ''}`}>
-            {!g && (
-              <div className="room-heading">
-                <div>
-                  <div className="eyebrow">好友专属的起点</div>
-                  <h1>
-                    准备出发{' '}
-                    <span className="badge">
-                      {room.settings.mode === 'team'
-                        ? '团队战'
-                        : room.settings.mode === 'quick'
-                          ? '快速战'
-                          : '自由战'}
-                    </span>
-                  </h1>
-                </div>
-                <div className="invite">
-                  <span>
-                    房间 <b>{room.code}</b>
-                    {room.locked ? ' · 密码房' : ''}
-                  </span>
-                  <button className="secondary" onClick={invite}>
-                    复制邀请
-                  </button>
-                </div>
-              </div>
-            )}
             {!g ? (
-              <div className="waiting-layout">
-                <section className="paper">
-                  <div className="section-heading">
-                    <h2>旅行伙伴</h2>
-                    <span>
-                      {room.seats.filter((s) => !s.spectator).length}/{room.settings.maxPlayers}{' '}
-                      席位
-                    </span>
-                  </div>
-                  <div className="seat-grid">
-                    {room.seats
-                      .filter((s) => !s.spectator)
-                      .map((s) => {
-                        const c = characterById(s.characterId);
-                        return (
-                          <article
-                            className={`seat ${s.id === room.viewerId ? 'self' : ''}`}
-                            key={s.id}
-                          >
-                            <div className="avatar" style={{ background: c.color }}>
-                              {c.icon}
-                            </div>
-                            <div>
-                              <h3>
-                                {s.name} {s.id === room.hostId && <small>房主</small>}
-                              </h3>
-                              <p>
-                                {c.name} · {c.title}
-                              </p>
-                              <span className={`seat-status ${s.ready ? 'ready' : ''}`}>
-                                {s.bot
-                                  ? `${s.botMode === 'llm' ? 'LLM' : '规则'}机器人 · 已准备`
-                                  : !s.connected
-                                    ? '连接已断开'
-                                    : s.ready
-                                      ? '已准备'
-                                      : '选择角色中'}
-                                {room.settings.mode === 'team'
-                                  ? ` · ${s.team === 0 ? '青' : '橙'}队`
-                                  : ''}
-                              </span>
-                            </div>
-                            {s.bot && room.isHost && (
-                              <button
-                                className="icon-button"
-                                aria-label={`移除${s.name}`}
-                                onClick={() => lobby('removeBot', { seatId: s.id })}
-                              >
-                                ×
-                              </button>
-                            )}
-                            {!s.bot && room.isHost && s.id !== room.viewerId && (
-                              <button
-                                className="icon-button"
-                                aria-label={`移出${s.name}`}
-                                title="把这位玩家移出房间"
-                                onClick={() => lobby('kick', { seatId: s.id })}
-                              >
-                                ×
-                              </button>
-                            )}
-                          </article>
-                        );
-                      })}
-                    {Array.from({
-                      length: Math.max(
-                        0,
-                        room.settings.maxPlayers - room.seats.filter((s) => !s.spectator).length,
-                      ),
-                    }).map((_, i) => (
-                      <button
-                        className="empty-seat"
-                        key={i}
-                        disabled={!room.isHost || disabled}
-                        title={!room.isHost ? '由房主添加机器人' : '添加一个准备好的机器人席位'}
-                        onClick={() =>
-                          lobby('addBot', {
-                            botMode: tutorialGame || !room.ai.configured ? 'rule' : botMode,
-                          })
-                        }
-                      >
-                        ＋<span>{room.isHost ? '添加机器人' : '等待朋友加入'}</span>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="section-heading">
-                    <h2>选择你的角色</h2>
-                    <span>天赋每 3 轮可使用一次</span>
-                  </div>
-                  <div className="character-grid">
-                    {CHARACTERS.map((c) => (
-                      <button
-                        key={c.id}
-                        className={`character ${room.seats.find((s) => s.id === room.viewerId)?.characterId === c.id ? 'selected' : ''}`}
-                        disabled={
-                          disabled || room.seats.find((s) => s.id === room.viewerId)?.spectator
-                        }
-                        onClick={() => lobby('character', { characterId: c.id })}
-                      >
-                        <span className="avatar" style={{ background: c.color }}>
-                          {c.icon}
-                        </span>
-                        <b>{c.name}</b>
-                        <small>{c.title}</small>
-                        <p>{c.description}</p>
-                        <em>{c.ability}</em>
-                      </button>
-                    ))}
-                  </div>
-                  {room.settings.mode === 'team' && (
-                    <div className="team-picker">
-                      <span>我的队伍</span>
-                      {[0, 1].map((team) => (
-                        <button
-                          key={team}
-                          disabled={disabled}
-                          onClick={() => lobby('team', { team })}
-                        >
-                          {team === 0 ? '青队' : '橙队'}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <div className="start-bar">
-                    <p>
-                      所有真人准备后，由房主开始。
-                      <br />
-                      <small>
-                        观战席：{room.seats.filter((s) => s.spectator && s.connected).length}
-                      </small>
-                    </p>
-                    {!room.seats.find((s) => s.id === room.viewerId)?.spectator && (
-                      <button
-                        className="secondary"
-                        disabled={disabled}
-                        onClick={() => lobby('ready')}
-                      >
-                        {room.seats.find((s) => s.id === room.viewerId)?.ready
-                          ? '取消准备'
-                          : '我准备好了'}
-                      </button>
-                    )}
-                    {room.isHost && (
-                      <button
-                        className="primary"
-                        disabled={disabled || !!startReason}
-                        title={startReason || '所有席位已准备，可以出发'}
-                        onClick={() => lobby('start')}
-                      >
-                        开始旅程 →
-                      </button>
-                    )}
-                    {room.isHost && startReason && <p className="hint">{startReason}</p>}
-                  </div>
-                </section>
-                <aside className="paper room-settings">
-                  <h2>旅程设置</h2>
-                  <label>
-                    地图
-                    <select
-                      aria-label="地图"
-                      value={room.settings.mapId}
-                      disabled={!room.isHost || disabled}
-                      onChange={(e) =>
-                        lobby('settings', { settings: { ...room.settings, mapId: e.target.value } })
-                      }
-                    >
-                      {MAPS.map((m) => (
-                        <option value={m.id} key={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <p className="hint">{map.description}</p>
-                  <label>
-                    模式
-                    <select
-                      value={room.settings.mode}
-                      disabled={!room.isHost || disabled}
-                      onChange={(e) =>
-                        lobby('settings', {
-                          settings: {
-                            ...room.settings,
-                            mode: e.target.value,
-                            end: 'rounds',
-                            rounds: e.target.value === 'quick' ? 10 : 16,
-                          },
-                        })
-                      }
-                    >
-                      <option value="free">自由对战</option>
-                      <option value="quick">快速对战</option>
-                      <option value="team">团队战 2v2 / 3v3</option>
-                    </select>
-                  </label>
-                  <label>
-                    地图大小
-                    <select
-                      aria-label="地图大小"
-                      value={room.settings.size ?? 36}
-                      disabled={!room.isHost || disabled}
-                      onChange={(e) =>
-                        lobby('settings', {
-                          settings: { ...room.settings, size: Number(e.target.value) },
-                        })
-                      }
-                    >
-                      <option value={36}>标准 · 36 格（10×10）</option>
-                      <option value={44}>大地图 · 44 格（12×12，地产更多、节奏更长）</option>
-                    </select>
-                  </label>
-                  <label>
-                    空地拍卖
-                    <select
-                      aria-label="空地拍卖"
-                      value={room.settings.auction ? 'on' : 'off'}
-                      disabled={!room.isHost || disabled}
-                      onChange={(e) =>
-                        lobby('settings', {
-                          settings: { ...room.settings, auction: e.target.value === 'on' },
-                        })
-                      }
-                    >
-                      <option value="off">关闭（默认）</option>
-                      <option value="on">开启</option>
-                    </select>
-                    <small className="field-hint">
-                      {room.settings.auction
-                        ? '放弃购买的空地进入全员公开竞拍'
-                        : '只有停在空地上的人能买，放弃则继续空置'}
-                    </small>
-                  </label>
-                  <label>
-                    结束方式
-                    <select
-                      aria-label="结束方式"
-                      value={endValue(room.settings)}
-                      disabled={!room.isHost || disabled}
-                      onChange={(e) => {
-                        const [end, raw] = e.target.value.split(':');
-                        const n = Number(raw);
-                        lobby('settings', {
-                          settings: {
-                            ...room.settings,
-                            end,
-                            ...(end === 'rounds' ? { rounds: n } : {}),
-                            ...(end === 'time' ? { minutes: n } : {}),
-                            ...(end === 'target' ? { target: n } : {}),
-                          },
-                        });
-                      }}
-                    >
-                      {END_CHOICES.map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    玩家操作时限
-                    <select
-                      value={room.settings.turnSeconds ?? 0}
-                      disabled={!room.isHost || disabled}
-                      onChange={(e) =>
-                        lobby('settings', {
-                          settings: { ...room.settings, turnSeconds: Number(e.target.value) },
-                        })
-                      }
-                    >
-                      {TURN_SECONDS.map((v) => (
-                        <option key={v} value={v}>
-                          {v ? `${v} 秒后自动推进` : '不限时（默认）'}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    起始现金
-                    <select
-                      value={room.settings.initialCash}
-                      disabled={!room.isHost || disabled}
-                      onChange={(e) =>
-                        lobby('settings', {
-                          settings: { ...room.settings, initialCash: Number(e.target.value) },
-                        })
-                      }
-                    >
-                      {[1000, 2000, 3000, 5000, 10000].map((v) => (
-                        <option key={v} value={v}>
-                          {money(v)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="tip-box">
-                    ✦{' '}
-                    {room.settings.mode === 'team'
-                      ? '团队需均分为两队，同队地产免租。'
-                      : '到时按现金、存款和地产估值，扣除待付债务排名。'}
-                    <br />
-                    断线 {Math.ceil(room.takeoverAfterMs / 1000)} 秒后机器人临时托管，回来即可接手。
-                  </div>
-                  <section className="bot-config" aria-label="AI 设置">
-                    <label>
-                      机器人策略
-                      <select
-                        aria-label="机器人策略"
-                        disabled={!room.isHost || disabled}
-                        value={room.ai.configured && !tutorialGame ? botMode : 'rule'}
-                        onChange={(e) => setBotMode(e.target.value as 'rule' | 'llm')}
-                      >
-                        <option value="rule">规则机器人 · 即时决策</option>
-                        <option value="llm" disabled={!room.ai.configured || tutorialGame}>
-                          LLM 机器人 · 模型策略
-                        </option>
-                      </select>
-                    </label>
-                    <p>
-                      {tutorialGame
-                        ? '教学使用规则机器人，便于逐步练习。'
-                        : room.ai.configured
-                          ? `模型已配置：${room.ai.model}。超时自动由规则策略继续。`
-                          : '模型尚未配置，当前使用规则机器人。API 由服务端部署者配置。'}
-                    </p>
-                  </section>
+              <Lobby
+                room={room}
+                map={map}
+                disabled={disabled}
+                tutorial={tutorialGame}
+                lobby={lobby}
+                invite={invite}
+                chat={
                   <Chat
                     room={room}
                     chat={chat}
@@ -1141,8 +801,8 @@ function App() {
                     }}
                     disabled={disabled}
                   />
-                </aside>
-              </div>
+                }
+              />
             ) : (
               <>
                 <div className="match-workspace">
@@ -1843,100 +1503,83 @@ function App() {
           )}
         </Modal>
       )}
-      {dialog && (dialog === 'create' || dialog === 'join') && (
-        <Modal
-          title={dialog === 'create' ? '创建朋友房间' : '加入朋友的旅程'}
-          close={() => setDialog(null)}
-        >
+      {dialog === 'join' && (
+        <Modal title="加入房间" close={() => setDialog(null)}>
           <form
+            className="join-form"
             onSubmit={(e) => {
               e.preventDefault();
-              void enter(dialog === 'create');
+              void enter(false, !!joinInfo?.spectatorOnly);
             }}
           >
             <label>
-              游客昵称
+              房间码
+              <input
+                className="code-input"
+                maxLength={6}
+                required
+                autoFocus={!code}
+                value={code}
+                placeholder="6 位房间码"
+                autoComplete="off"
+                onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+              />
+            </label>
+            {joinInfo && (
+              <p className="join-room">
+                <b>{joinInfo.host || '房主'}的房间</b>，{mapById(joinInfo.mapId).name}，
+                {joinInfo.players}/{joinInfo.maxPlayers} 人，
+                {joinInfo.status === 'waiting'
+                  ? '正在组局'
+                  : joinInfo.status === 'playing'
+                    ? '对局进行中'
+                    : '刚结束一局'}
+                {joinInfo.locked ? '，需要密码' : ''}
+              </p>
+            )}
+            {joinError && <p className="field-error">{joinError}</p>}
+            <label>
+              你的昵称
               <input
                 maxLength={16}
                 required
+                autoFocus={!!code}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
             </label>
-            {dialog === 'join' && (
+            {joinInfo?.locked && (
               <label>
-                房间码
+                房间密码
                 <input
-                  maxLength={6}
+                  maxLength={64}
+                  type="password"
                   required
-                  value={code}
-                  placeholder="输入 6 位房间码"
-                  onChange={(e) => setCode(e.target.value.toUpperCase())}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                 />
               </label>
             )}
-            <label>
-              {dialog === 'create' ? '设置密码（可留空）' : '房间密码（无密码可留空）'}
-              <input
-                maxLength={64}
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </label>
-            {dialog === 'create' && (
-              <>
-                <label>
-                  地图
-                  <select
-                    value={settings.mapId}
-                    onChange={(e) => setSettings({ ...settings, mapId: e.target.value })}
-                  >
-                    {MAPS.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  席位上限
-                  <select
-                    value={settings.maxPlayers}
-                    onChange={(e) =>
-                      setSettings({ ...settings, maxPlayers: Number(e.target.value) })
-                    }
-                  >
-                    {[2, 3, 4, 5, 6].map((v) => (
-                      <option key={v}>{v}</option>
-                    ))}
-                  </select>
-                </label>
-              </>
-            )}
-            <label>
-              初始角色
-              <select value={role} onChange={(e) => setRole(e.target.value)}>
-                {CHARACTERS.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} · {c.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <p className="hint">对局开始后加入会进入观战席。刷新可恢复原席位。</p>
-            <button className="primary full" disabled={busy}>
-              {busy ? '正在入座…' : dialog === 'create' ? '创建并进入' : '加入房间'}
+            <button className="primary full" disabled={busy || code.length !== 6 || !!joinError}>
+              {busy ? '正在加入…' : joinInfo?.spectatorOnly ? '进入观战' : '加入房间'}
             </button>
-            {dialog === 'join' && (
-              <button
-                className="secondary full"
-                type="button"
-                disabled={busy}
-                onClick={() => void enter(false, true)}
-              >
-                以观众身份加入
-              </button>
+            {joinInfo?.spectatorOnly ? (
+              <p className="hint">
+                {joinInfo.status === 'waiting'
+                  ? '席位已满，你会先在观战席。'
+                  : '对局已经开始，你会先在观战席，下一局可以入座。'}
+              </p>
+            ) : (
+              joinInfo && (
+                <button
+                  className="text-button"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void enter(false, true)}
+                >
+                  只观战，不占席位
+                </button>
+              )
             )}
           </form>
         </Modal>
@@ -2295,6 +1938,22 @@ function App() {
             </button>
           </div>
           {!connected && <p className="hint">请恢复连接后退出；你的恢复凭证会保留。</p>}
+          {room?.isHost && (
+            <div className="exit-close">
+              <p className="hint">
+                你是房主：结束房间会让所有人离开，进行中的对局按当前净资产结算，房间 10 分钟后删除。
+              </p>
+              <button
+                className="danger"
+                disabled={busy || !connected}
+                onClick={() => {
+                  if (window.confirm('确定结束整个房间吗？')) lobby('close');
+                }}
+              >
+                结束房间
+              </button>
+            </div>
+          )}
         </Modal>
       )}
       {tutorial !== null && room && (

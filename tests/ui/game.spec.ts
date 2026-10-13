@@ -8,11 +8,14 @@ async function accepted(page: Page, button: Locator) {
 }
 async function create(page: Page, name: string, seats = 2) {
   await page.goto('/');
-  await page.getByRole('button', { name: '创建朋友房间' }).click();
-  await page.getByLabel('游客昵称').fill(name);
-  await page.getByLabel('席位上限').selectOption(String(seats));
-  await page.getByRole('button', { name: '创建并进入' }).click();
+  // One click opens a room; the name and every setting are changed inside it.
+  await page.getByRole('button', { name: '创建房间', exact: true }).click();
   await expect(page.getByRole('heading', { name: '准备出发' })).toBeVisible();
+  await page.getByLabel('我的昵称').fill(name);
+  await page.getByLabel('我的昵称').press('Enter');
+  // The save button disappears once the server has the new name.
+  await expect(page.locator('.seat-rename button')).toHaveCount(0);
+  await page.getByLabel('席位上限').selectOption(String(seats));
   return new URL(page.url()).searchParams.get('room')!;
 }
 async function openPanel(page: Page, panel = '操作') {
@@ -40,15 +43,14 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
   const code = await create(host, '小筑');
   await guest.goto(`/?room=${code}`);
   // The invite link opens the join form by itself.
-  await expect(guest.getByLabel('游客昵称')).toBeVisible();
-  await guest.getByLabel('游客昵称').fill('飞飞');
+  await expect(guest.getByLabel('你的昵称')).toBeVisible();
+  await guest.getByLabel('你的昵称').fill('飞飞');
   await guest.getByRole('button', { name: '加入房间', exact: true }).last().click();
   await expect(guest.getByRole('heading', { name: '准备出发' })).toBeVisible();
   await host.getByLabel('聊天内容').fill('<b>一起出发</b>');
   await host.getByRole('button', { name: '发送聊天' }).click();
   await expect(guest.locator('.chat-feed')).toContainText('<b>一起出发</b>');
   await expect(guest.locator('.chat-feed b')).toHaveCount(1);
-  await host.getByRole('button', { name: '我准备好了' }).click();
   await guest.getByRole('button', { name: '我准备好了' }).click();
   await expect(host.getByRole('button', { name: '开始旅程' })).toBeEnabled();
   await host.getByRole('button', { name: '开始旅程' }).click();
@@ -203,8 +205,7 @@ test('interactive tutorial can be skipped and restarted, settings and map previe
   await expect(page.getByRole('group', { name: /海洋航线二维国家棋盘/ })).toBeVisible();
   await page.getByRole('button', { name: '开始互动教学' }).click();
   await expect(page.getByRole('region', { name: '互动教学' })).toBeVisible();
-  await page.getByRole('button', { name: '添加机器人' }).click();
-  await page.getByRole('button', { name: '我准备好了' }).click();
+  await page.getByRole('button', { name: '添加规则机器人' }).click();
   await page.getByRole('button', { name: '开始旅程' }).click();
   await expect(page.getByRole('region', { name: '互动教学' })).toContainText('掷骰，探索世界');
   await page.getByRole('button', { name: '跳过教学' }).click();
@@ -223,8 +224,7 @@ test('mobile country express map: real fork selection and auction input advance 
   await create(page, '路线玩家');
   await page.getByLabel('地图', { exact: true }).selectOption('neon');
   await page.getByLabel('空地拍卖').selectOption('on');
-  await page.getByRole('button', { name: '添加机器人' }).click();
-  await page.getByRole('button', { name: '我准备好了' }).click();
+  await page.getByRole('button', { name: '添加规则机器人' }).click();
   await page.getByRole('button', { name: '开始旅程' }).click();
   let fork = false,
     auction = false;
@@ -285,10 +285,9 @@ test('six player finances remain readable on desktop and mobile; a second window
   await page.setViewportSize({ width: 1440, height: 1000 });
   const code = await create(page, '资产玩家', 6);
   for (let i = 0; i < 5; i++) {
-    await page.getByRole('button', { name: '添加机器人' }).first().click();
-    await expect(page.locator('.seat')).toHaveCount(i + 2);
+    await page.getByRole('button', { name: '添加规则机器人' }).first().click();
+    await expect(page.locator('.seat-row:not(.empty)')).toHaveCount(i + 2);
   }
-  await page.getByRole('button', { name: '我准备好了' }).click();
   await page.getByRole('button', { name: '开始旅程' }).click();
   await expect(page.locator('.player-card')).toHaveCount(6);
   await expect(page.locator('.board-meta')).toContainText('第 1 / 16 轮');
@@ -324,7 +323,7 @@ test('six player finances remain readable on desktop and mobile; a second window
     await page.setViewportSize({ width, height: 844 });
     await expect(page.getByRole('button', { name: '快捷掷骰出发' })).toBeVisible();
     await page.getByRole('button', { name: /查看6号玩家/ }).click();
-    await expect(page.getByRole('dialog', { name: 'AI · 6的资产' })).toContainText('地产估值');
+    await expect(page.getByRole('dialog', { name: 'AI · 5的资产' })).toContainText('地产估值');
     // The sixth seat starts with the later-seat bonus.
     await expect(page.getByLabel('资产明细').locator('strong').first()).toHaveText('3,500');
     await page.keyboard.press('Escape');
@@ -361,12 +360,10 @@ test('the complete board and all six players fit one screen; dice and opponent a
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await create(page, '一屏验收', 6);
-  await expect(page.getByLabel('机器人策略')).toHaveValue('rule');
   for (let i = 0; i < 5; i++) {
-    await page.getByRole('button', { name: '添加机器人' }).first().click();
-    await expect(page.locator('.seat')).toHaveCount(i + 2);
+    await page.getByRole('button', { name: '添加规则机器人' }).first().click();
+    await expect(page.locator('.seat-row:not(.empty)')).toHaveCount(i + 2);
   }
-  await page.getByRole('button', { name: '我准备好了' }).click();
   await page.getByRole('button', { name: '开始旅程' }).click();
   await expect(page.locator('.country-tile')).toHaveCount(36);
   await expect(page.locator('.pawn')).toHaveCount(6);
@@ -460,8 +457,7 @@ test('the 44-square board fits the screen on desktop and phones', async ({ page 
   await page.setViewportSize({ width: 1280, height: 720 });
   await create(page, '大地图', 2);
   await page.getByLabel('地图大小').selectOption('44');
-  await page.getByRole('button', { name: '添加机器人' }).click();
-  await page.getByRole('button', { name: '我准备好了' }).click();
+  await page.getByRole('button', { name: '添加规则机器人' }).click();
   await page.getByRole('button', { name: '开始旅程' }).click();
   await expect(page.locator('.country-tile')).toHaveCount(44);
   // Keyboard play: Space presses the main action (roll).
