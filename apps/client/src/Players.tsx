@@ -20,13 +20,15 @@ function connectionName(
   if (seat?.bot)
     return room.aiActivity?.playerId === player.id && room.aiActivity.state === 'thinking'
       ? 'LLM 思考中'
-      : room.aiActivity?.playerId === player.id &&
-          room.aiActivity.state === 'fallback' &&
-          now - room.aiActivity.at < 30000
-        ? 'LLM · 规则回退'
-        : seat.botMode === 'llm'
-          ? 'LLM 机器人'
-          : '规则机器人';
+      : room.aiActivity?.playerId === player.id && room.aiActivity.state === 'queued'
+        ? 'LLM 排队中'
+        : room.aiActivity?.playerId === player.id &&
+            room.aiActivity.state === 'fallback' &&
+            now - room.aiActivity.at < 30000
+          ? 'LLM · 规则回退'
+          : seat.botMode === 'llm'
+            ? 'LLM 机器人'
+            : '规则机器人';
   if (seat?.afk) return '挂机托管中';
   if (seat?.connected) return '在线';
   return seat &&

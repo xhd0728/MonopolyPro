@@ -26,6 +26,7 @@ export const endValue = (s: RoomSettings) => {
   return `${end}:${end === 'rounds' ? s.rounds : end === 'time' ? s.minutes : s.target}`;
 };
 const MODE_NAMES = { free: '自由战', quick: '快速战', team: '团队战' } as const;
+const LEVEL_NAMES = { easy: '简单', normal: '普通', hard: '困难' } as const;
 
 /**
  * The room before a match: who is coming, who plays which character, and how the journey is
@@ -194,9 +195,7 @@ export function Lobby({
                       {self
                         ? '你'
                         : s.bot
-                          ? s.botMode === 'llm'
-                            ? 'LLM 机器人'
-                            : '规则机器人'
+                          ? `${s.botMode === 'llm' ? 'LLM 机器人' : '规则机器人'}（${LEVEL_NAMES[s.botLevel ?? 'normal']}）`
                           : '朋友'}
                       {s.id === room.hostId ? '，房主' : ''}，{c.name} · {c.title}
                       {room.settings.mode === 'team' ? `，${s.team === 0 ? '青' : '橙'}队` : ''}
@@ -212,10 +211,25 @@ export function Lobby({
                           lobby('botSettings', { seatId: s.id, botMode: e.target.value })
                         }
                       >
-                        <option value="rule">规则机器人</option>
+                        <option value="rule">规则</option>
                         <option value="llm" disabled={!llm}>
-                          LLM 机器人{llm ? '' : '（未配置）'}
+                          LLM{llm ? '' : '（未配置）'}
                         </option>
+                      </select>
+                      <select
+                        aria-label={`${s.name}的难度`}
+                        value={s.botLevel ?? 'normal'}
+                        disabled={disabled}
+                        title="简单：凭感觉；普通：稳健；困难：积极建房、交易谨慎"
+                        onChange={(e) =>
+                          lobby('botSettings', { seatId: s.id, botLevel: e.target.value })
+                        }
+                      >
+                        {(['easy', 'normal', 'hard'] as const).map((lv) => (
+                          <option key={lv} value={lv}>
+                            {LEVEL_NAMES[lv]}
+                          </option>
+                        ))}
                       </select>
                       <select
                         aria-label={`${s.name}的角色`}

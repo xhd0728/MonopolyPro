@@ -28,7 +28,7 @@ const service = new GameService(store, {
   emptyCloseMs: numberEnv('ROOM_EMPTY_CLOSE_MS', 3 * 60000),
   closedTtlMs: numberEnv('ROOM_CLOSED_TTL_MS', 10 * 60000),
   brain: aiConfig ? createBotBrain(aiConfig) : undefined,
-  aiMaxConcurrent: numberEnv('MONOPOLY_AI_MAX_CONCURRENT', 4),
+  aiMaxConcurrent: numberEnv('MONOPOLY_AI_MAX_CONCURRENT', 8),
 });
 const app = express();
 app.disable('x-powered-by');

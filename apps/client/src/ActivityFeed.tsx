@@ -207,7 +207,7 @@ export function ActivityFeed({
           ))}
         </span>
       </header>
-      {ai?.state === 'thinking' && index(ai.playerId) >= 0 && (
+      {(ai?.state === 'thinking' || ai?.state === 'queued') && index(ai.playerId) >= 0 && (
         <div
           className="feed-thinking"
           role="status"
@@ -215,7 +215,8 @@ export function ActivityFeed({
         >
           <i aria-hidden="true" />
           <span>
-            <b>{game.players[index(ai.playerId)].name}</b> 思考中 · {ai.message}
+            <b>{game.players[index(ai.playerId)].name}</b>{' '}
+            {ai.state === 'queued' ? '排队中' : '思考中'} · {ai.message}
             {!!ai.steps?.length && (
               <span className="feed-steps">
                 {ai.steps.map((s, i) => (

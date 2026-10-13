@@ -42,6 +42,7 @@ import { Store } from './store.ts';
 import type { BotBrain, AiDecision } from './ai.ts';
 import { botChoices } from './bot-choices.ts';
 import { aiTools } from './ai-tools.ts';
+import { labelActions, observe, validator } from './ai-observe.ts';
 
 export const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 const nameSchema = z
@@ -79,6 +80,8 @@ export interface ServiceOptions {
   /** Upper bound for one AI decision (default two minutes). */
   aiDecisionCapMs?: number;
 }
+/** How long an LLM seat waits for a free model slot before the rule bot plays. */
+const AI_QUEUE_MAX_MS = 20000;
 /** How long a bot on turn waits before skipping an offer between two other players. */
 const SIDE_TRADE_GRACE_MS = 10000;
 /** Bot moves whose reason is worth showing to the table (not routine rolls or turn ends). */
@@ -113,6 +116,13 @@ export class GameService {
     }
   >();
   private aiActivity = new Map<string, NonNullable<RoomView['aiActivity']>>();
+  /** When an LLM seat started waiting for a free model slot, per room. */
+  private queuedSince = new Map<string, number>();
+  /** Follow-up moves an LLM seat planned for the rest of its turn, per room. */
+  private plans = new Map<
+    string,
+    { gameId: string; seatId: string; round: number; turn: number; actions: GameAction[] }
+  >();
   private dirtyRooms = new Set<string>();
   private takeoverSignatures = new Map<string, string>();
   private grants = new Map<string, { code: string; seatId: string; expires: number }>();
@@ -456,6 +466,7 @@ export class GameService {
         characterId: z.string().optional(),
         team: z.number().int().min(0).max(1).optional(),
         botMode: z.enum(['rule', 'llm']).optional(),
+        botLevel: z.enum(['easy', 'normal', 'hard']).optional(),
         settings: settingsSchema.optional(),
         seatId: z.string().optional(),
       })
@@ -602,6 +613,7 @@ export class GameService {
         team: team0 <= players.length - team0 ? 0 : 1,
         bot: true,
         botMode,
+        botLevel: data.botLevel ?? 'normal',
         ready: true,
         spectator: false,
         tokenHash: '',
@@ -628,6 +640,7 @@ export class GameService {
         bot.characterId = data.characterId;
       }
       if (data.team !== undefined && r.settings.mode === 'team') bot.team = data.team;
+      if (data.botLevel) bot.botLevel = data.botLevel;
     }
     if (data.type === 'removeBot') {
       ensure(host, '只有房主能移除机器人');
@@ -826,39 +839,99 @@ export class GameService {
           this.now() - seat.disconnectedAt >= this.options.takeoverMs;
         const timeout = this.humanTimedOut(r);
         if (seat && (seat.bot || seat.afk || takeover || timeout)) {
+          const level = seat.bot ? (seat.botLevel ?? 'normal') : 'normal';
           const decision =
-            timeout && !seat.bot && !seat.afk && !takeover ? null : botDecision(r.game, seat.id);
+            timeout && !seat.bot && !seat.afk && !takeover
+              ? null
+              : botDecision(r.game, seat.id, level);
           const action = decision ? decision.action : this.timeoutAction(r.game, seat.id);
+          let detail: string | undefined;
           if (action) {
             if (seat.bot && seat.botMode === 'llm' && this.options.brain) {
-              if (!this.botJobs.has(code)) {
-                if (this.botJobs.size < (this.options.aiMaxConcurrent ?? 4)) {
-                  const choices = botChoices(r.game, seat.id);
-                  if (choices.length > 1) {
-                    this.startBotJob(r, seat, choices, action, decision?.reason);
-                    feedback = true;
-                    if (changed) this.save(r);
-                    return changed || feedback;
-                  }
-                } else {
-                  this.aiActivity.set(code, {
-                    playerId: seat.id,
-                    state: 'fallback',
-                    message: '模型忙，规则机器人继续',
-                    at: this.now(),
-                  });
-                  feedback = true;
-                }
-              } else {
+              if (this.botJobs.has(code)) {
                 if (changed) this.save(r);
                 return changed || feedback;
               }
+              // The rest of a turn the model already planned: play it without another request.
+              const plan = this.plans.get(code);
+              if (plan) {
+                const g = r.game;
+                if (
+                  plan.seatId === seat.id &&
+                  plan.gameId === g.id &&
+                  plan.round === g.round &&
+                  plan.turn === g.turn &&
+                  plan.actions.length
+                ) {
+                  const next = plan.actions.shift()!;
+                  if (!plan.actions.length) this.plans.delete(code);
+                  try {
+                    r.game = applyAction(g, seat.id, next, this.env());
+                    this.save(r);
+                    return true;
+                  } catch {
+                    // The plan no longer fits the board: ask the model again.
+                    this.plans.delete(code);
+                  }
+                } else if (plan.gameId !== g.id || plan.round !== g.round || plan.turn !== g.turn)
+                  this.plans.delete(code);
+              }
+              const choices = botChoices(r.game, seat.id);
+              // The rule bot's own idea (e.g. an offer for the last square of a set) is always
+              // on the list, so the model can take it.
+              if (!choices.some((c) => JSON.stringify(c) === JSON.stringify(action)))
+                try {
+                  applyAction(r.game, seat.id, action, this.env());
+                  choices.unshift(action);
+                } catch {
+                  // Not legal right now; the model chooses from the rest.
+                }
+              if (choices.length > 1) {
+                if (this.botJobs.size < (this.options.aiMaxConcurrent ?? 4)) {
+                  this.queuedSince.delete(code);
+                  this.startBotJob(r, seat, choices, action, decision?.reason);
+                  feedback = true;
+                  if (changed) this.save(r);
+                  return changed || feedback;
+                }
+                // Every model slot is busy: wait a little instead of handing over at once.
+                const since = this.queuedSince.get(code) ?? this.now();
+                this.queuedSince.set(code, since);
+                if (this.now() - since < AI_QUEUE_MAX_MS) {
+                  this.aiActivity.set(code, {
+                    playerId: seat.id,
+                    state: 'queued',
+                    message: '排队等待模型',
+                    at: this.now(),
+                  });
+                  if (changed) this.save(r);
+                  return true;
+                }
+                this.queuedSince.delete(code);
+                this.aiActivity.set(code, {
+                  playerId: seat.id,
+                  state: 'fallback',
+                  message: '模型排队超过 20 秒，规则机器人继续',
+                  at: this.now(),
+                });
+                detail = '规则兜底';
+                feedback = true;
+              } else detail = '只有一个可选动作';
             }
             try {
               r.game = applyAction(r.game, seat.id, action, this.env());
               changed = true;
               if (decision?.reason && EXPLAINED.has(action.type))
-                log(r.game, this.env(), 'ai', `${seat.name}：${decision.reason}`, seat.id);
+                log(
+                  r.game,
+                  this.env(),
+                  'ai',
+                  `${seat.name}：${decision.reason}`,
+                  seat.id,
+                  undefined,
+                  undefined,
+                  detail ? { detail } : undefined,
+                );
             } catch (error) {
               console.error(
                 JSON.stringify({
@@ -985,6 +1058,15 @@ export class GameService {
           }
         }
         const steps = decision.steps ?? [];
+        // Remember the rest of the turn the model planned; each move is re-checked when used.
+        if (decision.source === 'llm' && decision.plan?.length)
+          this.plans.set(code, {
+            gameId: latest.game!.id,
+            seatId: seat.id,
+            round: latest.game!.round,
+            turn: latest.game!.turn,
+            actions: [...decision.plan],
+          });
         log(
           latest.game,
           this.env(),
@@ -1021,9 +1103,16 @@ export class GameService {
       this.dirtyRooms.add(code);
     };
     const tools = aiTools(game, seat.id, choices);
+    const advice = choices.findIndex((c) => JSON.stringify(c) === JSON.stringify(fallback));
     void this.options
       .brain!.choose(viewFor(game, seat.id), choices, fallback, job.controller.signal, {
         tools,
+        level: seat.botLevel ?? 'normal',
+        observation: observe(game, seat.id),
+        labels: labelActions(game, seat.id, choices),
+        validate: validator(game, seat.id, this.now()),
+        ...(advice >= 0 ? { advice } : {}),
+        deadline: Date.now() + (this.options.aiDecisionCapMs ?? AI_DECISION_CAP_MS) - 5000,
         ...(fallbackReason ? { fallbackReason } : {}),
         onStep: (label, steps) => {
           if (this.botJobs.get(code) !== job) return;

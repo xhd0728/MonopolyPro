@@ -1981,3 +1981,6 @@ label {
   padding: 0;
   font-size: 18px;
 }
+.seat-controls select {
+  max-width: 120px;
+}
