@@ -1,9 +1,9 @@
 import {
   BOARD,
-  CARDS,
   CHANCE_CARDS,
   FATE_CARDS,
   cardById,
+  randomCard,
   characterById,
   deckCardById,
   mapById,
@@ -65,10 +65,33 @@ export function log(
   });
   if (g.events.length > 120) g.events.splice(0, g.events.length - 120);
 }
-function drawCard(g: GameState, p: PlayerState, env: EngineEnvironment) {
-  if (p.cards.length >= 8) return;
-  p.cards.push(CARDS[env.randomInt(CARDS.length)].id);
-  log(g, env, 'card', `${p.name}获得一张卡牌`, p.id);
+export const handSize = (p: Pick<PlayerState, 'cards' | 'newCards'>) =>
+  p.cards.length + (p.newCards?.length ?? 0);
+export const handFull = (p: Pick<PlayerState, 'cards' | 'newCards'>) =>
+  handSize(p) >= BOARD.handLimit;
+/**
+ * Give a random card. Cards gained during a turn wait in `newCards` until the player's next
+ * turn, so a card can never be bought and played in the same turn; the opening hand is ready.
+ */
+function drawCard(g: GameState, p: PlayerState, env: EngineEnvironment, ready = false) {
+  if (handFull(p)) return;
+  const card = randomCard(env.randomInt);
+  (ready ? p.cards : p.newCards).push(card.id);
+  log(g, env, 'card', `${p.name}获得一张卡牌${ready ? '' : '（下回合可用）'}`, p.id);
+}
+/** Rent shields never stack. Returns false (and grants nothing) when one is already held. */
+function grantShield(g: GameState, p: PlayerState, env: EngineEnvironment, source: string) {
+  if (p.shield >= BOARD.shieldCap) return false;
+  p.shield++;
+  log(g, env, 'shield', `${p.name}通过「${source}」获得 1 次租金护盾`, p.id);
+  return true;
+}
+/** Unlock last turn's cards and reset the per-turn card limits. */
+function beginTurn(p: PlayerState) {
+  p.cards.push(...p.newCards);
+  p.newCards = [];
+  p.cardPlayed = false;
+  p.shopped = false;
 }
 export function assetsOf(g: GameState, p: PlayerState): number {
   const propertyValue = g.properties
@@ -245,6 +268,12 @@ export function migrateGame(state: GameState, randomInt?: (max: number) => numbe
   }
   for (const p of g.players) {
     (p as Partial<PlayerState>).prophet ??= 0;
+    p.newCards ??= [];
+    p.cardPlayed ??= false;
+    p.shopped ??= false;
+    // Older saves allowed eight cards and stacked shields; trim to the current limits.
+    if (p.cards.length > BOARD.handLimit) p.cards.length = BOARD.handLimit;
+    p.shield = Math.min(p.shield, BOARD.shieldCap);
     p.stats = { ...emptyStats(), ...p.stats };
   }
   return g as GameState;
@@ -268,6 +297,9 @@ export function createGame(
           deposit: 0,
           position: 0,
           cards: [],
+          newCards: [],
+          cardPlayed: false,
+          shopped: false,
           bankrupt: false,
           shield: 0,
           taxShield: 0,
@@ -340,7 +372,7 @@ export function createGame(
     finishReason: '',
   };
   for (const p of players)
-    for (let i = 0; i < (p.characterId === 'dealer' ? 3 : 2); i++) drawCard(g, p, env);
+    for (let i = 0; i < (p.characterId === 'dealer' ? 3 : 2); i++) drawCard(g, p, env, true);
   log(g, env, 'start', '富翁之旅开始了！先使用卡牌或天赋，再掷骰出发。');
   // Everyone starts level, so the first round is calm; world news begins in round two.
   g.news = { id: 'calm', round: 1 };
@@ -601,6 +633,7 @@ function advanceTurn(g: GameState, env: EngineEnvironment) {
     }
     const p = currentPlayer(g);
     if (p.bankrupt) continue;
+    beginTurn(p);
     if (p.skipTurns > 0) {
       p.skipTurns--;
       log(g, env, 'skip', `${p.name}临时停留一回合`, p.id);
@@ -878,9 +911,9 @@ function applyDeckCard(
       sendToJail(g, p, env, `抽到「${card.name}」`);
       break;
     case 'jailCard':
-      if (p.cards.length < 8) {
-        p.cards.push('rescue');
-        log(g, env, 'card', `${p.name}获得一张「自由通行」`, p.id);
+      if (!handFull(p)) {
+        p.newCards.push('rescue');
+        log(g, env, 'card', `${p.name}获得一张「自由通行」（下回合可用）`, p.id);
       } else reward(g, p, card.amount, env, `${card.name}（手牌已满）`);
       break;
     case 'repairs': {
@@ -915,12 +948,12 @@ function applyDeckCard(
       break;
     }
     case 'shield':
-      p.shield++;
-      log(g, env, 'shield', `${p.name}获得 1 次租金护盾`, p.id);
+      if (!grantShield(g, p, env, card.name))
+        reward(g, p, 80, env, `${card.name}（已有护盾，改发现金）`);
       if (card.amount) reward(g, p, card.amount, env, card.name);
       break;
     case 'drawCard':
-      if (p.cards.length < 8) drawCard(g, p, env);
+      if (!handFull(p)) drawCard(g, p, env);
       else reward(g, p, 80, env, `${card.name}（手牌已满）`);
       break;
     case 'upgradeRandom': {
@@ -1110,7 +1143,11 @@ function cardAction(
 ) {
   manageAllowed(g, p);
   const card = cardById(action.cardId);
-  requireRule(card && p.cards.includes(card.id), '没有这张卡牌');
+  requireRule(
+    card && p.cards.includes(card.id),
+    card && p.newCards.includes(card.id) ? '这张卡本回合刚获得，下回合才能使用' : '没有这张卡牌',
+  );
+  requireRule(!p.cardPlayed, '每回合只能使用一张卡牌');
   requireRule(p.jailTurns === 0 || card.category !== 'move', '拘留中不能使用移动类卡牌');
   let target = p;
   let property: PropertyState | undefined;
@@ -1210,8 +1247,9 @@ function cardAction(
       target.skipTurns = 1;
       break;
     case 'stealCard':
-      requireRule(target.cards.length > 0 && p.cards.length < 8, '对手没有卡牌或手牌已满');
-      p.cards.push(target.cards.splice(env.randomInt(target.cards.length), 1)[0]);
+      // The played card leaves the hand first, so a full hand still has room for the stolen one.
+      requireRule(target.cards.length > 0, '对手没有可取走的卡牌');
+      p.newCards.push(target.cards.splice(env.randomInt(target.cards.length), 1)[0]);
       break;
     case 'clearBoost':
       property!.boostUntil = 0;
@@ -1220,7 +1258,11 @@ function cardAction(
       property!.cutUntil = g.round + card.amount - 1;
       break;
     case 'shield':
-      p.shield += card.amount;
+      requireRule(p.shield < BOARD.shieldCap, '已经持有护盾，护盾不能叠加');
+      grantShield(g, p, env, card.name);
+      break;
+    case 'lottery':
+      reward(g, p, [50, 100, 200, 400][env.randomInt(4)], env, card.name);
       break;
     case 'cleanse':
       p.skipTurns = 0;
@@ -1232,13 +1274,15 @@ function cardAction(
       reward(g, p, 100, env, card.name);
       break;
     case 'insure':
-      p.shield++;
+      grantShield(g, p, env, card.name);
       reward(g, p, card.amount, env, card.name);
       break;
     case 'taxShield':
-      p.taxShield++;
+      requireRule(p.taxShield < 1, '已经持有税务减免');
+      p.taxShield = 1;
       break;
   }
+  p.cardPlayed = true;
   p.cards.splice(p.cards.indexOf(card.id), 1);
   p.stats.cards++;
   log(
@@ -1579,11 +1623,15 @@ export function applyAction(
     case 'buyCard': {
       manageAllowed(g, p);
       requireRule(tileAt(g, p.position).kind === 'shop', '请在卡牌商店购买');
-      const card = cardById(action.cardId);
-      requireRule(card && p.cash >= card.price && p.cards.length < 8, '现金不足或手牌已满');
-      p.cash -= card.price;
-      p.cards.push(card.id);
-      log(g, env, 'card', `${p.name}在商店购买一张卡牌`, p.id);
+      requireRule(!p.shopped, '每回合只能在卡牌市场抽一次');
+      requireRule(!handFull(p), `手牌已满（最多 ${BOARD.handLimit} 张）`);
+      requireRule(p.cash >= BOARD.cardDraw, `抽卡需要 ${BOARD.cardDraw} 现金`);
+      // A blind draw at a flat price: nobody can buy the exact combo they want.
+      p.cash -= BOARD.cardDraw;
+      p.shopped = true;
+      const card = randomCard(env.randomInt);
+      p.newCards.push(card.id);
+      log(g, env, 'card', `${p.name}在卡牌市场抽了一张卡（下回合可用）`, p.id, -BOARD.cardDraw);
       break;
     }
     case 'ability': {
@@ -1592,13 +1640,13 @@ export function applyAction(
       p.abilityRound = g.round;
       if (p.characterId === 'builder') reward(g, p, 180, env, '建设补助');
       if (p.characterId === 'landlord') reward(g, p, 150, env, '商业分红');
-      if (p.characterId === 'runner') {
-        p.shield++;
-        reward(g, p, 80, env, '旅行奖励');
+      if (p.characterId === 'runner') reward(g, p, 150, env, '旅行补贴');
+      if (p.characterId === 'guardian') {
+        p.taxShield = 1;
+        reward(g, p, 100, env, '应急金');
       }
-      if (p.characterId === 'guardian') p.shield += 2;
       if (p.characterId === 'dealer') {
-        requireRule(p.cards.length < 8, '手牌已满');
+        requireRule(!handFull(p), '手牌已满');
         drawCard(g, p, env);
       }
       if (p.characterId === 'explorer') {
@@ -1754,7 +1802,8 @@ export function assertInvariants(g: GameState) {
         p.position >= 0 &&
         p.position < mapOf(g).tiles.length &&
         (p.jailTurns === 0 || (p.jailTurns === 1 && p.position === mapOf(g).corners.jail)) &&
-        p.cards.length <= 8,
+        handSize(p) <= BOARD.handLimit &&
+        p.shield <= BOARD.shieldCap,
     ),
     '资产或玩家状态不满足约束',
   );
@@ -1884,7 +1933,19 @@ export function actionsFor(g: GameState, id: string): ActionOption[] {
     add({ type: 'surrender' }, '宣布破产', '退出经营，仍可继续观战');
     return options;
   }
-  if (g.round - p.abilityRound >= 3 && (p.characterId !== 'dealer' || p.cards.length < 8))
+  if (
+    MANAGE_PHASES.includes(g.phase) &&
+    tileAt(g, p.position).kind === 'shop' &&
+    !p.shopped &&
+    !handFull(p) &&
+    p.cash >= BOARD.cardDraw
+  )
+    add(
+      { type: 'buyCard' },
+      `抽一张卡 · ${BOARD.cardDraw}`,
+      '随机抽取，下回合才能使用；每回合限一次',
+    );
+  if (g.round - p.abilityRound >= 3 && (p.characterId !== 'dealer' || !handFull(p)))
     add({ type: 'ability' }, '使用角色天赋', characterById(p.characterId).ability);
   return options;
 }
@@ -1931,14 +1992,14 @@ export function viewFor(g: GameState, viewerId: string | null): GameView {
       };
     }),
     players: players.map((p) => {
-      const { cards, nextDice, ...pub } = p;
+      const { cards, newCards, nextDice, ...pub } = p;
       const assets = assetsOf(g, p),
         debt = g.debt?.playerId === p.id ? g.debt.amount : 0;
       const owned = properties.filter((x) => x.owner === p.id);
       return {
         ...pub,
-        cardCount: cards.length,
-        ...(p.id === viewerId ? { cards: [...cards], nextDice } : {}),
+        cardCount: cards.length + newCards.length,
+        ...(p.id === viewerId ? { cards: [...cards], newCards: [...newCards], nextDice } : {}),
         assets,
         propertyValue: assets - p.cash - p.deposit + debt,
         propertyCount: owned.length,

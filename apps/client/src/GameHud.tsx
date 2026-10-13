@@ -201,7 +201,8 @@ export function adviceFor(game: GameView, map: MapDefinition): string | null {
       );
       if (monopoly) return `你已独占${map.tiles[monopoly.tile].name}所在的组，现在升级它最划算。`;
       if (here.kind === 'bank' && me.cash > 800) return '你在银行：多余现金存进去，每轮有利息。';
-      if (here.kind === 'shop' && me.cardCount < 8) return '你在卡牌市场，可以花钱挑一张想要的牌。';
+      if (here.kind === 'shop' && me.cardCount < BOARD.handLimit && !me.shopped)
+        return `你在卡牌市场，可以花 ${BOARD.cardDraw} 随机抽一张卡，下回合可用。`;
       if (can('build') && me.cash > 1200) return '现金充裕，可以升级一处地产提高租金。';
       return '没有更急的事了，点「结束回合」交给下一位。';
     }

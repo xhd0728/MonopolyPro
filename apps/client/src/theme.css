@@ -1045,3 +1045,67 @@ label {
 .settlement .stat-line {
   font-size: 12px;
 }
+
+/* ---------- Card market and hand limits ---------- */
+.card-mini.locked {
+  opacity: 0.55;
+  border-style: dashed;
+  cursor: not-allowed;
+}
+.card-mini.locked small {
+  color: var(--ocean);
+  font-weight: 700;
+}
+.shop-draw {
+  width: 100%;
+  min-height: 48px;
+  margin: 4px 0 8px;
+  font-size: 16px;
+}
+.pool-title {
+  margin: 14px 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.catalog-grid.pool article {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+.catalog-grid.pool article.rare {
+  border-color: #c9a227;
+  background: #fffaf0;
+}
+.catalog-grid.pool article b em {
+  font-style: normal;
+  font-size: 11px;
+  color: #a57c00;
+}
+.catalog-grid.pool article p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.catalog-grid.pool {
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 6px;
+}
+.catalog-grid.pool article {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  column-gap: 6px;
+  align-items: start;
+  padding: 8px;
+}
+.catalog-grid.pool article > span {
+  grid-row: span 2;
+  font-size: 20px;
+}
+.catalog-grid.pool article b {
+  font-size: 13px;
+}
+.catalog-grid.pool article p {
+  margin: 2px 0 0;
+  line-height: 1.45;
+}

@@ -1,4 +1,4 @@
-import { CARDS, mapById } from '../../../packages/content/src/index.ts';
+import { CARDS } from '../../../packages/content/src/index.ts';
 import type { GameAction, GameState } from '../../../packages/shared/src/index.ts';
 import { actionsFor, applyAction, viewFor } from '../../../packages/engine/src/index.ts';
 /** Enumerate proposals; simulation only tests legality, never previews the real dice/randomness. */
@@ -22,8 +22,7 @@ export function botChoices(game: GameState, id: string): GameAction[] {
         for (const property of view.properties)
           proposals.push({ type: 'playCard', cardId, tile: property.tile });
     }
-    if (mapById(game.settings.mapId, game.settings.size).tiles[me.position].kind === 'shop')
-      for (const card of CARDS) proposals.push({ type: 'buyCard', cardId: card.id });
+    // Market draws come from actionsFor: one blind draw, no card choice.
   }
   const unique = [...new Map(proposals.map((a) => [JSON.stringify(a), a])).values()];
   return unique

@@ -63,7 +63,7 @@ function tileCaption(t: TileDefinition, game: GameView | null | undefined, salar
     case 'bank':
       return '利息 3%';
     case 'shop':
-      return '购买卡牌';
+      return '随机抽卡';
     case 'tax':
       return '缴税';
     case 'transit':

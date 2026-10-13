@@ -26,7 +26,6 @@ export function cardTargetReason(
   if (card.effect === 'swap' && game.players.find((p) => p.id === target)?.jailTurns)
     return '对手正在拘留所';
   if (card.effect === 'stealCard') {
-    if (me.cardCount >= 8) return '自己的手牌已满';
     if (!game.players.find((p) => p.id === target)?.cardCount) return '对手没有手牌';
   }
   const property = game.properties.find((p) => String(p.tile) === target);

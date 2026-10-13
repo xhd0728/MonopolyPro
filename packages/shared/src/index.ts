@@ -101,7 +101,8 @@ export type CardEffect =
   | 'cleanse'
   | 'rescue'
   | 'insure'
-  | 'taxShield';
+  | 'taxShield'
+  | 'lottery';
 export interface CardDefinition {
   id: string;
   name: string;
@@ -112,6 +113,8 @@ export interface CardDefinition {
   target: 'self' | 'player' | 'ownProperty' | 'enemyProperty' | 'emptyProperty' | 'tile';
   price: number;
   icon: string;
+  /** Rare cards come up a third as often in random draws. */
+  rarity: 'common' | 'rare';
 }
 /** 机会 (chance) leans on surprise movement; 命运 (fate) on money and the whole table. */
 export type DeckId = 'chance' | 'fate';
@@ -192,6 +195,11 @@ export interface PlayerState {
   deposit: number;
   position: number;
   cards: string[];
+  /** Cards gained this turn: they join the hand (and become playable) when the next turn starts. */
+  newCards: string[];
+  /** Turn-scoped limits: one card played and one market draw per turn. */
+  cardPlayed: boolean;
+  shopped: boolean;
   bankrupt: boolean;
   shield: number;
   taxShield: number;
@@ -321,8 +329,9 @@ export interface GameState {
   winners: string[];
   finishReason: string;
 }
-export type PlayerView = Omit<PlayerState, 'cards' | 'nextDice'> & {
+export type PlayerView = Omit<PlayerState, 'cards' | 'newCards' | 'nextDice'> & {
   cards?: string[];
+  newCards?: string[];
   cardCount: number;
   nextDice?: number | null;
   assets: number;
@@ -458,7 +467,7 @@ export const actionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('bid'), amount }),
   z.object({ type: z.literal(['build', 'downgrade', 'mortgage', 'redeem']), tile }),
   z.object({ type: z.literal('bank'), amount, direction: z.enum(['deposit', 'withdraw']) }),
-  z.object({ type: z.literal('buyCard'), cardId: z.string().max(50) }),
+  z.object({ type: z.literal('buyCard'), cardId: z.string().max(50).optional() }),
   z.object({
     type: z.literal('playCard'),
     cardId: z.string().max(50),

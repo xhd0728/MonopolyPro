@@ -34,7 +34,7 @@ export function botAction(g: GameState, id: string): GameAction | null {
       : { type: 'pass' };
   if (g.phase === 'jail') {
     const rescue = p.cards.find((c) => cardById(c)?.effect === 'rescue');
-    if (rescue) return { type: 'playCard', cardId: rescue };
+    if (rescue && !p.cardPlayed) return { type: 'playCard', cardId: rescue };
     // Leaving early matters most while unowned land is still on the board.
     const landLeft = g.properties.some((x) => !x.owner);
     return p.cash >= bailOf(g) + (landLeft ? 500 : 1500) &&
@@ -55,11 +55,14 @@ export function botAction(g: GameState, id: string): GameAction | null {
     );
   const ability = options.find((x) => x.action.type === 'ability');
   if (ability) return ability.action;
-  for (const id of p.cards) {
+  // One card per turn; cards gained this turn are not in `cards` yet.
+  for (const id of p.cardPlayed ? [] : p.cards) {
     const card = cardById(id)!;
     if (p.jailTurns > 0 && card.category === 'move') continue;
     // Keep the jail key for when it is needed.
     if (card.effect === 'rescue' && p.skipTurns === 0 && p.jailTurns === 0) continue;
+    if (card.effect === 'shield' && p.shield > 0) continue;
+    if (card.effect === 'taxShield' && p.taxShield > 0) continue;
     if (card.target === 'self' && !['move', 'teleport', 'dice'].includes(card.effect))
       return { type: 'playCard', cardId: id };
     if (card.target === 'ownProperty') {
@@ -82,12 +85,14 @@ export function botAction(g: GameState, id: string): GameAction | null {
       if (
         opponent &&
         (card.effect !== 'stealCard' || opponent.cards.length > 0) &&
-        (card.effect !== 'swap' || opponent.jailTurns === 0) &&
-        p.cards.length < 8
+        (card.effect !== 'swap' || opponent.jailTurns === 0)
       )
         return { type: 'playCard', cardId: id, targetId: opponent.id };
     }
   }
+  // A blind draw at the market when cash is comfortable.
+  const draw = options.find((x) => x.action.type === 'buyCard');
+  if (draw && p.cash > 900) return draw.action;
   const offer = groupOffer(g, p);
   if (offer) return offer;
   const build = options.find(

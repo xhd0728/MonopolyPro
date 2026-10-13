@@ -57,7 +57,7 @@ const kindNames = {
   start: '起点 · 经过领取薪水',
   property: '可购买的地产',
   bank: '银行 · 每轮利息 3%',
-  shop: '卡牌商店 · 最多 8 张',
+  shop: `卡牌市场 · 抽一张 ${BOARD.cardDraw}`,
   chance: '机会 · 抽一张机会卡（多为移动与惊喜）',
   fate: '命运 · 抽一张命运卡（多为现金与全场事件）',
   tax: '公共税费 · 进入停车场奖池',
@@ -464,7 +464,13 @@ function App() {
             : '')
         : '',
   }));
-  const chosenCardReason = cardTargets.find((t) => t.id === cardTarget)?.reason ?? '';
+  const chosenCardReason = me?.cardPlayed
+    ? '本回合已经用过一张卡，下回合再用。'
+    : selectedCard?.effect === 'shield' && me && me.shield > 0
+      ? '已经持有护盾，护盾不能叠加。'
+      : selectedCard?.effect === 'taxShield' && me && me.taxShield > 0
+        ? '已经持有税务减免。'
+        : (cardTargets.find((t) => t.id === cardTarget)?.reason ?? '');
   const jailedMove = !!me?.jailTurns && selectedCard?.category === 'move';
   const bidReason = !validMoney(bid)
     ? '请输入整数竞价金额'
@@ -1375,20 +1381,27 @@ function App() {
                                     }
                                     title={
                                       map.tiles[me.position].kind !== 'shop'
-                                        ? '抵达卡牌商店后可购买'
-                                        : '购买指定卡牌'
+                                        ? '抵达卡牌市场后可抽卡'
+                                        : `随机抽一张，${BOARD.cardDraw} 现金，每回合一次`
                                     }
                                     onClick={() => setDialog('shop')}
                                   >
-                                    ♧ 卡牌商店
+                                    ♧ 卡牌市场
                                   </button>
                                 </div>
                                 <div className="hand-heading">
                                   <b>
-                                    我的手牌 <small>{me.cardCount}/8</small>
+                                    我的手牌{' '}
+                                    <small>
+                                      {me.cardCount}/{BOARD.handLimit}
+                                    </small>
                                   </b>
                                   <small>
-                                    {canManage ? '点击选择目标' : '自己的可操作阶段可使用'}
+                                    {me.cardPlayed
+                                      ? '本回合已用过一张卡'
+                                      : canManage
+                                        ? '每回合可用一张，点击选择目标'
+                                        : '自己的可操作阶段可使用'}
                                   </small>
                                 </div>
                                 <div className="hand">
@@ -1399,11 +1412,26 @@ function App() {
                                         key={`${id}-${i}`}
                                         className={`card-mini ${c.category}`}
                                         onClick={() => openCard(id)}
-                                        title={`${c.description}；${!canManage ? '等待自己的掷骰或经营阶段' : '点击查看目标与效果'}`}
+                                        title={`${c.description}；${!canManage ? '等待自己的掷骰或经营阶段' : me.cardPlayed ? '本回合已用过一张卡' : '点击查看目标与效果'}`}
                                       >
                                         <span>{c.icon}</span>
                                         <b>{c.name}</b>
                                         <small>{CATEGORY_NAMES[c.category]}</small>
+                                      </button>
+                                    );
+                                  })}
+                                  {me.newCards?.map((id, i) => {
+                                    const c = cardById(id)!;
+                                    return (
+                                      <button
+                                        key={`new-${id}-${i}`}
+                                        className={`card-mini ${c.category} locked`}
+                                        disabled
+                                        title={`${c.description}；本回合刚获得，下回合可用`}
+                                      >
+                                        <span>{c.icon}</span>
+                                        <b>{c.name}</b>
+                                        <small>下回合可用</small>
                                       </button>
                                     );
                                   })}
@@ -1916,27 +1944,49 @@ function App() {
       )}
       {dialog === 'shop' && (
         <Modal title="旅途卡牌市场" close={() => setDialog(null)}>
-          <p className="hint">购买指定卡牌，每人最多 8 张。当前现金 {me?.cash}。</p>
-          <div className="catalog-grid">
+          <p className="hint">
+            花 {BOARD.cardDraw} 随机抽一张卡，每回合限抽一次；抽到的卡下回合才能使用。手牌最多{' '}
+            {BOARD.handLimit} 张（含待解锁的卡），每回合只能使用一张。当前现金 {me?.cash}。
+          </p>
+          {(() => {
+            const why = !me
+              ? '观众不能抽卡'
+              : !canManage
+                ? '请在自己的掷骰或经营阶段抽卡'
+                : me.shopped
+                  ? '本回合已经抽过了'
+                  : me.cardCount >= BOARD.handLimit
+                    ? '手牌已满'
+                    : me.cash < BOARD.cardDraw
+                      ? '现金不足'
+                      : '';
+            return (
+              <>
+                <button
+                  className="primary shop-draw"
+                  disabled={disabled || !!why}
+                  onClick={() => {
+                    command({ type: 'buyCard' });
+                    setDialog(null);
+                  }}
+                >
+                  🎴 抽一张卡 · {BOARD.cardDraw}
+                </button>
+                {why && <p className="field-error">{why}</p>}
+              </>
+            );
+          })()}
+          <h4 className="pool-title">卡池（稀有卡出现概率是普通卡的三分之一）</h4>
+          <div className="catalog-grid pool">
             {CARDS.map((c) => (
-              <button
-                key={c.id}
-                disabled={disabled || !canManage || !me || me.cash < c.price || me.cardCount >= 8}
-                title={
-                  me && me.cash < c.price
-                    ? '现金不足'
-                    : me && me.cardCount >= 8
-                      ? '手牌已满'
-                      : c.description
-                }
-                onClick={() => command({ type: 'buyCard', cardId: c.id })}
-              >
+              <article key={c.id} className={c.rarity}>
                 <span>{c.icon}</span>
                 <b>
-                  {c.name} · {c.price}
+                  {c.name}
+                  {c.rarity === 'rare' && <em> 稀有</em>}
                 </b>
                 <p>{c.description}</p>
-              </button>
+              </article>
             ))}
           </div>
         </Modal>
@@ -1976,7 +2026,9 @@ function App() {
               </p>
               <h3>04 / 卡牌、银行与交易</h3>
               <p>
-                手牌最多 8 张，每个角色有被动与每 3 轮一次的天赋。银行可存取现金，存款每轮带来 3%
+                手牌最多 {BOARD.handLimit} 张，每回合只能使用一张。卡牌市场花 {BOARD.cardDraw}{' '}
+                随机抽一张（每回合一次），稀有卡更难抽到；新得到的卡下回合才能用。租金护盾只能靠随机卡获得，最多持有
+                1 次。每个角色有被动与每 3 轮一次的天赋。银行可存取现金，存款每轮带来 3%
                 现金利息。没钱付租金或税费时，先取款、卖建筑或抵押；无法筹齐可破产，将资产清算给债权人或银行。交易随时可以发起（购买、拍卖、选路和筹款时除外）：点「⇄
                 发起交易」、玩家资料或国家详情里的「求购 /
                 出售」，勾选双方的现金和任意多处无建筑、未抵押的地产。对方 60
@@ -2065,7 +2117,7 @@ function App() {
                   <h3>{c.name}</h3>
                   <p>{c.description}</p>
                   <small>
-                    {CATEGORY_NAMES[c.category]} · 商店 {c.price}
+                    {CATEGORY_NAMES[c.category]} · {c.rarity === 'rare' ? '稀有' : '普通'}
                   </small>
                 </article>
               ))}

@@ -371,7 +371,7 @@ test('deck effects: repairs tax buildings, relay helps the poorest, immunity fre
   g.players[0].nextDice = 1;
   g.decks.chance = ['chance-immunity', ...g.decks.chance.filter((id) => id !== 'chance-immunity')];
   g = act(g, { type: 'roll' });
-  assert.ok(g.players[0].cards.includes('rescue'));
+  assert.ok(g.players[0].newCards.includes('rescue'), 'the jail key unlocks next turn');
 });
 test('a clearly trailing player draws two chance cards and keeps the better one', () => {
   let g = game('town', 3);
@@ -980,4 +980,62 @@ test('by default only the player who landed may buy; declining leaves the square
   assert.equal(g.auction, null);
   assert.equal(propertyAt(g, 1)!.owner, null);
   assert.throws(() => act(g, { type: 'bid', amount: 10 }, 'p1'));
+});
+test('card market: one blind draw per turn, new cards wait a turn, one card played per turn', () => {
+  let g = game('town', 2);
+  const shop = mapById('town').tiles.find((t) => t.kind === 'shop')!.index;
+  g.players[0].cards = ['bonus', 'savings'];
+  g.players[0].position = shop;
+  g.phase = 'manage';
+  assert.ok(actionsFor(g, 'p0').some((a) => a.action.type === 'buyCard'));
+  g = act(g, { type: 'buyCard' });
+  assert.equal(g.players[0].cash, 3000 - BOARD.cardDraw);
+  assert.equal(g.players[0].newCards.length, 1, 'the drawn card waits for the next turn');
+  assert.deepEqual(g.players[0].cards, ['bonus', 'savings']);
+  assert.throws(() => act(g, { type: 'buyCard' }), /只能在卡牌市场抽一次/);
+  assert.throws(
+    () => act(g, { type: 'playCard', cardId: g.players[0].newCards[0] }),
+    /下回合才能使用|每回合只能/,
+  );
+  g = act(g, { type: 'playCard', cardId: 'bonus' });
+  assert.throws(() => act(g, { type: 'playCard', cardId: 'savings' }), /每回合只能使用一张/);
+  // The hidden new card stays private, but counts toward the hand size everyone sees.
+  const view = viewFor(g, 'p1');
+  assert.equal(view.players[0].cardCount, 2);
+  assert.equal(view.players[0].newCards, undefined);
+  g = act(g, { type: 'end' });
+  g.phase = 'manage';
+  g = act(g, { type: 'end' }, 'p1');
+  assert.equal(g.players[0].newCards.length, 0);
+  assert.equal(g.players[0].cards.length, 2, 'last turn’s draw is now playable');
+  assert.equal(g.players[0].cardPlayed, false);
+});
+test('hands hold five cards and rent shields never stack or come from talents', () => {
+  let g = game('town', 4);
+  const shop = mapById('town').tiles.find((t) => t.kind === 'shop')!.index;
+  g.players[0].cards = ['bonus', 'bonus', 'bonus', 'bonus', 'bonus'];
+  g.players[0].position = shop;
+  g.phase = 'manage';
+  assert.equal(
+    actionsFor(g, 'p0').some((a) => a.action.type === 'buyCard'),
+    false,
+  );
+  assert.throws(() => act(g, { type: 'buyCard' }), /手牌已满/);
+  g.players[0].cards = ['shield', 'insure'];
+  g.players[0].shield = 1;
+  assert.throws(() => act(g, { type: 'playCard', cardId: 'shield' }), /护盾不能叠加/);
+  g = act(g, { type: 'playCard', cardId: 'insure' });
+  assert.equal(g.players[0].shield, 1, 'insurance pays cash but the shield stays capped');
+  assert.equal(CARDS.filter((c) => c.effect === 'shield').length, 1);
+  // Runner and guardian talents no longer hand out rent shields.
+  for (const id of ['p2', 'p3']) {
+    let h = game('town', 4);
+    h.turn = Number(id.slice(1));
+    h.phase = 'manage';
+    h = act(h, { type: 'ability' }, id);
+    const p = h.players.find((x) => x.id === id)!;
+    assert.equal(p.shield, 0);
+    assert.ok(p.cash > 3000);
+  }
+  assert.ok(CARDS.some((c) => c.rarity === 'rare') && CARDS.some((c) => c.rarity === 'common'));
 });

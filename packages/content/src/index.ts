@@ -31,7 +31,7 @@ export const CHARACTERS: CharacterDefinition[] = [
     name: '陆飞飞',
     title: '城市漫游者',
     description: '每次掷骰额外前进 1 格。街头巷尾，都有你的足迹。',
-    ability: '每 3 轮获得 1 次护盾和 80 现金',
+    ability: '每 3 轮领取 150 旅行补贴',
     color: '#78afbd',
     icon: '🛵',
   },
@@ -40,7 +40,7 @@ export const CHARACTERS: CharacterDefinition[] = [
     name: '苏安心',
     title: '风险管理师',
     description: '支付租金减少 15%。稳健经营，笑到最后。',
-    ability: '每 3 轮获得 2 次租金护盾',
+    ability: '每 3 轮领取 100 应急金和 1 次税务减免',
     color: '#7fa889',
     icon: '🛡',
   },
@@ -77,7 +77,26 @@ export const BOARD = {
   /** 猜一猜: reward per correct free guess, paid at most this many times a match. */
   guessReward: 30,
   guessCap: 5,
+  /** Cards held at once, counting cards that unlock next turn. */
+  handLimit: 5,
+  /** Price of one random draw at the card market (one draw per turn). */
+  cardDraw: 150,
+  /** Rent shields cannot stack: a player holds at most this many. */
+  shieldCap: 1,
 } as const;
+/** Strong or swingy cards: drawn a third as often as the rest. */
+const RARE_CARDS = new Set([
+  'express',
+  'home',
+  'remote',
+  'swap',
+  'grant',
+  'renovate',
+  'demolish',
+  'remoteBuy',
+  'pickpocket',
+  'service',
+]);
 /** Square sizes the host can pick: a 10x10 ring (36 squares) or a 12x12 ring (44). */
 export const BOARD_SIZES = [36, 44] as const;
 export type BoardSize = (typeof BOARD_SIZES)[number];
@@ -477,6 +496,7 @@ function card(
     description,
     icon,
     price: 100 + Math.abs(amount > 6 ? Math.min(amount, 400) : amount * 25),
+    rarity: RARE_CARDS.has(id) ? 'rare' : 'common',
   };
 }
 export const CARDS: CardDefinition[] = [
@@ -639,8 +659,26 @@ export const CARDS: CardDefinition[] = [
     '对手一处地产租金减少 50%，持续 2 轮。',
     '✂',
   ),
-  card('shield', '安心护盾', 'defense', 'shield', 1, 'self', '免除下一次对手租金。', '🛡'),
-  card('doubleShield', '双重保障', 'defense', 'shield', 2, 'self', '免除接下来两次对手租金。', '☂'),
+  card(
+    'shield',
+    '安心护盾',
+    'defense',
+    'shield',
+    1,
+    'self',
+    '免除下一次对手租金；护盾最多持有 1 次。',
+    '🛡',
+  ),
+  card(
+    'lottery',
+    '幸运彩票',
+    'economy',
+    'lottery',
+    0,
+    'self',
+    '刮开彩票，随机获得 50、100、200 或 400 现金。',
+    '🎫',
+  ),
   card(
     'cleanse',
     '清风拂面',
@@ -679,6 +717,16 @@ export const mapById = (id: string, size: number = 36) => {
 };
 export const characterById = (id: string) => CHARACTERS.find((c) => c.id === id) ?? CHARACTERS[0];
 export const cardById = (id: string) => CARDS.find((c) => c.id === id);
+/** A random hand card; common cards are three times as likely as rare ones. */
+export function randomCard(randomInt: (max: number) => number): CardDefinition {
+  const weight = (c: CardDefinition) => (c.rarity === 'rare' ? 1 : 3);
+  let roll = randomInt(CARDS.reduce((n, c) => n + weight(c), 0));
+  for (const c of CARDS) {
+    roll -= weight(c);
+    if (roll < 0) return c;
+  }
+  return CARDS[0];
+}
 export const CATEGORY_NAMES = {
   move: '移动',
   economy: '经济',
