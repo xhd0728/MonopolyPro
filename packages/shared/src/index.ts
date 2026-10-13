@@ -399,6 +399,11 @@ export interface RoomRecord {
   seats: Seat[];
   game: GameState | null;
   chat: { id: string; name: string; text: string; at: number }[];
+  /** Last time a human did anything in the room (join, connect, lobby, command, chat). */
+  lastActiveAt?: number;
+  /** When the room ended; it is deleted a few minutes later. */
+  closedAt?: number | null;
+  closedReason?: string;
 }
 export interface SeatView extends Omit<Seat, 'tokenHash' | 'controlEpoch'> {
   takeover: boolean;
@@ -429,6 +434,8 @@ export interface RoomView {
     steps?: string[];
     at: number;
   } | null;
+  /** Set once the room has ended (it is deleted a few minutes later). */
+  closedReason: string | null;
 }
 /** Fixed, wordless reactions; nothing to moderate. */
 export const EMOTES = ['👍', '😂', '😮', '😭', '😤', '🎉', '🙏', '💸'] as const;
@@ -450,6 +457,20 @@ export interface RoomListing {
   maxPlayers: number;
   locked: boolean;
   status: 'waiting' | 'playing' | 'finished';
+  /** Name of the host, so friends recognise the room. */
+  host: string;
+}
+/** What the join form shows before you commit to a room. */
+export interface RoomSummary {
+  code: string;
+  locked: boolean;
+  status: 'waiting' | 'playing' | 'finished';
+  players: number;
+  maxPlayers: number;
+  host: string;
+  mapId: string;
+  /** Joining now gives a spectator seat (match running or table full). */
+  spectatorOnly: boolean;
 }
 
 const amount = z.number().int().min(0).max(1000000);

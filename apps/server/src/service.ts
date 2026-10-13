@@ -16,6 +16,7 @@ import {
   viewFor,
   log,
   currentPlayer,
+  endMatch,
   SIDE_TRADE_MS,
 } from '../../../packages/engine/src/index.ts';
 import { botAction, botDecision } from '../../../packages/engine/src/bot.ts';
@@ -32,6 +33,7 @@ import type {
   GameAction,
   GameView,
   RoomListing,
+  RoomSummary,
   RoomRecord,
   RoomView,
   Seat,
@@ -65,7 +67,12 @@ export interface ServiceOptions {
   takeoverMs: number;
   botStepMs: number;
   maxRooms: number;
+  /** A room closes after this long without any human interaction (default 30 minutes). */
   roomIdleMs: number;
+  /** A room closes once no human (player or spectator) has been connected this long. */
+  emptyCloseMs?: number;
+  /** Closed rooms are deleted this long after closing (default 10 minutes). */
+  closedTtlMs?: number;
   now?: () => number;
   brain?: BotBrain;
   aiMaxConcurrent?: number;
@@ -122,7 +129,9 @@ export class GameService {
       takeoverMs: 15000,
       botStepMs: 1200,
       maxRooms: 200,
-      roomIdleMs: 86400000,
+      roomIdleMs: 30 * 60000,
+      emptyCloseMs: 3 * 60000,
+      closedTtlMs: 10 * 60000,
       ...options,
     };
     const now = this.now();
@@ -156,6 +165,32 @@ export class GameService {
   private save(record: RoomRecord) {
     record.updatedAt = this.now();
     this.store.save(record);
+  }
+  /** A human did something: the room is in use. */
+  private touch(record: RoomRecord) {
+    record.lastActiveAt = this.now();
+  }
+  private ensureOpen(record: Readonly<RoomRecord>) {
+    ensure(
+      !record.closedAt,
+      `房间已结束${record.closedReason ? `：${record.closedReason}` : ''}`,
+      410,
+    );
+  }
+  /**
+   * End the room: an unfinished match is ranked as it stands, everyone is disconnected by the
+   * caller, and the record is deleted `closedTtlMs` later.
+   */
+  private close(record: RoomRecord, reason: string) {
+    if (record.closedAt) return;
+    if (record.game && record.game.phase !== 'finished')
+      record.game = endMatch(record.game, reason, this.env());
+    record.closedAt = this.now();
+    record.closedReason = reason;
+    this.botJobs.get(record.code)?.controller.abort();
+    this.botJobs.delete(record.code);
+    this.aiActivity.delete(record.code);
+    this.save(record);
   }
   private newSeat(input: unknown, index: number, spectator = false): { seat: Seat; token: string } {
     const data = z
@@ -214,6 +249,8 @@ export class GameService {
       seats: [seat],
       game: null,
       chat: [],
+      lastActiveAt: this.now(),
+      closedAt: null,
     };
     this.save(record);
     return { code, seatId: seat.id, token };
@@ -233,6 +270,7 @@ export class GameService {
       })
       .parse(input);
     const record = this.record(code);
+    this.ensureOpen(record);
     this.checkPassword(record, data.password);
     const players = record.seats.filter((s) => !s.spectator);
     const spectator =
@@ -240,6 +278,7 @@ export class GameService {
     ensure(!spectator || record.seats.filter((s) => s.spectator).length < 20, '观战席已满');
     const { seat, token } = this.newSeat(data, players.length, spectator);
     record.seats.push(seat);
+    this.touch(record);
     this.save(record);
     return { code: record.code, seatId: seat.id, token };
   }
@@ -252,6 +291,7 @@ export class GameService {
     const record = this.record(code),
       hash = tokenHash(token),
       seat = record.seats.find((s) => s.tokenHash === hash);
+    this.ensureOpen(record);
     ensure(seat && !seat.bot, '无法恢复此席位', 403);
     return { record, seat };
   }
@@ -282,6 +322,7 @@ export class GameService {
     seat.connected = true;
     seat.disconnectedAt = null;
     seat.controlEpoch++;
+    this.touch(record);
     this.save(record);
   }
   disconnected(code: string, id: string) {
@@ -299,8 +340,36 @@ export class GameService {
     }
     this.save(record);
   }
+  /**
+   * Open rooms someone is actually in: closed rooms, and rooms where no human is connected,
+   * stay off the home page. Waiting rooms come first.
+   */
   list(): RoomListing[] {
-    return [...this.store.peekAll()].map((r) => ({
+    const order = { waiting: 0, playing: 1, finished: 2 };
+    return [...this.store.peekAll()]
+      .filter((r) => !r.closedAt && r.seats.some((s) => !s.bot && s.connected))
+      .map((r) => this.listing(r))
+      .sort((a, b) => order[a.status] - order[b.status])
+      .slice(0, 30);
+  }
+  /** Public facts about one room for the join form. */
+  summary(code: string): RoomSummary {
+    const r = this.peek(code);
+    this.ensureOpen(r);
+    const l = this.listing(r);
+    return {
+      code: l.code,
+      locked: l.locked,
+      status: l.status,
+      players: l.players,
+      maxPlayers: l.maxPlayers,
+      host: l.host,
+      mapId: l.mapId,
+      spectatorOnly: !!r.game || l.players >= l.maxPlayers,
+    };
+  }
+  private listing(r: Readonly<RoomRecord>): RoomListing {
+    return {
       code: r.code,
       mapId: r.settings.mapId,
       mode: r.settings.mode,
@@ -311,7 +380,8 @@ export class GameService {
       maxPlayers: r.settings.maxPlayers,
       locked: !!r.passwordHash,
       status: !r.game ? 'waiting' : r.game.phase === 'finished' ? 'finished' : 'playing',
-    }));
+      host: r.seats.find((s) => s.id === r.hostId)?.name ?? '',
+    };
   }
   /**
    * Room view for one seat. Pass the same cache map while broadcasting one revision so
@@ -356,6 +426,7 @@ export class GameService {
       ai: { configured: !!this.options.brain, model: this.options.brain?.model ?? null },
       emotes: (this.emotes.get(r.code) ?? []).filter((e) => this.now() - e.at < EMOTE_SHOW_MS),
       aiActivity: this.aiActivity.get(code) ?? null,
+      closedReason: r.closedAt ? (r.closedReason ?? '房间已结束') : null,
     };
   }
   lobby(code: string, id: string, input: unknown) {
@@ -374,7 +445,11 @@ export class GameService {
           'afk',
           'rename',
           'kick',
+          'close',
+          'password',
+          'botSettings',
         ]),
+        password: z.string().max(64).optional(),
         afk: z.boolean().optional(),
         name: nameSchema.optional(),
         ready: z.boolean().optional(),
@@ -389,6 +464,21 @@ export class GameService {
       seat = r.seats.find((s) => s.id === id);
     ensure(seat && !seat.bot, '席位不存在');
     const host = r.hostId === id;
+    this.ensureOpen(r);
+    this.touch(r);
+    if (data.type === 'close') {
+      ensure(host, '只有房主能结束房间');
+      this.close(r, `房主${seat.name}结束了房间`);
+      return { closed: r.closedReason! };
+    }
+    if (data.type === 'password') {
+      ensure(host, '只有房主能设置密码');
+      const password = data.password ?? '';
+      r.passwordSalt = password ? randomBytes(16).toString('hex') : null;
+      r.passwordHash = password ? scryptSync(password, r.passwordSalt!, 32).toString('hex') : null;
+      this.save(r);
+      return {};
+    }
     if (data.type === 'leave') {
       if (
         r.game &&
@@ -408,7 +498,7 @@ export class GameService {
         r.hostId =
           r.seats.find((s) => !s.bot && s.connected)?.id ?? r.seats.find((s) => !s.bot)?.id ?? '';
       this.save(r);
-      return;
+      return {};
     }
     if (data.type === 'newMatch') {
       ensure(host && r.game?.phase === 'finished', '仅房主能在结算后开启新局');
@@ -420,13 +510,13 @@ export class GameService {
         s.controlEpoch++;
       }
       this.save(r);
-      return;
+      return {};
     }
     if (data.type === 'afk') {
       ensure(r.game && r.game.phase !== 'finished' && !seat.spectator, '对局进行中才能挂机托管');
       seat.afk = data.afk ?? !seat.afk;
       this.save(r);
-      return;
+      return {};
     }
     if (data.type === 'rename') {
       ensure(data.name, '请输入新昵称');
@@ -434,7 +524,7 @@ export class GameService {
       const player = r.game?.players.find((p) => p.id === id);
       if (player) player.name = data.name;
       this.save(r);
-      return;
+      return {};
     }
     if (data.type === 'kick') {
       const target = r.seats.find((s) => s.id === data.seatId);
@@ -458,7 +548,7 @@ export class GameService {
           if (grant.code === r.code && grant.seatId === target.id) this.grants.delete(key);
       } else r.seats = r.seats.filter((s) => s.id !== target.id);
       this.save(r);
-      return target.id;
+      return { removed: target.id };
     }
     ensure(!r.game, '对局开始后不能修改房间设置');
     if (data.type === 'ready') {
@@ -494,12 +584,22 @@ export class GameService {
         host && r.seats.filter((s) => !s.spectator).length < r.settings.maxPlayers,
         '只有房主能在空位添加机器人',
       );
-      const index = r.seats.filter((s) => !s.spectator).length;
+      const players = r.seats.filter((s) => !s.spectator);
+      // Unique name, a character nobody has yet, and the smaller team.
+      const names = new Set(r.seats.map((s) => s.name));
+      let n = 1;
+      while (names.has(`AI · ${n}`)) n++;
+      const taken = new Set(players.map((s) => s.characterId));
+      const characterId =
+        data.characterId && CHARACTERS.some((c) => c.id === data.characterId)
+          ? data.characterId
+          : (CHARACTERS.find((c) => !taken.has(c.id)) ?? CHARACTERS[players.length % 6]).id;
+      const team0 = players.filter((s) => s.team === 0).length;
       r.seats.push({
         id: randomUUID(),
-        name: `AI · ${index + 1}`,
-        characterId: CHARACTERS[index % 6].id,
-        team: index % 2,
+        name: `AI · ${n}`,
+        characterId,
+        team: team0 <= players.length - team0 ? 0 : 1,
         bot: true,
         botMode,
         ready: true,
@@ -510,6 +610,25 @@ export class GameService {
         controlEpoch: 0,
       });
     }
+    if (data.type === 'botSettings') {
+      const bot = r.seats.find((s) => s.id === data.seatId && s.bot);
+      ensure(host && bot, '只有房主能调整机器人');
+      if (data.botMode) {
+        ensure(
+          data.botMode !== 'llm' || this.options.brain,
+          '服务端尚未配置 LLM API，可选择规则机器人',
+        );
+        bot.botMode = data.botMode;
+      }
+      if (data.characterId) {
+        ensure(
+          CHARACTERS.some((c) => c.id === data.characterId),
+          '角色不存在',
+        );
+        bot.characterId = data.characterId;
+      }
+      if (data.team !== undefined && r.settings.mode === 'team') bot.team = data.team;
+    }
     if (data.type === 'removeBot') {
       ensure(host, '只有房主能移除机器人');
       r.seats = r.seats.filter((s) => !(s.bot && s.id === data.seatId));
@@ -517,7 +636,11 @@ export class GameService {
     if (data.type === 'start') {
       ensure(host, '只有房主能开始比赛');
       const players = r.seats.filter((s) => !s.spectator);
-      ensure(players.length >= 2 && players.every((s) => s.ready), '请等待所有玩家准备');
+      // The host starting the match is their "ready".
+      ensure(
+        players.length >= 2 && players.every((s) => s.ready || s.id === r.hostId),
+        '请等待所有玩家准备',
+      );
       ensure(
         players.every((s) => s.bot || s.connected),
         '请等待断线玩家重新连接',
@@ -525,6 +648,7 @@ export class GameService {
       r.game = createGame(r.settings, r.seats, randomUUID(), this.env());
     }
     this.save(r);
+    return {};
   }
   command(code: string, id: string, input: unknown): CommandResult {
     const cmd = commandSchema.parse(input),
@@ -533,6 +657,7 @@ export class GameService {
     ensure(seat && !seat.spectator && !seat.bot, '观众或机器人席位不能执行游戏动作', 403);
     // A player who acts is back at the table.
     if (seat.afk && cmd.action.type !== 'guess') seat.afk = false;
+    this.touch(r);
     ensure(r.game, '对局尚未开始');
     const fingerprint = tokenHash(JSON.stringify(cmd));
     const old = this.store.command(code, id, cmd.id);
@@ -592,13 +717,14 @@ export class GameService {
       seat = r.seats.find((s) => s.id === id);
     ensure(seat, '席位不存在');
     r.chat.push({ id: randomUUID(), name: seat.name, text, at: this.now() });
+    this.touch(r);
     r.chat = r.chat.slice(-40);
     this.save(r);
   }
   /** Whether a tick has real work: expiry/finish, or a seat the server must act for. */
   private tickWork(r: Readonly<RoomRecord>): boolean {
     const g = r.game;
-    if (!g || g.phase === 'finished') return false;
+    if (!g || g.phase === 'finished' || r.closedAt) return false;
     if (tickGame(g, this.env()) !== null) return true;
     if (g.trade && this.sideTradeDue(r)) return true;
     const actorId = g.trade ? g.trade.to : actingPlayerId(g);
@@ -939,29 +1065,57 @@ export class GameService {
     if (g.phase === 'path') return { type: 'choosePath', tile: g.pendingPath!.choices[0] };
     return botAction(g, id);
   }
-  cleanup(): string[] {
+  /**
+   * Room lifecycle, run every 30 s:
+   * - open rooms close after `roomIdleMs` without human interaction, or once no human
+   *   (player or spectator) has been connected for `emptyCloseMs` (an all-bot table nobody
+   *   watches);
+   * - closed rooms are deleted `closedTtlMs` after closing.
+   * Returns the codes whose sockets the caller must close.
+   */
+  cleanup(): { closed: { code: string; reason: string }[]; removed: string[] } {
     for (const [key, grant] of this.grants) if (grant.expires < this.now()) this.grants.delete(key);
+    const now = this.now();
+    const closed: { code: string; reason: string }[] = [];
     const removed: string[] = [];
-    for (const r of [...this.store.peekAll()]) {
-      if (r.seats.some((s) => s.connected && !s.bot)) continue;
-      if (
-        this.now() - r.updatedAt > this.options.roomIdleMs ||
-        (this.now() - r.createdAt > 60000 && !r.game && !r.seats.some((s) => s.connected || s.bot))
-      ) {
-        this.store.remove(r.code);
-        this.takeoverSignatures.delete(r.code);
-        this.botJobs.get(r.code)?.controller.abort();
-        this.botJobs.delete(r.code);
-        this.aiActivity.delete(r.code);
-        this.emotes.delete(r.code);
-        for (const key of this.latency.keys())
-          if (key.startsWith(`${r.code}:`)) this.latency.delete(key);
-        for (const key of this.emoteAt.keys())
-          if (key.startsWith(`${r.code}:`)) this.emoteAt.delete(key);
-        removed.push(r.code);
+    for (const peeked of [...this.store.peekAll()]) {
+      if (peeked.closedAt) {
+        if (now - peeked.closedAt >= (this.options.closedTtlMs ?? 600000)) {
+          this.forget(peeked.code);
+          removed.push(peeked.code);
+        }
+        continue;
       }
+      const humans = peeked.seats.filter((s) => !s.bot);
+      // When the last human was seen: their last action or the moment they disconnected.
+      const lastHuman = Math.max(
+        peeked.lastActiveAt ?? peeked.createdAt,
+        ...humans.map((s) => s.disconnectedAt ?? 0),
+      );
+      const connected = humans.some((s) => s.connected);
+      const idle = now - (peeked.lastActiveAt ?? peeked.createdAt) >= this.options.roomIdleMs;
+      const empty = !connected && now - lastHuman >= (this.options.emptyCloseMs ?? 180000);
+      if (!idle && !empty) continue;
+      const record = this.record(peeked.code);
+      this.close(
+        record,
+        idle
+          ? `${Math.round(this.options.roomIdleMs / 60000)} 分钟没有人操作，房间已自动结束`
+          : '房间里没有真人玩家或观众，已自动结束',
+      );
+      closed.push({ code: record.code, reason: record.closedReason! });
     }
-    return removed;
+    return { closed, removed };
+  }
+  private forget(code: string) {
+    this.store.remove(code);
+    this.takeoverSignatures.delete(code);
+    this.botJobs.get(code)?.controller.abort();
+    this.botJobs.delete(code);
+    this.aiActivity.delete(code);
+    this.emotes.delete(code);
+    for (const key of this.latency.keys()) if (key.startsWith(`${code}:`)) this.latency.delete(key);
+    for (const key of this.emoteAt.keys()) if (key.startsWith(`${code}:`)) this.emoteAt.delete(key);
   }
   content() {
     return { maps: MAPS, characters: CHARACTERS, cards: CARDS };

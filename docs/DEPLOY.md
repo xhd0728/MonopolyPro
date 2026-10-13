@@ -49,7 +49,9 @@ MAX_ROOMS=200
 DISCONNECT_TAKEOVER_MS=15000
 BOT_STEP_MS=1200
 DECISION_TIMEOUT_MS=45000
-ROOM_IDLE_MS=86400000
+ROOM_IDLE_MS=1800000
+ROOM_EMPTY_CLOSE_MS=180000
+ROOM_CLOSED_TTL_MS=600000
 ```
 
 systemd 读取 EnvironmentFile，应用本身不自动读取 `.env`。本地可用 Node 的 `--env-file=.env` 参数。密码与恢复凭证不要写入日志、工单、链接或提交记录。
@@ -101,7 +103,7 @@ sudo -u monopolypro /usr/bin/node /opt/monopolypro/current/scripts/backup.mjs \
 - `/healthz` 校验数据库并返回版本、存活时间和房间数；故障监控可每 30 秒访问，失败后查看 journal。
 - 日志为 JSON，不包含连接凭证或手牌。检查 `http_error`、`room_tick`、`bot_rejected` 和进程重启次数。
 - 默认最多 200 房间；每房 6 玩家、最多 20 观众；HTTP 每 IP 600 请求/分钟，建房每 IP 30 次/分钟，WebSocket 每连接 60 消息/10 秒，载荷 8 KiB。
-- 离线超过 `ROOM_IDLE_MS` 的房间清理，事件和动作去重记录级联删除。游客未连接的空房 60 秒清理。保留周期可调整；先用备份保存需留存的战绩。
+- 房间生命周期：`ROOM_IDLE_MS`（默认 30 分钟）内没有任何真人操作，或最后一位真人（含观众）离开超过 `ROOM_EMPTY_CLOSE_MS`（默认 3 分钟），房间自动结束；房主也可以随时结束房间。进行中的对局按当时净资产结算。结束的房间不再出现在首页、不能加入，`ROOM_CLOSED_TTL_MS`（默认 10 分钟）后删除，事件和动作去重记录级联删除。需要留存的战绩请先用备份保存。
 - 单实例 SQLite 写入串行化。200 是硬上限，不是已测容量；本地 20 房间测试不能推断公网机器的容量。
 
 ## 真实外网验收清单

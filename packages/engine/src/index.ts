@@ -481,6 +481,14 @@ function settleDebt(g: GameState, env: EngineEnvironment) {
     d.split,
   );
 }
+/** End a match early (the host closed the room): ranks by net worth like any other end. */
+export function endMatch(state: GameState, reason: string, env: EngineEnvironment): GameState {
+  if (state.phase === 'finished') return state;
+  const g = structuredClone(state);
+  g.revision++;
+  finish(g, reason, env);
+  return g;
+}
 function finish(g: GameState, reason: string, env: EngineEnvironment) {
   const alive = g.players.filter((p) => !p.bankrupt);
   const contestants = alive.length ? alive : g.players;

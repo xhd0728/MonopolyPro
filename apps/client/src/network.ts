@@ -10,6 +10,15 @@ export interface Credentials {
 const server = import.meta.env.DEV
   ? `${location.protocol}//${location.hostname}:8788`
   : location.origin;
+/** An HTTP error with its status, so callers can tell "gone" from "try again". */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
 export async function api<T>(path: string, body?: unknown): Promise<T> {
   const response = await fetch(
     `${server}${path}`,
@@ -21,8 +30,8 @@ export async function api<T>(path: string, body?: unknown): Promise<T> {
         }
       : undefined,
   );
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error ?? '网络请求失败');
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new ApiError(result.error ?? '网络请求失败', response.status);
   return result;
 }
 export class Connection {
@@ -48,6 +57,7 @@ export class Connection {
     private removed?: (message: string) => void,
   ) {}
   private rtt: number | undefined;
+  private closedReason?: string;
   async connect(credentials: Credentials, resume = false) {
     clearTimeout(this.reconnectTimer);
     clearInterval(this.heartbeat);
@@ -103,6 +113,9 @@ export class Connection {
         this.rejectLeave(message);
         this.error(message);
       });
+      room.onMessage('closed', (reason: string) => {
+        if (current()) this.closedReason = reason;
+      });
       room.onMessage('notice', (message: string) => {
         if (current()) this.error(message);
       });
@@ -119,6 +132,14 @@ export class Connection {
       });
       room.onLeave((code) => {
         if (generation !== this.generation || this.stopped) return;
+        if (code === 4003) {
+          // The room was ended by the host or closed for inactivity.
+          clearInterval(this.heartbeat);
+          this.stopped = true;
+          this.status('房间已结束');
+          this.removed?.(this.closedReason ?? '房间已结束');
+          return;
+        }
         if (code === 4002) {
           clearInterval(this.heartbeat);
           this.stopped = true;
@@ -152,6 +173,17 @@ export class Connection {
       }, 5000);
     } catch (error) {
       if (generation !== this.generation || this.stopped) return;
+      // The room was deleted, has ended, or this seat is no longer ours: retrying cannot help,
+      // so say it once and forget the saved seat instead of looping on the same error.
+      if (error instanceof ApiError && [403, 404, 410].includes(error.status)) {
+        clearInterval(this.heartbeat);
+        this.stopped = true;
+        this.status('尚未连接');
+        this.removed?.(
+          error.status === 403 ? `无法恢复上次的席位：${error.message}` : error.message,
+        );
+        return;
+      }
       this.error((error as Error).message);
       this.schedule();
     }

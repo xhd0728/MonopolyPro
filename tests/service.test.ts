@@ -306,7 +306,9 @@ test('auto-play, renaming mid-match, and the host handing an idle seat to a bot'
   const h = svc.create({ name: '房主' });
   const x = svc.join(h.code, { name: '挂机的人' });
   assert.throws(() => svc.lobby(h.code, x.seatId, { type: 'kick', seatId: h.seatId }), /房主/);
-  assert.equal(svc.lobby(h.code, h.seatId, { type: 'kick', seatId: x.seatId }), x.seatId);
+  assert.deepEqual(svc.lobby(h.code, h.seatId, { type: 'kick', seatId: x.seatId }), {
+    removed: x.seatId,
+  });
   assert.equal(svc.record(h.code).seats.length, 1);
   const y = svc.join(h.code, { name: '玩家二' });
   svc.connected(h.code, h.seatId);
@@ -403,6 +405,96 @@ test('a bot on turn skips an offer between two humans after a short grace period
   const g = service.record(a.code).game!;
   assert.equal(g.trade, null);
   assert.ok(g.events.some((e) => e.text.includes('跳过了旁人的交易提案')));
+  service.dispose();
+  store.close();
+});
+
+test('room lifecycle: host ends the room, idle and empty rooms close, closed rooms vanish', () => {
+  let now = 1000;
+  const store = new Store(':memory:');
+  const service = new GameService(store, { now: () => now });
+  // The host ends a room mid-match: the match is ranked and nobody can rejoin.
+  const a = service.create({ name: '房主' });
+  service.connected(a.code, a.seatId);
+  service.lobby(a.code, a.seatId, { type: 'addBot', botMode: 'rule' });
+  service.lobby(a.code, a.seatId, { type: 'ready' });
+  service.lobby(a.code, a.seatId, { type: 'start' });
+  assert.deepEqual(service.lobby(a.code, a.seatId, { type: 'close' }), {
+    closed: '房主房主结束了房间',
+  });
+  const ended = service.record(a.code);
+  assert.equal(ended.game!.phase, 'finished');
+  assert.ok(ended.closedAt);
+  assert.throws(() => service.join(a.code, { name: '迟到' }), /房间已结束/);
+  assert.throws(() => service.authenticate(a.code, a.token), /房间已结束/);
+  assert.equal(service.list().length, 0);
+  // Ten minutes later the record is gone.
+  now += 10 * 60000;
+  assert.deepEqual(service.cleanup().removed, [a.code]);
+  assert.throws(() => service.record(a.code), /不存在/);
+  // A room where the last human left closes three minutes later.
+  const b = service.create({ name: '离开的人' });
+  service.connected(b.code, b.seatId);
+  assert.equal(service.list().length, 1);
+  service.disconnected(b.code, b.seatId);
+  assert.equal(service.list().length, 0, 'rooms with nobody connected are not listed');
+  now += 2 * 60000;
+  assert.deepEqual(service.cleanup().closed, []);
+  now += 60000;
+  assert.equal(service.cleanup().closed[0]?.code, b.code);
+  // Thirty minutes without anyone doing anything closes a room even with people connected.
+  const c = service.create({ name: '发呆的人' });
+  service.connected(c.code, c.seatId);
+  now += 29 * 60000;
+  assert.deepEqual(service.cleanup().closed, []);
+  service.chat(c.code, c.seatId, '还在');
+  now += 29 * 60000;
+  assert.deepEqual(service.cleanup().closed, [], 'any human action resets the clock');
+  now += 2 * 60000;
+  assert.match(service.cleanup().closed[0].reason, /30 分钟没有人操作/);
+  service.dispose();
+  store.close();
+});
+
+test('lobby: typed bots get unique names, free characters and balanced teams; password set inside the room', () => {
+  const store = new Store(':memory:');
+  const service = new GameService(store, { now: () => 1000 });
+  const h = service.create({ name: '房主', settings: { ...DEFAULT_SETTINGS, maxPlayers: 4 } });
+  service.connected(h.code, h.seatId);
+  for (let i = 0; i < 3; i++) service.lobby(h.code, h.seatId, { type: 'addBot', botMode: 'rule' });
+  let seats = service.record(h.code).seats;
+  assert.deepEqual(
+    seats.map((s) => s.name),
+    ['房主', 'AI · 1', 'AI · 2', 'AI · 3'],
+  );
+  assert.equal(new Set(seats.map((s) => s.characterId)).size, 4, 'no repeated characters');
+  // Removing a bot frees its name and the next bot takes it back.
+  service.lobby(h.code, h.seatId, { type: 'removeBot', seatId: seats[2].id });
+  service.lobby(h.code, h.seatId, { type: 'addBot', botMode: 'rule' });
+  seats = service.record(h.code).seats;
+  assert.equal(new Set(seats.map((s) => s.name)).size, 4);
+  assert.ok(seats.some((s) => s.name === 'AI · 2'));
+  assert.equal(seats.filter((s) => s.team === 0).length, 2, 'teams stay balanced');
+  // LLM bots need a configured model; a bot's character can be changed.
+  assert.throws(
+    () => service.lobby(h.code, h.seatId, { type: 'addBot', botMode: 'llm' }),
+    /LLM|席位/,
+  );
+  service.lobby(h.code, h.seatId, {
+    type: 'botSettings',
+    seatId: seats[1].id,
+    characterId: 'explorer',
+  });
+  assert.equal(service.record(h.code).seats[1].characterId, 'explorer');
+  // The host sets a password from inside the room; joining then needs it.
+  service.lobby(h.code, h.seatId, { type: 'removeBot', seatId: seats[3].id });
+  service.lobby(h.code, h.seatId, { type: 'password', password: 'secret' });
+  assert.equal(service.summary(h.code).locked, true);
+  assert.throws(() => service.join(h.code, { name: '朋友' }), /密码/);
+  assert.ok(service.join(h.code, { name: '朋友', password: 'secret' }).seatId);
+  service.lobby(h.code, h.seatId, { type: 'password', password: '' });
+  assert.equal(service.summary(h.code).locked, false);
+  assert.equal(service.summary(h.code).host, '房主');
   service.dispose();
   store.close();
 });

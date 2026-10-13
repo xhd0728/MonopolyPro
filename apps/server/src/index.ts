@@ -24,7 +24,9 @@ const service = new GameService(store, {
   takeoverMs: numberEnv('DISCONNECT_TAKEOVER_MS', 15000),
   botStepMs: numberEnv('BOT_STEP_MS', 1200),
   maxRooms: numberEnv('MAX_ROOMS', 200),
-  roomIdleMs: numberEnv('ROOM_IDLE_MS', 86400000),
+  roomIdleMs: numberEnv('ROOM_IDLE_MS', 30 * 60000),
+  emptyCloseMs: numberEnv('ROOM_EMPTY_CLOSE_MS', 3 * 60000),
+  closedTtlMs: numberEnv('ROOM_CLOSED_TTL_MS', 10 * 60000),
   brain: aiConfig ? createBotBrain(aiConfig) : undefined,
   aiMaxConcurrent: numberEnv('MONOPOLY_AI_MAX_CONCURRENT', 4),
 });
@@ -127,14 +129,18 @@ class MonopolyRoom extends Room {
     );
     this.onMessage('lobby', (c, data) =>
       guard(c, () => {
-        const removed = service.lobby(this.code, c.auth, data);
+        const result = service.lobby(this.code, c.auth, data);
         // A removed player's connection is closed with an explanation.
-        if (removed) {
-          const target = this.occupants.get(removed);
-          this.occupants.delete(removed);
+        if (result.removed) {
+          const target = this.occupants.get(result.removed);
+          this.occupants.delete(result.removed);
           target?.leave(4002, '你已被房主移出或交给机器人代打');
         }
         if (data.type === 'leave') c.send('left');
+        if (result.closed) {
+          this.closeAll(result.closed);
+          return;
+        }
         this.views();
       }),
     );
@@ -183,7 +189,7 @@ class MonopolyRoom extends Room {
     this.views();
   }
   onLeave(client: Client) {
-    if (!store.get(this.code)) return;
+    if (!store.peek(this.code) || store.peek(this.code)!.closedAt) return;
     const id = client.auth as string;
     if (this.occupants.get(id) !== client) return;
     this.occupants.delete(id);
@@ -193,6 +199,14 @@ class MonopolyRoom extends Room {
   onDispose() {
     if (this.timer) clearInterval(this.timer);
     if (rooms.get(this.code) === this) rooms.delete(this.code);
+  }
+  /** The room has ended: tell everyone why, then close every connection. */
+  closeAll(reason: string) {
+    for (const client of this.occupants.values()) {
+      client.send('closed', reason);
+      client.leave(4003, reason);
+    }
+    this.occupants.clear();
   }
   sendView(client: Client) {
     client.send('view', service.view(this.code, client.auth));
@@ -245,6 +259,9 @@ app.get('/healthz', (_req, res) => {
 });
 app.get('/api/content', (_req, res) => res.json(service.content()));
 app.get('/api/rooms', (_req, res) => res.json(service.list()));
+app.get('/api/rooms/:code', (req, res) =>
+  res.json(service.summary(String(req.params.code).toUpperCase())),
+);
 app.post('/api/rooms', async (req, res) => {
   if (!allowed(`create:${req.ip}`, 30)) {
     res.status(429).json({ error: '建房过于频繁' });
@@ -301,9 +318,9 @@ app.use(
   },
 );
 const cleanup = setInterval(() => {
-  for (const code of service.cleanup()) {
-    void rooms.get(code)?.disconnect();
-  }
+  const { closed, removed } = service.cleanup();
+  for (const { code, reason } of closed) rooms.get(code)?.closeAll(reason);
+  for (const code of removed) void rooms.get(code)?.disconnect();
   for (const [key, b] of buckets) if (b.until < Date.now()) buckets.delete(key);
 }, 30000);
 let stopping = false;
