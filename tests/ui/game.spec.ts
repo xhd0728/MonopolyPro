@@ -126,9 +126,12 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
   await expect(other.getByRole('button', { name: '接受交易' })).toBeVisible();
   await other.getByRole('button', { name: '接受交易' }).click();
   await expect(current.getByRole('button', { name: '结束回合', exact: true })).toBeVisible();
-  await openPanel(host, '动态');
-  await expect(host.locator('.event-feed').getByText(/完成交易，资产同时结算/)).toBeVisible();
-  await openPanel(host);
+  // Desktop keeps the activity feed docked bottom-right, newest first; phones open it as a tab.
+  await expect(host.locator('.activity-feed.docked .feed-row').first()).toBeVisible();
+  await expect(host.locator('.activity-feed.docked')).toContainText(/完成交易，资产同时结算/);
+  await openPanel(guest, '动态');
+  await expect(guest.locator('.activity-feed.in-panel')).toContainText(/完成交易，资产同时结算/);
+  await closePanel(guest);
   await host.reload();
   await expect(host.locator('.connection')).toContainText('已同步');
   await expect(host.getByRole('button', { name: /查看1号玩家小筑的资产/ })).toContainText('我');

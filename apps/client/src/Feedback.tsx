@@ -197,8 +197,9 @@ export function Headlines({
   // so re-renders, duplicate keys or bursts of views can never keep a headline up.
   if (current && shown.current?.key !== current.key) {
     // Readable when calm; when more is waiting, keep pace with the board (bots act ~1.2s apart).
-    const read = ['chance', 'fate', 'news'].includes(current.tone) ? 3000 : 2200;
-    shown.current = { key: current.key, until: Date.now() + (queue.length > 1 ? 1000 : read) };
+    // Cards and news carry text worth reading; everything stays in the activity feed afterwards.
+    const read = ['chance', 'fate', 'news', 'card'].includes(current.tone) ? 4500 : 2600;
+    shown.current = { key: current.key, until: Date.now() + (queue.length > 1 ? 1400 : read) };
   }
   const busy = queue.length > 0;
   useEffect(() => {
@@ -238,7 +239,7 @@ export function Headlines({
 }
 
 const QUIET = new Set(['turn', 'start', 'move', 'ai']);
-const TICKER_MS = 6000;
+const TICKER_MS = 9000;
 /**
  * Rolling log of smaller actions. New lines append and each line expires on its own, so the
  * list never blinks when several actions arrive quickly.

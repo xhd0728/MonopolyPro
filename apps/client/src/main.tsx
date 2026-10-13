@@ -26,7 +26,14 @@ import {
 import { Board } from './Board.tsx';
 import { Assets } from './Assets.tsx';
 import { PlayerRoster, PlayerDetails } from './Players.tsx';
-import { money, cardTargetReason, validMoney, groupColor, pingBand } from './game-ui.ts';
+import {
+  money,
+  cardTargetReason,
+  validMoney,
+  groupColor,
+  pingBand,
+  playerColor,
+} from './game-ui.ts';
 import {
   MatchHud,
   ActionAnnouncements,
@@ -38,6 +45,7 @@ import { api, Connection, type Credentials } from './network.ts';
 import { createCommandId } from './command-id.ts';
 import { Clock, serverTime, setServerOffset } from './clock.tsx';
 import { EmoteBar, Headlines, useLiveEmotes, useTurnAttention } from './Feedback.tsx';
+import { ActivityFeed } from './ActivityFeed.tsx';
 import { setSoundEnabled, soundEnabled, unlockSound } from './sound.ts';
 import { useShortcuts } from './shortcuts.ts';
 import { MatchSummary } from './Summary.tsx';
@@ -86,6 +94,18 @@ const endValue = (s: RoomSettings) => {
   const value = `${end}:${end === 'rounds' ? s.rounds : end === 'time' ? s.minutes : s.target}`;
   return END_CHOICES.some(([v]) => v === value) ? value : END_CHOICES[1][0];
 };
+/** Tablets and desktops dock the activity feed under the controls; phones use a tab. */
+function useWide() {
+  const query = '(min-width: 801px)';
+  const [wide, setWide] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setWide(media.matches);
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  return wide;
+}
 /** How far along the match is, in the terms of its end condition. */
 function MatchProgress({ game }: { game: GameView }) {
   const s = game.settings;
@@ -216,7 +236,8 @@ function App() {
     [bid, setBid] = useState(10),
     [chat, setChat] = useState(''),
     [panel, setPanel] = useState('操作'),
-    [sheetOpen, setSheetOpen] = useState(false);
+    [sheetOpen, setSheetOpen] = useState(false),
+    wide = useWide();
   const [inspectedPlayer, setInspectedPlayer] = useState<string | null>(null);
   const inspectPlayer = useCallback((id: string) => {
     setSelectedTile(null);
@@ -1181,28 +1202,37 @@ function App() {
                           ×
                         </button>
                         <div className="panel-tabs">
-                          {['操作', '资产', '动态', '聊天'].map((p) => (
-                            <button
-                              className={panel === p ? 'selected' : ''}
-                              key={p}
-                              onClick={() => {
-                                setPanel(p);
-                                automaticSheet.current = false;
-                              }}
-                            >
-                              {p}
-                            </button>
-                          ))}
+                          {(wide ? ['操作', '资产', '聊天'] : ['操作', '资产', '动态', '聊天']).map(
+                            (p) => (
+                              <button
+                                className={panel === p ? 'selected' : ''}
+                                key={p}
+                                onClick={() => {
+                                  setPanel(p);
+                                  automaticSheet.current = false;
+                                }}
+                              >
+                                {p}
+                              </button>
+                            ),
+                          )}
                         </div>
-                        {panel === '操作' ? (
+                        {panel === '操作' || (wide && panel === '动态') ? (
                           <>
-                            <div className="turn-prompt">
+                            <div
+                              className={`turn-prompt ${myTurn ? 'mine' : ''}`}
+                              style={
+                                {
+                                  '--who': playerColor(Math.max(0, g.turn)),
+                                } as React.CSSProperties
+                              }
+                            >
                               <span className="eyebrow">
                                 {myTurn
-                                  ? '轮到你了'
+                                  ? `轮到你了 · 第 ${g.round} 轮`
                                   : me?.bankrupt
                                     ? '继续观战'
-                                    : '等待时也能查看地图'}
+                                    : `第 ${g.round} 轮 · 等待时也能查看地图`}
                               </span>
                               <h2>
                                 {g.phase === 'finished'
@@ -1472,24 +1502,10 @@ function App() {
                             disabled={disabled}
                           />
                         ) : (
-                          <div className="event-feed" aria-live="polite">
-                            {[...g.events]
-                              .reverse()
-                              .slice(0, 30)
-                              .map((e) => (
-                                <div className={`event ${e.kind}`} key={e.id}>
-                                  <small>
-                                    {new Date(e.at).toLocaleTimeString('zh-CN', {
-                                      hour: '2-digit',
-                                      minute: '2-digit',
-                                    })}
-                                  </small>
-                                  <span>{e.text}</span>
-                                </div>
-                              ))}
-                          </div>
+                          <ActivityFeed game={g} map={map} className="in-panel" />
                         )}
                       </section>
+                      {wide && <ActivityFeed game={g} map={map} className="docked" />}
                     </aside>
                   </div>
                 </div>
