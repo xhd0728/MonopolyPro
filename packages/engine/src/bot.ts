@@ -90,6 +90,8 @@ export function botDecision(g: GameState, id: string): BotDecision | null {
         };
   }
   if (actingPlayerId(g) !== id) return null;
+  // An offer between two other players is holding up our turn: wave it away.
+  if (g.trade) return { action: { type: 'tradeReject' }, reason: '不等旁人的交易，继续自己的回合' };
   const options = actionsFor(g, id);
   const has = (type: GameAction['type']) => options.find((x) => x.action.type === type);
   const reserve = reserveFor(g, p);
@@ -224,9 +226,15 @@ function cardMove(g: GameState, p: PlayerState, reserve: number): BotDecision | 
         if (p.taxShield > 0) continue;
         return play(card, {}, '备好一次免税');
       case 'teleport':
-        // In the roll phase the salary arrives and the roll still follows.
+        // Before rolling it replaces the roll, so it is worth it only when cash is short.
         if (g.phase === 'roll' && p.cash < reserve + 300) return play(card, {}, '回起点领薪水');
         continue;
+      case 'insure':
+        if (p.shield > 0 && p.cash > reserve) continue;
+        break;
+      case 'discount':
+        if (p.discount) continue;
+        break;
       case 'dice': {
         if (g.phase !== 'roll') continue;
         const best = reach(g, p).sort(

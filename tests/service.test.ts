@@ -84,7 +84,7 @@ test('restart restores trade, auction and path decisions with resume credentials
         action: {
           type: 'tradeOffer',
           to: other,
-          giveCash: 50,
+          giveCash: 200,
           wantCash: 0,
           giveTiles: [],
           wantTiles: [1],
@@ -364,5 +364,45 @@ test('review fixes: kicked seats cannot reconnect with an old grant; auto-play e
   store.save(r);
   service.lobby(h.code, h.seatId, { type: 'newMatch' });
   assert.equal(service.record(h.code).seats[0].afk, false);
+  store.close();
+});
+
+test('a bot on turn skips an offer between two humans after a short grace period', () => {
+  let now = 1000;
+  const store = new Store(':memory:');
+  const service = new GameService(store, { now: () => now });
+  const a = service.create({ name: '甲' });
+  const b = service.join(a.code, { name: '乙' });
+  service.connected(a.code, a.seatId);
+  service.connected(a.code, b.seatId);
+  service.lobby(a.code, a.seatId, { type: 'addBot', botMode: 'rule' });
+  service.lobby(a.code, a.seatId, { type: 'ready' });
+  service.lobby(a.code, b.seatId, { type: 'ready' });
+  service.lobby(a.code, a.seatId, { type: 'start' });
+  const r = service.record(a.code);
+  r.game!.turn = 2;
+  r.game!.properties.find((x) => x.tile === 1)!.owner = b.seatId;
+  store.save(r);
+  const result = service.command(a.code, a.seatId, {
+    id: 'side-offer-0001',
+    revision: r.game!.revision,
+    action: {
+      type: 'tradeOffer',
+      to: b.seatId,
+      giveCash: 200,
+      wantCash: 0,
+      giveTiles: [],
+      wantTiles: [1],
+    },
+  });
+  assert.ok(result.ok);
+  service.tick(a.code);
+  assert.ok(service.record(a.code).game!.trade, 'the bot waits a little first');
+  now += 11000;
+  service.tick(a.code);
+  const g = service.record(a.code).game!;
+  assert.equal(g.trade, null);
+  assert.ok(g.events.some((e) => e.text.includes('跳过了旁人的交易提案')));
+  service.dispose();
   store.close();
 });

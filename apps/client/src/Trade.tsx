@@ -91,9 +91,11 @@ export function TradeDialog({
               : rival &&
                   (d.giveCash > listed(d.wantTiles) * 2 || d.wantCash > listed(d.giveTiles) * 2)
                 ? '现金不能超过所换地产标价的 2 倍'
-                : sideOffer && game.tradeMemo[me.id]?.side === game.round
-                  ? '不在自己回合时，每轮只能发起一次交易'
-                  : '';
+                : rival && (gives * 2 < gets || gets * 2 < gives)
+                  ? '双方给出的价值（现金 + 地价）差距不能超过一倍'
+                  : sideOffer && game.tradeMemo[me.id]?.side === game.round
+                    ? '不在自己回合时，每轮只能发起一次交易'
+                    : '';
   // Plain render helpers (not components) so inputs keep focus while typing.
   const squares = (owner: string, side: 'giveTiles' | 'wantTiles') => {
     const list = tradable(game, owner);
@@ -157,8 +159,8 @@ export function TradeDialog({
       <ol className="trade-steps">
         <li>选对象</li>
         <li>勾选双方的现金和地产</li>
-        <li>发出后对方 60 秒内接受、拒绝或还价</li>
-        <li>对手间不能单方面赠送，现金最多为地价 2 倍</li>
+        <li>发出后对方在时限内（涉及当前玩家 60 秒，旁人之间 30 秒）接受、拒绝或还价</li>
+        <li>对手间不能单方面赠送，双方价值差距不超过一倍</li>
       </ol>
       {!d.counter && (
         <label>

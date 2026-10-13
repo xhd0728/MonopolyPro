@@ -54,6 +54,8 @@ const seats = (n = 2): Seat[] =>
     controlEpoch: 0,
   }));
 const env = { now: 1000, randomInt: (_max: number) => 0 };
+/** Listed price of a town square, for trades that must be roughly balanced between rivals. */
+const P = (tile: number) => mapById('town').tiles[tile].price;
 /** A level start: rule tests ignore the later-seat cash bonus (tested on its own). */
 const game = (mapId = 'town', n = 2) => {
   const g = createGame({ ...DEFAULT_SETTINGS, mapId }, seats(n), 'test', env);
@@ -724,7 +726,7 @@ test('free trading: any player proposes, several squares per side, counter-offer
   propertyAt(g, 10)!.owner = 'p0';
   g = act(
     g,
-    { type: 'tradeOffer', to: 'p0', giveCash: 10, wantCash: 0, giveTiles: [], wantTiles: [10] },
+    { type: 'tradeOffer', to: 'p0', giveCash: P(10), wantCash: 0, giveTiles: [], wantTiles: [10] },
     'p1',
   );
   g = act(g, { type: 'tradeReject' }, 'p0');
@@ -732,7 +734,14 @@ test('free trading: any player proposes, several squares per side, counter-offer
     () =>
       act(
         g,
-        { type: 'tradeOffer', to: 'p0', giveCash: 10, wantCash: 0, giveTiles: [], wantTiles: [10] },
+        {
+          type: 'tradeOffer',
+          to: 'p0',
+          giveCash: P(10),
+          wantCash: 0,
+          giveTiles: [],
+          wantTiles: [10],
+        },
         'p1',
       ),
     /稍等/,
@@ -888,7 +897,7 @@ test('match statistics count rent, purchases, builds, laps, jail visits, cards a
   g = act(g, {
     type: 'tradeOffer',
     to: 'p1',
-    giveCash: 10,
+    giveCash: P(1),
     wantCash: 0,
     giveTiles: [],
     wantTiles: [1],
@@ -907,7 +916,7 @@ test('review fixes: trades cannot stall the table, team targets use averages', (
   propertyAt(g, 4)!.owner = 'p2';
   g = act(
     g,
-    { type: 'tradeOffer', to: 'p2', giveCash: 10, wantCash: 0, giveTiles: [], wantTiles: [4] },
+    { type: 'tradeOffer', to: 'p2', giveCash: P(4), wantCash: 0, giveTiles: [], wantTiles: [4] },
     'p1',
   );
   assert.equal(g.trade!.expiresAt, env.now + 30000, 'side trades hold the table for 30 s');
@@ -919,7 +928,14 @@ test('review fixes: trades cannot stall the table, team targets use averages', (
       applyAction(
         g,
         'p1',
-        { type: 'tradeOffer', to: 'p2', giveCash: 10, wantCash: 0, giveTiles: [], wantTiles: [4] },
+        {
+          type: 'tradeOffer',
+          to: 'p2',
+          giveCash: P(4),
+          wantCash: 0,
+          giveTiles: [],
+          wantTiles: [4],
+        },
         later,
       ),
     /稍等/,
@@ -929,19 +945,19 @@ test('review fixes: trades cannot stall the table, team targets use averages', (
   g = act(g, {
     type: 'tradeOffer',
     to: 'p1',
-    giveCash: 10,
+    giveCash: P(4),
     wantCash: 0,
     giveTiles: [],
     wantTiles: [4],
   });
   g = act(
     g,
-    { type: 'tradeCounter', giveCash: 0, wantCash: 20, giveTiles: [4], wantTiles: [] },
+    { type: 'tradeCounter', giveCash: 0, wantCash: P(4) + 20, giveTiles: [4], wantTiles: [] },
     'p1',
   );
   g = act(
     g,
-    { type: 'tradeCounter', giveCash: 15, wantCash: 0, giveTiles: [], wantTiles: [4] },
+    { type: 'tradeCounter', giveCash: P(4) + 10, wantCash: 0, giveTiles: [], wantTiles: [4] },
     'p0',
   );
   assert.throws(
@@ -1082,7 +1098,7 @@ test('audit fixes: side offers once per round and dismissable; consistent cards,
   const side = {
     type: 'tradeOffer',
     to: 'p2',
-    giveCash: 10,
+    giveCash: P(4),
     wantCash: 0,
     giveTiles: [],
     wantTiles: [4],
@@ -1136,4 +1152,55 @@ test('audit fixes: side offers once per round and dismissable; consistent cards,
   g = act(g, { type: 'surrender' });
   assert.equal(propertyAt(g, 2)!.owner, 'p1');
   assert.equal(propertyAt(g, 2)!.mortgaged, true);
+});
+test('review fixes: balanced rival trades, lasting off-turn quota, bots skip side offers, savings pay road works', () => {
+  let g = game('town', 3);
+  propertyAt(g, 4)!.owner = 'p2';
+  propertyAt(g, 1)!.owner = 'p1';
+  // A token coin for a square is not a trade between rivals.
+  assert.throws(
+    () =>
+      act(
+        g,
+        { type: 'tradeOffer', to: 'p2', giveCash: 1, wantCash: 0, giveTiles: [], wantTiles: [4] },
+        'p1',
+      ),
+    /差距不能超过一倍/,
+  );
+  // Using the off-turn offer, then an offer to the player on turn, does not refill the quota.
+  const side = {
+    type: 'tradeOffer',
+    to: 'p2',
+    giveCash: P(4),
+    wantCash: 0,
+    giveTiles: [],
+    wantTiles: [4],
+  } as GameAction;
+  g = act(g, side, 'p1');
+  g = act(g, { type: 'tradeReject' }, 'p2');
+  let t = { now: env.now + 16000, randomInt: () => 0 };
+  g = applyAction(
+    g,
+    'p1',
+    { type: 'tradeOffer', to: 'p0', giveCash: 0, wantCash: P(1), giveTiles: [1], wantTiles: [] },
+    t,
+  );
+  g = applyAction(g, 'p0', { type: 'tradeReject' }, t);
+  t = { now: env.now + 40000, randomInt: () => 0 };
+  assert.throws(() => applyAction(g, 'p1', side, t), /每轮只能发起一次/);
+  // A bot on turn waves away an offer between two others.
+  g = game('town', 3);
+  propertyAt(g, 4)!.owner = 'p2';
+  g = act(g, side, 'p1');
+  assert.ok(actionsFor(g, 'p0').some((a) => a.action.type === 'tradeReject'));
+  assert.equal(botAction(g, 'p0')?.type, 'tradeReject');
+  // Road works are paid from savings when cash runs short.
+  g = game();
+  g.traps[1] = { owner: 'p1', until: 99, amount: 100 };
+  g.players[0].cash = 30;
+  g.players[0].deposit = 500;
+  g.players[0].nextDice = 1;
+  g = act(g, { type: 'roll' });
+  assert.equal(g.players[0].cash + g.players[0].deposit, 430);
+  assert.equal(g.players[1].cash, 3100);
 });

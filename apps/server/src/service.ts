@@ -15,6 +15,8 @@ import {
   tickGame,
   viewFor,
   log,
+  currentPlayer,
+  SIDE_TRADE_MS,
 } from '../../../packages/engine/src/index.ts';
 import { botAction, botDecision } from '../../../packages/engine/src/bot.ts';
 import {
@@ -70,6 +72,8 @@ export interface ServiceOptions {
   /** Upper bound for one AI decision (default two minutes). */
   aiDecisionCapMs?: number;
 }
+/** How long a bot on turn waits before skipping an offer between two other players. */
+const SIDE_TRADE_GRACE_MS = 10000;
 /** Bot moves whose reason is worth showing to the table (not routine rolls or turn ends). */
 const EXPLAINED = new Set<GameAction['type']>([
   'buy',
@@ -596,6 +600,7 @@ export class GameService {
     const g = r.game;
     if (!g || g.phase === 'finished') return false;
     if (tickGame(g, this.env()) !== null) return true;
+    if (g.trade && this.sideTradeDue(r)) return true;
     const actorId = g.trade ? g.trade.to : actingPlayerId(g);
     const seat = r.seats.find((s) => s.id === actorId);
     if (!seat) return false;
@@ -606,6 +611,18 @@ export class GameService {
         seat.disconnectedAt !== null &&
         this.now() - seat.disconnectedAt >= this.options.takeoverMs) ||
       this.humanTimedOut(r)
+    );
+  }
+  /** An offer between two others has held up a bot's (or away player's) turn long enough. */
+  private sideTradeDue(r: Readonly<RoomRecord>) {
+    const trade = r.game?.phase !== 'finished' ? r.game?.trade : null;
+    if (!trade) return false;
+    const turnSeat = r.seats.find((s) => s.id === currentPlayer(r.game!).id);
+    return (
+      !!turnSeat &&
+      ![trade.from, trade.to].includes(turnSeat.id) &&
+      (turnSeat.bot || !!turnSeat.afk) &&
+      this.now() >= trade.expiresAt - SIDE_TRADE_MS + SIDE_TRADE_GRACE_MS
     );
   }
   /** Human decision limit from the room settings; rooms without one never force a move. */
@@ -656,6 +673,21 @@ export class GameService {
         this.botJobs.delete(code);
         this.aiActivity.delete(code);
         feedback = true;
+      }
+      // A bot (or an away player) on turn gives an offer between two others ten seconds,
+      // then waves it away so humans cannot park the table on a bot's turn.
+      if (this.sideTradeDue(r)) {
+        try {
+          r.game = applyAction(
+            r.game,
+            currentPlayer(r.game).id,
+            { type: 'tradeReject' },
+            this.env(),
+          );
+          changed = true;
+        } catch {
+          // The offer changed meanwhile; the next tick looks again.
+        }
       }
       if (r.game.phase !== 'finished') {
         const offerTarget = r.game.trade && r.seats.find((s) => s.id === r.game!.trade!.to);
@@ -791,6 +823,20 @@ export class GameService {
         this.dirtyRooms.add(code);
         return;
       }
+      // Trades are where a manipulated model could give assets away: the rule bot's value
+      // check has the final word on accepting one.
+      if (
+        decision.source === 'llm' &&
+        decision.action.type === 'tradeAccept' &&
+        fallback.type === 'tradeReject'
+      )
+        decision = {
+          action: fallback,
+          source: 'rule',
+          message: '交易估值不划算，规则机器人否决',
+          ...(fallbackReason ? { reason: fallbackReason } : {}),
+          steps: decision.steps ?? [],
+        };
       try {
         try {
           latest.game = applyAction(latest.game!, seat.id, decision.action, this.env());

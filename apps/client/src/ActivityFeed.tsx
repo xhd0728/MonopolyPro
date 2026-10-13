@@ -112,68 +112,84 @@ export function ActivityFeed({
 }) {
   const [filter, setFilter] = useState<Filter>('all');
   const list = useRef<HTMLDivElement>(null);
-  const anchor = useRef({ height: 0, top: 0 });
+  // Scroll anchor: the first row the reader can see and how far it sat from the top.
+  const anchor = useRef<{ key: string; offset: number } | null>(null);
   // Lines that arrive after the feed mounted glow briefly.
   const firstSeen = useRef({ gameId: game.id, id: game.nextEvent - 1 });
   if (firstSeen.current.gameId !== game.id)
     firstSeen.current = { gameId: game.id, id: game.nextEvent - 1 };
   const index = (id?: string) => game.players.findIndex((p) => p.id === id);
   const rows = useMemo(() => {
-    const out: (Row | { separator: string; key: string })[] = [];
-    const events = [...game.events].reverse();
-    // An AI seat logs its reason right after the move; show the two as one line.
-    let thought: GameEvent | null = null;
-    const flush = () => {
-      if (thought && filter !== 'mine') out.push(describe(thought, game, map));
-      thought = null;
-    };
-    for (const e of events) {
+    // Group events by turn in time order, then show the newest turn first with its header on
+    // top and its lines newest first.
+    const turns: { header?: { separator: string; key: string }; rows: Row[] }[] = [{ rows: [] }];
+    let last: Row | null = null;
+    for (const e of game.events) {
       if (HIDDEN.has(e.kind)) continue;
-      if (e.kind === 'ai') {
-        flush();
-        thought = e;
-        continue;
-      }
-      const reason = thought && thought.actor === e.actor && e.kind !== 'turn' ? thought : null;
-      if (!reason) flush();
-      thought = null;
       if (e.kind === 'turn') {
-        out.push({ separator: e.text, key: `s${e.id}` });
+        turns.push({ header: { separator: e.text, key: `s${e.id}` }, rows: [] });
+        last = null;
         continue;
       }
-      if (filter === 'key' && !e.spot && !['finish', 'bankrupt', 'ai'].includes(e.kind)) continue;
-      if (filter === 'mine') {
-        const owner = e.tile !== undefined && game.properties.find((p) => p.tile === e.tile)?.owner;
-        if (e.actor !== game.viewerId && owner !== game.viewerId) continue;
+      // An AI seat logs its reason right after the move; fold it into that line.
+      if (e.kind === 'ai' && last && last.e.actor === e.actor && !last.why) {
+        last.why = describe(e, game, map).body;
+        if (e.detail) last.detail = e.detail;
+        continue;
       }
       const row = describe(e, game, map);
-      if (reason) {
-        row.why = describe(reason, game, map).body;
-        if (reason.detail) row.detail = reason.detail;
-      }
-      out.push(row);
+      last = e.kind === 'ai' ? null : row;
+      const keep =
+        filter === 'all' ||
+        (filter === 'key' && (!!e.spot || ['finish', 'bankrupt', 'ai'].includes(e.kind))) ||
+        (filter === 'mine' &&
+          (e.actor === game.viewerId ||
+            (e.tile !== undefined &&
+              game.properties.find((p) => p.tile === e.tile)?.owner === game.viewerId)));
+      if (keep) turns.at(-1)!.rows.push(row);
     }
-    flush();
-    // Drop separators with nothing under them (filtered views) and a trailing one.
-    return out.filter(
-      (r, i) => !('separator' in r) || (i + 1 < out.length && !('separator' in out[i + 1])),
-    );
+    const out: (Row | { separator: string; key: string })[] = [];
+    for (const turn of turns.reverse()) {
+      if (!turn.rows.length) continue;
+      if (turn.header) out.push(turn.header);
+      out.push(...turn.rows.reverse());
+    }
+    return out;
   }, [game.revision, game.id, filter, map]);
   useLayoutEffect(() => {
     const el = list.current;
-    if (!el) return;
-    const { height, top } = anchor.current;
-    // Near the top: stay on the newest line. Reading older lines: keep them under the eyes.
-    if (top > 40) el.scrollTop = top + (el.scrollHeight - height);
-    anchor.current = { height: el.scrollHeight, top: el.scrollTop };
+    const saved = anchor.current;
+    if (!el || !saved) return;
+    // Put the line the reader was looking at back where it was, whatever was added on top
+    // or trimmed below.
+    const row = el.querySelector<HTMLElement>(`[data-key="${saved.key}"]`);
+    if (row) el.scrollTop = row.offsetTop - el.offsetTop - saved.offset;
   }, [rows]);
   useEffect(() => {
     const el = list.current;
     if (!el) return;
-    const save = () => (anchor.current = { height: el.scrollHeight, top: el.scrollTop });
+    const save = () => {
+      // Near the top the feed follows the newest line.
+      if (el.scrollTop < 40) {
+        anchor.current = null;
+        return;
+      }
+      const top = el.scrollTop + el.offsetTop;
+      const first = [...el.querySelectorAll<HTMLElement>('[data-key]')].find(
+        (r) => r.offsetTop + r.offsetHeight > top,
+      );
+      anchor.current = first
+        ? { key: first.dataset.key!, offset: first.offsetTop - el.offsetTop - el.scrollTop }
+        : null;
+    };
     el.addEventListener('scroll', save, { passive: true });
     return () => el.removeEventListener('scroll', save);
   }, []);
+  const choose = (next: Filter) => {
+    setFilter(next);
+    anchor.current = null;
+    if (list.current) list.current.scrollTop = 0;
+  };
   return (
     <section className={`activity-feed ${className}`} aria-label="实时动态">
       <header>
@@ -184,7 +200,7 @@ export function ActivityFeed({
               key={id}
               aria-pressed={filter === id}
               className={filter === id ? 'on' : ''}
-              onClick={() => setFilter(id)}
+              onClick={() => choose(id)}
             >
               {label}
             </button>
@@ -210,16 +226,17 @@ export function ActivityFeed({
           </span>
         </div>
       )}
-      <div className="feed-list" ref={list} role="log" aria-live="polite">
+      <div className="feed-list" ref={list} role="log" aria-live="polite" aria-relevant="additions">
         {rows.length === 0 && <p className="feed-empty">还没有相关动态。</p>}
         {rows.map((r) =>
           'separator' in r ? (
-            <div className="feed-turn" key={r.key}>
+            <div className="feed-turn" key={r.key} data-key={r.key}>
               <span>{r.separator}</span>
             </div>
           ) : (
             <article
               key={r.e.id}
+              data-key={r.e.id}
               className={`feed-row kind-${r.e.kind} ${r.e.spot ? 'key' : ''} ${
                 r.e.id > firstSeen.current.id ? 'fresh' : ''
               } ${r.e.actor && r.e.actor === game.viewerId ? 'mine' : ''}`}
@@ -240,7 +257,7 @@ export function ActivityFeed({
                     </b>
                   )}
                   {r.e.kind === 'ai' && <em className="feed-tag">AI 思路</em>}
-                  <time>
+                  <time aria-hidden="true">
                     <Clock>{(now) => ago(now - r.e.at)}</Clock>
                   </time>
                 </span>

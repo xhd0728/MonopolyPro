@@ -137,7 +137,12 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
     .locator('input[type="checkbox"]')
     .first()
     .check();
-  await dialog.getByLabel('现金', { exact: true }).nth(1).fill('10');
+  // Ask for about the listed price: rivals' sides must be within a factor of two.
+  const listed = await dialog.locator('.trade-squares label.picked small').first().innerText();
+  await dialog
+    .getByLabel('现金', { exact: true })
+    .nth(1)
+    .fill(String(Number(listed.replaceAll(',', ''))));
   await current.getByRole('button', { name: '发出提案' }).click();
   await expect(other.getByRole('button', { name: '接受交易' })).toBeVisible();
   await other.getByRole('button', { name: '接受交易' }).click();

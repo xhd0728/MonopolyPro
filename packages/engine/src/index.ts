@@ -745,7 +745,12 @@ function land(g: GameState, env: EngineEnvironment) {
     delete g.traps[p.position];
     // The fee never exceeds the cash in hand, so it cannot open a debt that would cancel the
     // rest of the landing (the purchase offer or the rent on this square).
-    const fee = Math.min(trap.amount, p.cash);
+    const fee = Math.min(trap.amount, p.cash + p.deposit);
+    // Savings top up the cash automatically, so the fee cannot be dodged by banking money.
+    if (fee > p.cash) {
+      p.deposit -= fee - p.cash;
+      p.cash = fee;
+    }
     if (fee > 0) charge(g, p, fee, trap.owner, env, '道路施工');
     if (g.debt) return;
   }
@@ -1397,6 +1402,13 @@ function proposeTrade(
       giveCash <= listed(wantTiles) * 2 && wantCash <= listed(giveTiles) * 2,
       '现金不能超过所换地产标价的 2 倍',
     );
+    // Neither side may give less than half of what it gets (cash plus listed land prices).
+    const gives = giveCash + listed(giveTiles),
+      gets = wantCash + listed(wantTiles);
+    requireRule(
+      gives * 2 >= gets && gets * 2 >= gives,
+      '双方给出的价值（现金 + 地价）差距不能超过一倍',
+    );
   }
   g.trade = {
     id: `${g.id}-${g.revision}`,
@@ -1412,12 +1424,16 @@ function proposeTrade(
   };
   // The table waits for the offer, so the active player's decision clock restarts afterwards.
   g.decisionAt = env.now;
-  g.tradeMemo[p.id] = { until: g.tradeMemo[p.id]?.until ?? 0, round: g.round };
+  g.tradeMemo[p.id] = {
+    ...g.tradeMemo[p.id],
+    until: g.tradeMemo[p.id]?.until ?? 0,
+    round: g.round,
+  };
   log(
     g,
     env,
     'trade',
-    `${p.name}${counter ? '还价给' : '向'}${target.name}${counter ? '' : '提出交易'}，60 秒内有效`,
+    `${p.name}${counter ? '还价给' : '向'}${target.name}${counter ? '' : '提出交易'}，${Math.round((g.trade.expiresAt - env.now) / 1000)} 秒内有效`,
     p.id,
     undefined,
     undefined,
@@ -1923,6 +1939,13 @@ export function actionsFor(g: GameState, id: string): ActionOption[] {
     add({ type: 'tradeReject' }, '拒绝交易', '不改变资产');
   }
   if (g.trade?.from === id) add({ type: 'tradeReject' }, '撤回交易', '取消等待中的提案');
+  if (
+    g.trade &&
+    ![g.trade.from, g.trade.to].includes(id) &&
+    currentPlayer(g).id === id &&
+    MANAGE_PHASES.includes(g.phase)
+  )
+    add({ type: 'tradeReject' }, '跳过旁人交易', '不等这笔与你无关的交易，继续自己的回合');
   if (g.trade || actingPlayerId(g) !== id) return options;
   if (g.phase === 'auction') {
     const minimum = g.auction!.highBid + 10;
