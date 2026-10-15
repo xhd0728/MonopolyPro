@@ -12,7 +12,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   webServer: {
-    command: 'node dist/server/index.js',
+    command: 'tsx scripts/seed-ui.ts && node dist/server/index.js',
     url: 'http://127.0.0.1:8792/healthz',
     reuseExistingServer: false,
     env: {

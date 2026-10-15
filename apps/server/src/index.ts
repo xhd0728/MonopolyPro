@@ -272,6 +272,9 @@ app.post('/api/rooms', async (req, res) => {
 app.post('/api/rooms/:code/join', async (req, res) =>
   res.json(await credentials(service.join(String(req.params.code).toUpperCase(), req.body))),
 );
+app.post('/api/rooms/:code/ai-traces', (req, res) =>
+  res.json(service.aiTraces(String(req.params.code).toUpperCase(), req.body)),
+);
 app.post('/api/rooms/:code/resume', async (req, res) => {
   const code = String(req.params.code).toUpperCase();
   service.authenticate(code, req.body?.token);

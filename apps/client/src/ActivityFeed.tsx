@@ -6,6 +6,7 @@ import type {
   MapDefinition,
   RoomView,
 } from '../../../packages/shared/src/index.ts';
+import { AgentInspector, TraceTimeline } from './AgentTrace.tsx';
 import { Clock } from './clock.tsx';
 import { money, playerColor } from './game-ui.ts';
 
@@ -62,6 +63,7 @@ interface Row {
   /** An AI seat's reason for this move, folded in from the 'ai' event that follows it. */
   why?: string;
   detail?: string;
+  trace?: GameEvent['aiTrace'];
 }
 function describe(e: GameEvent, game: GameView, map: MapDefinition): Row {
   const drawn = e.card ? deckCardById(e.card) : undefined;
@@ -102,6 +104,7 @@ export function ActivityFeed({
   game,
   map,
   ai = null,
+  roomCode,
   className = '',
 }: {
   game: GameView;
@@ -109,7 +112,9 @@ export function ActivityFeed({
   /** Live progress of an AI seat that is thinking right now. */
   ai?: RoomView['aiActivity'];
   className?: string;
+  roomCode?: string;
 }) {
+  const [inspect, setInspect] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
   const list = useRef<HTMLDivElement>(null);
   // Scroll anchor: the first row the reader can see and how far it sat from the top.
@@ -135,6 +140,7 @@ export function ActivityFeed({
       if (e.kind === 'ai' && last && last.e.actor === e.actor && !last.why) {
         last.why = describe(e, game, map).body;
         if (e.detail) last.detail = e.detail;
+        if (e.aiTrace) last.trace = e.aiTrace;
         continue;
       }
       const row = describe(e, game, map);
@@ -194,6 +200,9 @@ export function ActivityFeed({
     <section className={`activity-feed ${className}`} aria-label="实时动态">
       <header>
         <b>实时动态</b>
+        <button className="trace-open" onClick={() => setInspect(true)}>
+          AI 轨迹 ↗
+        </button>
         <span className="feed-filters" role="group" aria-label="筛选动态">
           {FILTERS.map(([id, label]) => (
             <button
@@ -227,6 +236,9 @@ export function ActivityFeed({
           </span>
         </div>
       )}
+      {inspect && (
+        <AgentInspector roomCode={roomCode} game={game} ai={ai} close={() => setInspect(false)} />
+      )}
       <div className="feed-list" ref={list} role="log" aria-live="polite" aria-relevant="additions">
         {rows.length === 0 && <p className="feed-empty">还没有相关动态。</p>}
         {rows.map((r) =>
@@ -257,7 +269,7 @@ export function ActivityFeed({
                       {r.e.actor === game.viewerId ? '你' : game.players[index(r.e.actor)].name}
                     </b>
                   )}
-                  {r.e.kind === 'ai' && <em className="feed-tag">AI 思路</em>}
+                  {r.e.kind === 'ai' && <em className="feed-tag">AI 决策</em>}
                   <time aria-hidden="true">
                     <Clock>{(now) => ago(now - r.e.at)}</Clock>
                   </time>
@@ -267,6 +279,12 @@ export function ActivityFeed({
                 {r.why && <span className="feed-why">💭 {r.why}</span>}
                 {(r.detail ?? r.e.detail) && (
                   <small className="feed-detail">{r.detail ?? r.e.detail}</small>
+                )}
+                {!!(r.trace ?? r.e.aiTrace)?.length && (
+                  <details className="feed-trace">
+                    <summary>查看决策轨迹 · {(r.trace ?? r.e.aiTrace)!.length} 步</summary>
+                    <TraceTimeline trace={(r.trace ?? r.e.aiTrace)!} />
+                  </details>
                 )}
               </span>
               {r.e.amount !== undefined && r.e.amount !== 0 && (

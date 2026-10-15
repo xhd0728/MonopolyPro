@@ -8,6 +8,7 @@ import {
   actingPlayerId,
   applyAction,
   assertInvariants,
+  assetsOf,
   createGame,
 } from '../packages/engine/src/index.ts';
 import { botDecision } from '../packages/engine/src/bot.ts';
@@ -15,7 +16,7 @@ import { botDecision } from '../packages/engine/src/bot.ts';
 const games = Number(process.argv[2] ?? 100);
 let seed = 7;
 const randomInt = (max: number) => {
-  seed = (seed * 1103515245 + 12345) % 2147483648;
+  seed = (seed * 16807) % 2147483647;
   return seed % max;
 };
 const seats = (n: number): Seat[] =>
@@ -37,10 +38,20 @@ const ends: Record<string, number> = {};
 for (let i = 0; i < games; i++) {
   const map = MAPS[i % MAPS.length].id;
   let now = 1000;
-  let g = createGame({ ...DEFAULT_SETTINGS, mapId: map }, seats(2 + (i % 5)), `sim${i}`, {
-    now,
-    randomInt,
-  });
+  const n = 2 + (i % 5);
+  const settings = {
+    ...DEFAULT_SETTINGS,
+    mapId: map,
+    size: (Math.floor(i / MAPS.length) % 2 ? 44 : 36) as 36 | 44,
+    auction: Math.floor(i / 5) % 2 === 0,
+    mode: ((n === 4 || n === 6) && i % 2 ? 'team' : 'free') as 'team' | 'free',
+    end: (['rounds', 'time', 'target'] as const)[i % 3],
+    rounds: 8 + (i % 9),
+    minutes: 5,
+    target: 6000 + (i % 4) * 2000,
+    initialCash: [1500, 3000, 5000][Math.floor(i / 3) % 3],
+  };
+  let g = createGame(settings, seats(n), `sim${i}`, { now, randomInt });
   for (let step = 0; step < 20000 && g.phase !== 'finished'; step++) {
     const actor = g.trade?.to ?? actingPlayerId(g)!;
     const d = botDecision(g, actor)!;
@@ -60,7 +71,22 @@ for (let i = 0; i < games; i++) {
     assertInvariants(g);
     totals.steps++;
   }
-  if (g.phase === 'finished') totals.finished++;
+  if (g.phase === 'finished') {
+    totals.finished++;
+    const final = g.history?.at(-1);
+    if (
+      !final ||
+      final.players.some(
+        (p) =>
+          p.assets !==
+          assetsOf(
+            g,
+            g.players.find((x) => x.id === p.id)!,
+          ),
+      )
+    )
+      throw Error('Final financial snapshot mismatch');
+  }
   totals.rounds += g.round;
   totals.bankrupt += g.players.filter((p) => p.bankrupt).length;
   totals.cards += g.players.reduce((n, p) => n + p.stats.cards, 0);
@@ -69,6 +95,7 @@ for (let i = 0; i < games; i++) {
 }
 console.log({
   games,
+  coverage: '4 maps, 36/44 squares, 2-6 seats, auctions, teams, rounds/time/target',
   finished: totals.finished,
   avgRounds: +(totals.rounds / games).toFixed(1),
   bankruptPerGame: +(totals.bankrupt / games).toFixed(2),

@@ -12,6 +12,7 @@ import {
 } from '../../content/src/index.ts';
 import type {
   PlayerStats,
+  RoundSnapshot,
   ActionOption,
   DeckCardDefinition,
   DeckId,
@@ -53,7 +54,7 @@ export function log(
   actor?: string,
   amount?: number,
   path?: number[],
-  meta?: Pick<GameEvent, 'spot' | 'tile' | 'card' | 'detail'>,
+  meta?: Pick<GameEvent, 'spot' | 'tile' | 'card' | 'detail' | 'aiTrace'>,
 ) {
   g.events.push({
     id: g.nextEvent++,
@@ -292,6 +293,49 @@ export function migrateGame(state: GameState, randomInt?: (max: number) => numbe
   }
   return g as GameState;
 }
+/** A financial sample contains public facts only and is independent of event retention. */
+export function financialSnapshot(
+  g: GameState,
+  round: number,
+  at: number,
+  complete: boolean,
+): RoundSnapshot {
+  return {
+    round,
+    at,
+    complete,
+    players: g.players.map((p) => {
+      const owned = g.properties.filter((x) => x.owner === p.id);
+      const debt = g.debt?.playerId === p.id ? g.debt.amount : 0;
+      const assets = assetsOf(g, p);
+      return {
+        id: p.id,
+        assets,
+        cash: p.cash,
+        deposit: p.deposit,
+        propertyValue: assets - p.cash - p.deposit + debt,
+        debt,
+        properties: owned.length,
+        buildings: owned.reduce((n, x) => n + x.level, 0),
+        bankrupt: p.bankrupt,
+        stats: { ...p.stats },
+      };
+    }),
+  };
+}
+function recordRound(g: GameState, round: number, env: EngineEnvironment, complete = true) {
+  const history = g.history ?? [];
+  const sample = financialSnapshot(g, round, env.now, complete);
+  // Replace a final sample for an already completed round instead of creating duplicate x values.
+  const earlier = history.filter((x) => x.round < round);
+  // Keep the opening sample plus the latest 512 rounds in unusually fast/long matches.
+  g.history = [...(earlier.length > 512 ? [earlier[0], ...earlier.slice(-511)] : earlier), sample];
+}
+/** Financial samples are append-only; avoid repeatedly cloning the full history for simulations. */
+function cloneGame(state: GameState): GameState {
+  const { history, ...rest } = state;
+  return { ...structuredClone(rest), ...(history ? { history } : {}) };
+}
 export function createGame(
   settings: RoomSettings,
   seats: Seat[],
@@ -396,6 +440,7 @@ export function createGame(
   log(g, env, 'start', '富翁之旅开始了！先使用卡牌或天赋，再掷骰出发。');
   // Everyone starts level, so the first round is calm; world news begins in round two.
   g.news = { id: 'calm', round: 1 };
+  recordRound(g, 0, env);
   return g;
 }
 function setPhase(g: GameState, phase: GameState['phase'], env: EngineEnvironment) {
@@ -484,7 +529,7 @@ function settleDebt(g: GameState, env: EngineEnvironment) {
 /** End a match early (the host closed the room): ranks by net worth like any other end. */
 export function endMatch(state: GameState, reason: string, env: EngineEnvironment): GameState {
   if (state.phase === 'finished') return state;
-  const g = structuredClone(state);
+  const g = cloneGame(state);
   g.revision++;
   finish(g, reason, env);
   return g;
@@ -511,6 +556,9 @@ function finish(g: GameState, reason: string, env: EngineEnvironment) {
   g.auction = null;
   g.pendingPath = null;
   setPhase(g, 'finished', env);
+  g.finishedAt = env.now;
+  const finalRound = g.settings.end === 'rounds' ? Math.min(g.round, g.settings.rounds) : g.round;
+  recordRound(g, finalRound, env, g.round > finalRound || g.history?.at(-1)?.round === finalRound);
   log(
     g,
     env,
@@ -636,6 +684,7 @@ function advanceTurn(g: GameState, env: EngineEnvironment) {
     if (g.turn === 0) {
       // Interest uses the news of the round that just ended.
       const rate = interestRate(g);
+      recordRound(g, g.round, env);
       g.round++;
       if (checkWinner(g, env)) return;
       updateFinale(g, env);
@@ -1454,7 +1503,7 @@ export function applyAction(
   action: GameAction,
   env: EngineEnvironment,
 ): GameState {
-  const g = structuredClone(state);
+  const g = cloneGame(state);
   requireRule(g.phase !== 'finished', '对局已经结束');
   if (checkWinner(g, env)) {
     g.revision++;
@@ -1879,7 +1928,7 @@ export function tickGame(state: GameState, env: EngineEnvironment): GameState | 
     (state.finale || !finaleDue(state, env.now))
   )
     return null;
-  const g = structuredClone(state);
+  const g = cloneGame(state);
   let changed = false;
   if (g.trade && env.now >= g.trade.expiresAt) {
     expireTrade(g, env);
@@ -2073,7 +2122,7 @@ export function viewFor(g: GameState, viewerId: string | null): GameView {
   // Views are serialized immediately. Copy only the small mutable parts instead of the whole
   // state; event objects are append-only and safe to share.
   // Deck order is hidden information: it never leaves the server.
-  const { players, traps, properties, events, decks: _decks, ...rest } = g;
+  const { players, traps, properties, events, decks: _decks, history, ...rest } = g;
   const publicState = structuredClone(rest);
   const viewer = playerById(g, viewerId ?? '');
   const lastAction = new Map<string, string>();
@@ -2084,6 +2133,7 @@ export function viewFor(g: GameState, viewerId: string | null): GameView {
   }
   return {
     ...publicState,
+    ...(history ? { history: g.phase === 'finished' ? history : history.slice(-2) } : {}),
     events: events.slice(-VIEW_EVENTS),
     viewerId,
     activeId: actingPlayerId(g),

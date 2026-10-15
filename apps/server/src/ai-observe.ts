@@ -1,4 +1,4 @@
-import { BOARD, CARDS, characterById, mapById } from '../../../packages/content/src/index.ts';
+import { CARDS, characterById, mapById } from '../../../packages/content/src/index.ts';
 import type { GameAction, GameState } from '../../../packages/shared/src/index.ts';
 import {
   actionsFor,
@@ -9,11 +9,12 @@ import {
   landPrice,
   newsNow,
   rentOf,
+  salaryOf,
 } from '../../../packages/engine/src/index.ts';
 
 /**
  * What an AI seat sees: a compact, public-information summary of the table plus its own
- * hand, instead of the full client view (a few hundred tokens rather than many thousands).
+ * hand, without the full client view and its verbose action metadata.
  */
 export function observe(game: GameState, seatId: string): Record<string, unknown> {
   const map = mapById(game.settings.mapId, game.settings.size);
@@ -42,6 +43,7 @@ export function observe(game: GameState, seatId: string): Record<string, unknown
           price: landPrice(game, me.position),
           cashAfter: me.cash - landPrice(game, me.position),
           baseRent: map.tiles[me.position].rent,
+          assetValue: map.tiles[me.position].price,
         },
       };
     if (game.phase === 'auction' && game.auction)
@@ -54,7 +56,14 @@ export function observe(game: GameState, seatId: string): Record<string, unknown
         },
       };
     if (game.phase === 'debt' && game.debt)
-      return { debt: { owe: game.debt.amount, cash: me.cash } };
+      return {
+        debt: {
+          owe: game.debt.amount,
+          creditor: game.debt.creditorId,
+          reason: game.debt.reason,
+          cash: me.cash,
+        },
+      };
     if (game.phase === 'path' && game.pendingPath)
       return {
         fork: { steps: game.pendingPath.remaining, choices: game.pendingPath.choices.map(square) },
@@ -68,10 +77,36 @@ export function observe(game: GameState, seatId: string): Record<string, unknown
         ? `${Math.min(game.round, game.settings.rounds)}/${game.settings.rounds}`
         : game.round,
     phase: game.phase,
+    objective: {
+      mode: game.settings.mode,
+      end: game.settings.end,
+      target: game.settings.target,
+      rounds: game.settings.rounds,
+      endsAt: game.endsAt,
+    },
+    map: {
+      name: map.name,
+      salary: salaryOf(game),
+      mechanic: map.mechanic,
+      shortcuts: map.shortcuts,
+    },
+    activeId: actingPlayerId(game),
+    pot: game.pot,
+    squareColumns: [
+      'index name',
+      'group',
+      'purchasePrice',
+      'assetValue',
+      'owner',
+      'level',
+      'rent',
+      'mortgaged',
+    ],
     finalStretch: game.finale || undefined,
     news: news ? `${news.name}：${news.text}` : undefined,
     me: {
       id: me.id,
+      team: game.settings.mode === 'team' ? me.team : undefined,
       character: `${ch.name}（${ch.description} 天赋：${ch.ability}）`,
       cash: me.cash,
       deposit: me.deposit,
@@ -81,6 +116,9 @@ export function observe(game: GameState, seatId: string): Record<string, unknown
       shield: me.shield || undefined,
       taxWaiver: me.taxShield || undefined,
       cardPlayedThisTurn: me.cardPlayed || undefined,
+      marketUsedThisTurn: me.shopped || undefined,
+      abilityReady: game.round - me.abilityRound >= 3,
+      privateNextDice: me.nextDice ?? undefined,
       hand: me.cards.map((id) => {
         const c = CARDS.find((x) => x.id === id)!;
         return `${c.name}：${c.description}`;
@@ -101,10 +139,11 @@ export function observe(game: GameState, seatId: string): Record<string, unknown
         cards: p.cards.length + p.newCards.length,
         inJail: p.jailTurns > 0 || undefined,
       })),
-    // [square, colour group, list price, owner, level, rent now, mortgaged]
+    // [square, colour group, purchase price, original asset value, owner, level, rent, mortgaged]
     squares: game.properties.map((x) => [
       square(x.tile),
       map.tiles[x.tile].group,
+      landPrice(game, x.tile),
       map.tiles[x.tile].price,
       x.owner,
       x.level,
@@ -169,4 +208,4 @@ export function validator(game: GameState, seatId: string, now: () => number) {
     }
   };
 }
-export const RULES_SUMMARY = `规则要点：单骰 1–6，经过起点领 ${BOARD.salary}；落在空地可买，买下后别人停留要付租金；同色组全部拥有租金 +30%，还能升级建筑（0–3 级，租金约 1 / 2.5 / 5 / 9 倍）。净资产 = 现金 + 存款 + 地产地价 + 建筑造价的 75%，结束时净资产最高者获胜，所以买地不亏净资产、建筑在收回成本前略亏。每回合最多用一张卡，新得到的卡下回合才能用。对手之间交易必须双方都付出，价值差距不超过一倍。`;
+export const RULES_SUMMARY = `规则要点：单骰 1–6，经过起点按局面 map.salary 领取薪资；落在空地可买，买下后别人停留要付租金；同色组全部拥有租金 +30%；自己的未抵押地产均可升级建筑（0–3 级，租金约 1 / 2.5 / 5 / 9 倍）。净资产 = 现金 + 存款 + 地产权益（抵押时扣除赎回成本）+ 建筑原价的 75% - 待偿债务，结束时净资产最高者获胜，地产按原始地价估值，新闻与折扣改变实际购地和建设成本，需比较成交价与估值。每回合最多用一张卡，新得到的卡下回合才能用。对手之间交易必须双方都付出，价值差距不超过一倍。`;

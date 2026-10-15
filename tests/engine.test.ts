@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createGame,
+  endMatch,
   applyAction,
   assertInvariants,
   actingPlayerId,
@@ -1228,4 +1229,63 @@ test('bot difficulty levels play legal moves and differ in strength', () => {
     for (const w of g.winners) wins[order[Number(w.slice(1))]]++;
   }
   assert.ok(wins.hard > wins.easy, `hard ${wins.hard} should beat easy ${wins.easy}`);
+});
+
+test('financial history records true opening, completed rounds and a final partial round without private fields', () => {
+  let g = createGame({ ...DEFAULT_SETTINGS, end: 'rounds', rounds: 4 }, seats(), 'history', env);
+  assert.equal(g.history?.length, 1);
+  assert.deepEqual(
+    g.history![0].players.map((p) => p.cash),
+    g.players.map((p) => p.cash),
+  );
+  const opening = JSON.stringify(g.history![0]);
+  for (let step = 0; step < 1000 && g.phase !== 'finished'; step++) {
+    const id = g.trade?.to ?? actingPlayerId(g)!;
+    g = applyAction(g, id, botAction(g, id)!, { now: 1000 + step * 100, randomInt: () => 0 });
+  }
+  assert.equal(g.phase, 'finished');
+  assert.deepEqual(
+    g.history!.map((s) => s.round),
+    [0, 1, 2, 3, 4],
+  );
+  assert.ok(g.history!.every((s) => s.complete));
+  assert.equal(JSON.stringify(g.history![0]), opening, 'earlier samples remain immutable');
+  for (const p of g.history!.at(-1)!.players) {
+    assert.equal(
+      p.assets,
+      assetsOf(
+        g,
+        g.players.find((x) => x.id === p.id)!,
+      ),
+    );
+    assert.equal(p.assets, p.cash + p.deposit + p.propertyValue - p.debt);
+  }
+  const publicHistory = JSON.stringify(viewFor(g, null).history);
+  assert.doesNotMatch(publicHistory, /cardId|nextDice|newCards|tokenHash|decks/);
+  assert.equal(g.finishedAt, g.decisionAt);
+  // An externally ended/time-limited match also records its incomplete final round.
+  let partial = game();
+  partial.phase = 'manage';
+  partial.players[0].cash += 200;
+  partial = endMatch(partial, '测试结束', { ...env, now: 5000 });
+  assert.equal(partial.history!.at(-1)!.complete, false);
+  assert.equal(partial.history!.at(-1)!.players[0].cash, partial.players[0].cash);
+});
+
+test('financial history survives event trimming and spectators only receive a short tail while playing', () => {
+  let g = game();
+  for (let round = 0; round < 4; round++) {
+    g.phase = 'manage';
+    g.turn = 1;
+    g = applyAction(g, 'p1', { type: 'end' }, { now: 2000 + round * 100, randomInt: () => 0 });
+  }
+  assert.equal(g.history!.length, 5);
+  for (let i = 0; i < 200; i++) log(g, env, 'test', '记录');
+  assert.equal(g.events.length, 120);
+  assert.equal(g.history![0].round, 0);
+  assert.equal(viewFor(g, null).history!.length, 2);
+  const old = { ...g, history: undefined };
+  const done = endMatch(old, '旧存档结束', env);
+  assert.equal(done.history!.length, 1, 'old rounds are never invented');
+  assert.equal(done.history![0].round, g.round);
 });

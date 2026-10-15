@@ -190,7 +190,7 @@ test('desktop and mobile multiplayer journey: invite, ready, card, purchase, bui
   expect(width.scroll).toBeLessThanOrEqual(width.viewport + 1);
   await guest.getByRole('button', { name: '离开房间', exact: true }).click();
   await guest.getByRole('button', { name: '确认退出经营' }).click();
-  await expect(host.locator('.settlement')).toContainText('小筑获胜');
+  await expect(host.getByRole('dialog', { name: '旅程纪念册' })).toContainText('小筑 获胜');
   expect(errors).toEqual([]);
   await a.close();
   await b.close();

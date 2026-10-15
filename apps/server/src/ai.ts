@@ -1,5 +1,10 @@
 import { CARDS } from '../../../packages/content/src/index.ts';
-import type { BotLevel, GameAction, GameView } from '../../../packages/shared/src/index.ts';
+import type {
+  AiTraceStep,
+  BotLevel,
+  GameAction,
+  GameView,
+} from '../../../packages/shared/src/index.ts';
 import { AI_DECISION_CAP_MS, actionSchema } from '../../../packages/shared/src/index.ts';
 import type { AiTools } from './ai-tools.ts';
 import { RULES_SUMMARY } from './ai-observe.ts';
@@ -24,12 +29,14 @@ export interface AiDecision {
   steps?: string[];
   /** Follow-up moves for the rest of this turn (manage phase), each re-checked before use. */
   plan?: GameAction[];
+  trace?: AiTraceStep[];
 }
 export interface ChooseHooks {
   /** Read-only tools the model may call before it decides. */
   tools?: AiTools;
   /** Called after every tool call, for the live "thinking" strip. */
   onStep?: (label: string, steps: string[]) => void;
+  onTrace?: (trace: AiTraceStep[]) => void;
   /** The rule bot's reason, reported when the rule bot plays instead. */
   fallbackReason?: string;
   level?: BotLevel;
@@ -132,7 +139,7 @@ export const LEVELS: Record<
     reads: 2,
     budgetMs: 50000,
     temperature: 0.4,
-    tools: ['look_ahead', 'square', 'advice'],
+    tools: ['state', 'look_ahead', 'square', 'advice'],
     plan: true,
     custom: true,
     persona: '你是一名稳健的玩家：留够现金应对租金，优先凑齐同色组，在凑齐的色组上建房。',
@@ -141,11 +148,11 @@ export const LEVELS: Record<
     reads: 4,
     budgetMs: 90000,
     temperature: 0.2,
-    tools: ['look_ahead', 'square', 'player', 'preview', 'advice'],
+    tools: ['state', 'look_ahead', 'square', 'player', 'preview', 'advice'],
     plan: true,
     custom: true,
     persona:
-      '你是一名精于计算的高手：建筑是拉开差距的关键，凑齐色组后积极升级到 3 级，只留一小笔应急现金；买地不会降低净资产，能买就买；最后一轮不再建房；交易时绝不廉价卖给对手凑组所缺的最后一块，必要时主动出价收购自己缺的那块。',
+      '你是一名精于计算的高手：建筑是拉开差距的关键，凑齐色组后积极升级到 3 级，只留一小笔应急现金；比较实际地价与原始估值，现金充裕时积极购地；最后一轮按净资产增量和折扣判断是否建房；交易时绝不廉价卖给对手凑组所缺的最后一块，必要时主动出价收购自己缺的那块。',
   },
 };
 
@@ -192,6 +199,7 @@ const ACT: ToolSpec = {
   },
 };
 const READ_PARAMS: Record<string, Record<string, unknown>> = {
+  state: { type: 'object', properties: {} },
   look_ahead: { type: 'object', properties: {} },
   square: {
     type: 'object',
@@ -247,7 +255,7 @@ function safeJson(text: unknown): Record<string, unknown> {
  * a Hermes-style <tool_call> block, or a bare candidate id such as "a3".
  */
 export function salvage(text: string): Call[] {
-  const cleaned = text.replace(/<think>[\s\S]*?<\/think>/g, '');
+  const cleaned = text.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, '');
   const tagged = cleaned.match(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/);
   const candidates = [
     tagged?.[1],
@@ -272,28 +280,37 @@ export function salvage(text: string): Call[] {
 /** A short public reason, dropped if it names a card the seat is still holding. */
 function publicReason(reason: unknown, view: GameView, action: GameAction): string | undefined {
   if (typeof reason !== 'string') return undefined;
-  const text = reason.replace(/\s+/g, ' ').trim().slice(0, 40);
+  const text = reason
+    .replace(/<think>[\s\S]*?(?:<\/think>|$)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 40);
   const me = view.players.find((p) => p.id === view.viewerId);
   const played = action.type === 'playCard' ? action.cardId : null;
   // A die value fixed by a remote-dice card is private until the roll.
-  if (me?.nextDice != null && /[1-6一二三四五六]\s*点/.test(text)) return undefined;
+  if (me?.nextDice != null) return undefined;
   for (const id of [...(me?.cards ?? []), ...(me?.newCards ?? [])]) {
     const name = CARDS.find((c) => c.id === id)?.name;
-    if (id !== played && name && text.includes(name)) return undefined;
+    if (
+      id !== played &&
+      ((name && text.includes(name)) || text.toLowerCase().includes(id.toLowerCase()))
+    )
+      return undefined;
   }
   return text || undefined;
 }
 const sleep = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
-    const t = setTimeout(resolve, ms);
-    signal.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(t);
-        reject(Error('cancelled'));
-      },
-      { once: true },
-    );
+    const abort = () => {
+      clearTimeout(timer);
+      reject(Error('cancelled'));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    }, ms);
+    if (signal.aborted) abort();
+    else signal.addEventListener('abort', abort, { once: true });
   });
 
 export function createBotBrain(config: AiConfig, request: typeof fetch = fetch): BotBrain {
@@ -316,6 +333,7 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
     force: string | null,
     temperature: number,
     proto: 'tools' | 'json',
+    outputTokens: number,
   ) {
     const json = proto === 'json';
     const asText = (t: Turn): { role: 'user' | 'assistant'; content: string } =>
@@ -349,7 +367,7 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
       }
       return {
         model: config.model,
-        max_tokens: 1024,
+        max_tokens: outputTokens,
         temperature,
         system,
         messages,
@@ -368,9 +386,8 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
     if (config.mode === 'responses') {
       const input: unknown[] = [{ role: 'system', content: system }];
       for (const t of rest) {
-        // Reasoning items cannot be replayed with store:false; only echo calls and messages.
-        if (!json && t.role === 'assistant' && t.native)
-          input.push(...(t.raw as { type?: string }[]).filter((x) => x.type !== 'reasoning'));
+        // Keep encrypted reasoning with its calls for stateless multi-step continuation.
+        if (!json && t.role === 'assistant' && t.native) input.push(...(t.raw as unknown[]));
         else if (!json && t.role === 'tool' && t.native)
           input.push({ type: 'function_call_output', call_id: t.id, output: t.text });
         else input.push(asText(t));
@@ -379,11 +396,12 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
         model: config.model,
         input,
         store: false,
-        max_output_tokens: 1024,
+        max_output_tokens: outputTokens,
+        include: ['reasoning.encrypted_content'],
         ...(json
           ? { text: { format: { type: 'json_object' } } }
           : {
-              tools: specs.map((s) => ({ type: 'function', ...s })),
+              tools: specs.map((s) => ({ type: 'function', ...s, strict: false })),
               tool_choice: force ? { type: 'function', name: force } : 'required',
               parallel_tool_calls: false,
             }),
@@ -411,7 +429,7 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
     return {
       model: config.model,
       messages,
-      max_tokens: 1024,
+      max_tokens: outputTokens,
       temperature,
       ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
       ...(config.disableThinking
@@ -493,6 +511,8 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
     signal: AbortSignal,
     proto: 'tools' | 'json',
     first: boolean,
+    outputTokens: number,
+    status: (title: string, text: string) => void,
   ) {
     for (let attempt = 0; ; attempt++) {
       const left = deadline - Date.now();
@@ -509,7 +529,7 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
         const response = await request(base.endsWith(path) ? base : base + path, {
           method: 'POST',
           headers,
-          body: JSON.stringify(wire(turns, specs, force, temperature, proto)),
+          body: JSON.stringify(wire(turns, specs, force, temperature, proto, outputTokens)),
           signal: combined,
         });
         // Bound untrusted provider output instead of retaining a potentially huge response.
@@ -560,6 +580,12 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
           (!(error instanceof ProviderError) && !(error instanceof OutputError));
         if (error instanceof ProviderError && error.toolsRejected) throw error;
         if (transient && attempt === 0 && deadline - Date.now() > 3000) {
+          status(
+            '请求重试',
+            error instanceof ProviderError
+              ? `${error.message}，正在重试一次`
+              : '连接中断或单次请求超时，正在重试一次',
+          );
           await sleep(300 + Math.random() * 600, signal);
           continue;
         }
@@ -572,6 +598,19 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
   return {
     model: config.model,
     async choose(view, choices, fallback, signal, hooks = {}) {
+      const started = Date.now();
+      const trace: AiTraceStep[] = [];
+      const record = (
+        kind: AiTraceStep['kind'],
+        title: string,
+        text: string,
+        extra: Partial<AiTraceStep> = {},
+      ) => {
+        trace.push({ kind, title, text, ms: Date.now() - started, ...extra });
+        if (trace.length > 32) trace.splice(1, 1);
+        // A proposed card may still fail to commit: publish the final choice only with its persisted event.
+        if (kind !== 'decision') hooks.onTrace?.([...trace]);
+      };
       const level = hooks.level ?? 'normal';
       const L = LEVELS[level];
       const deadline = Math.min(
@@ -592,6 +631,17 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
       const candidates = ids.map(
         (id, i) =>
           `${id}: ${labels[i]}${level === 'hard' && hooks.advice === i ? '（规则机器人推荐）' : ''}`,
+      );
+      record(
+        'context',
+        '读取全局局面',
+        `第 ${view.round} 轮 · ${view.phase} · ${choices.length} 项候选`,
+        {
+          facts: view.players.map(
+            (p) =>
+              `${p.name}：净资产 ${p.assets} / 现金 ${p.cash} / 地产 ${p.propertyCount}${p.bankrupt ? ' / 已破产' : ''}`,
+          ),
+        },
       );
       const steps: string[] = [];
       let repairs = 0;
@@ -634,9 +684,17 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
       };
       const finish = (args: Record<string, unknown>, action: GameAction, plan: GameAction[]) => {
         const reason = publicReason(args.reason, view, action);
+        record('decision', '提交决定', reason ?? '已根据当前局面选择合法动作', {
+          tool: 'act',
+          facts: [
+            `动作：${action.type}`,
+            ...(plan.length ? [`后续计划：${plan.length} 步，每步执行前重新校验`] : []),
+          ],
+        });
         return {
           action,
           source: 'llm' as const,
+          trace: [...trace],
           message:
             (steps.length ? `模型查看 ${steps.length} 次信息后决定` : '模型直接决定') +
             (repairs ? `（自我纠正 ${repairs} 次）` : ''),
@@ -657,16 +715,31 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
           })),
         ];
         const turns: Turn[] = [
-          { role: 'system', text: systemPrompt(level, reads, proto === 'json') },
+          {
+            role: 'system',
+            text:
+              systemPrompt(level, reads, proto === 'json') +
+              (proto === 'json' ? `\n工具说明与参数：${JSON.stringify(specs)}` : ''),
+          },
           {
             role: 'user',
             text: `局面：${JSON.stringify(observation)}\n候选动作：\n${candidates.join('\n')}\n${reads ? `可用只读工具：${readNames.join('、')}（最多 ${reads} 次）` : '请直接 act。'}`,
           },
         ];
         let used = 0;
+        let outputTokens =
+          config.disableThinking || config.reasoningEffort === 'none' ? 2048 : 4096;
+        let expanded = false;
         for (let round = 0; round < reads + 4; round++) {
-          const force = used >= reads && canForce ? 'act' : null;
-          const offered = used >= reads ? [ACT] : specs;
+          const mustAct =
+            used >= reads || deadline - Date.now() < Math.max(6000, config.timeoutMs + 1500);
+          const force = mustAct && canForce ? 'act' : null;
+          const offered = mustAct ? [ACT] : specs;
+          if (mustAct && used < reads)
+            turns.push({
+              role: 'user',
+              text: '决策时间预算即将用完。请根据已知局面直接调用 act，不再查询。',
+            });
           const reply = await send(
             turns,
             offered,
@@ -676,11 +749,33 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
             signal,
             proto,
             turns.length === 2,
+            outputTokens,
+            (title, text) => record('retry', title, text),
           );
-          const native = reply.calls.length > 0 && proto === 'tools';
-          const calls = native ? reply.calls : salvage(reply.text);
+          if (reply.calls.length > 16) throw new OutputError('too many calls');
+          const native = reply.calls.length > 0 && proto === 'tools' && !reply.truncated;
+          // A candidate mentioned in an unfinished answer is not a completed decision.
+          const calls = native ? reply.calls : reply.truncated ? [] : salvage(reply.text);
           if (!calls.length) {
+            if (reply.truncated && !expanded) {
+              expanded = true;
+              outputTokens = Math.min(8192, outputTokens * 2);
+              used = reads;
+              record('retry', '输出被截断', '增加输出预算并要求直接提交决定');
+              turns.push({
+                role: 'user',
+                text: '上次输出在工具调用前被截断。请简洁地调用 act 完成本次决定。',
+              });
+              continue;
+            }
             if (++repairs > 2) throw new OutputError(reply.truncated ? 'truncated' : 'no call');
+            record(
+              'validation',
+              '修正调用格式',
+              reply.truncated
+                ? '模型输出被截断，要求重新提交合法调用'
+                : '未收到工具调用，要求模型重新提交',
+            );
             turns.push({
               role: 'assistant',
               text: reply.text || '（没有调用工具）',
@@ -691,25 +786,21 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
             continue;
           }
           turns.push({ role: 'assistant', text: reply.text, calls, native, raw: reply.raw });
-          let handled = false;
-          for (const call of calls) {
+          for (const call of calls.slice(0, 16)) {
             const answer = (text: string) =>
               turns.push({ role: 'tool', id: call.id, name: call.name, text, native });
-            if (handled) {
-              answer('已忽略：一次只处理一个调用');
-              continue;
-            }
-            handled = true;
             if (call.name === 'act') {
               const r = resolve(call.args);
               if ('action' in r && r.action) return finish(call.args, r.action, r.plan ?? []);
               repairs++;
+              record('validation', '动作校验未通过', '服务器已将合法性反馈交回模型，等待修正');
               answer(`${r.error}。候选：${ids.join('、')}`);
               if (repairs > 2) throw new OutputError('repairs exhausted');
               continue;
             }
             const tool = available[call.name];
-            if (!tool || !readNames.includes(call.name) || used >= reads) {
+            if (!tool || !readNames.includes(call.name) || mustAct || used >= reads) {
+              record('validation', '查询未执行', '工具不可用或预算已用完，要求提交决定');
               answer(
                 used >= reads
                   ? '查询次数已用完，请调用 act。'
@@ -724,9 +815,25 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
               args.choice = ids.indexOf(args.choice);
             else if (typeof args.choice === 'number') args.choice = args.choice - 1;
             const label = tool.label(args);
+            record('summary', '查询目的', tool.purpose ?? tool.description, { tool: call.name });
             steps.push(label);
             hooks.onStep?.(label, [...steps]);
-            answer(JSON.stringify(tool.run(args)).slice(0, 4000));
+            try {
+              const result = tool.run(args);
+              const output = JSON.stringify(result);
+              record('tool', label, tool.description, {
+                tool: call.name,
+                facts: tool.publicFacts?.(args, result) ?? ['已返回查询结果；私有候选与手牌不公开'],
+              });
+              answer(
+                output.length <= 16000
+                  ? output
+                  : JSON.stringify({ error: '结果过大，请查询具体格子或玩家' }),
+              );
+            } catch {
+              record('tool', label, '工具未能完成查询，已反馈模型', { tool: call.name });
+              answer(JSON.stringify({ error: '参数无效，请按工具说明重试或直接 act' }));
+            }
           }
         }
         throw new OutputError('no decision');
@@ -738,13 +845,22 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
           // The endpoint does not take tool definitions: switch to the JSON protocol for good.
           if (error instanceof ProviderError && error.toolsRejected) {
             protocol = 'json';
+            record('retry', '兼容模式', '接口不支持原生工具，改用 JSON 工具协议');
             return await run('json');
           }
           throw error;
         }
       } catch (error) {
         if (signal.aborted || (error as Error).message === 'cancelled') throw Error('cancelled');
+        const cause =
+          error instanceof ProviderError
+            ? error.message
+            : error instanceof OutputError
+              ? `输出错误：${error.message}`
+              : '请求失败';
+        record('fallback', '规则接管本次决定', cause === 'timeout' ? '决策时间预算已耗尽' : cause);
         return {
+          trace: [...trace],
           action: fallback,
           source: 'rule',
           message:
@@ -752,7 +868,7 @@ export function createBotBrain(config: AiConfig, request: typeof fetch = fetch):
               ? '模型超时，规则机器人继续'
               : error instanceof OutputError
                 ? '模型没能给出合法决定，规则机器人继续'
-                : '模型暂不可用，规则机器人继续',
+                : `模型暂不可用（${cause}），规则机器人继续`,
           ...(hooks.fallbackReason ? { reason: hooks.fallbackReason } : {}),
           steps,
         };

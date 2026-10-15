@@ -28,6 +28,7 @@ import {
   settingsSchema,
 } from '../../../packages/shared/src/index.ts';
 import type {
+  AiTraceStep,
   CommandResult,
   EmoteView,
   GameAction,
@@ -332,6 +333,18 @@ export class GameService {
     this.ensureOpen(record);
     ensure(seat && !seat.bot, '无法恢复此席位', 403);
     return { record, seat };
+  }
+  aiTraces(code: string, input: unknown) {
+    const data = z
+      .object({
+        token: z.string().max(100),
+        gameId: z.string().max(100),
+        before: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+      })
+      .parse(input);
+    const { record } = this.authenticate(code, data.token);
+    ensure(record.game?.id === data.gameId, '对局已更新，请重新打开决策台', 409);
+    return this.store.aiTraces(code, data.gameId, data.before ?? null);
   }
   grant(code: string, token: unknown) {
     const { seat } = this.authenticate(code, token);
@@ -897,6 +910,28 @@ export class GameService {
                   if (!plan.actions.length) this.plans.delete(code);
                   try {
                     r.game = applyAction(g, seat.id, next, this.env());
+                    log(
+                      r.game,
+                      this.env(),
+                      'ai',
+                      `${seat.name}：继续执行已确认的回合计划`,
+                      seat.id,
+                      undefined,
+                      undefined,
+                      {
+                        detail: 'LLM · 回合计划',
+                        aiTrace: [
+                          {
+                            kind: 'execution',
+                            title: '计划执行成功',
+                            text: '重新通过规则校验，已提交本步操作',
+                            tool: 'act',
+                            ms: 0,
+                            facts: [`动作：${next.type}`],
+                          },
+                        ],
+                      },
+                    );
                     this.save(r);
                     return true;
                   } catch {
@@ -921,7 +956,24 @@ export class GameService {
                 const key = `${seat.id}:${r.game.revision}`;
                 const queued = this.queuedSince.get(code);
                 const since = queued?.key === key ? queued.since : this.now();
-                if (this.botJobs.size < (this.options.aiMaxConcurrent ?? 4)) {
+                if (queued && queued.key !== key) this.queuedSince.delete(code);
+                this.queuedSince.set(code, { key, since });
+                // FIFO admission: an early room in the tick loop cannot continually steal slots.
+                for (const [waitingCode, waiting] of this.queuedSince) {
+                  const waitingRoom = this.store.peek(waitingCode);
+                  const g = waitingRoom?.game;
+                  if (
+                    !g ||
+                    g.phase === 'finished' ||
+                    `${g.trade?.to ?? actingPlayerId(g)}:${g.revision}` !== waiting.key
+                  )
+                    this.queuedSince.delete(waitingCode);
+                }
+                const firstWaiting = this.queuedSince.keys().next().value;
+                if (
+                  this.botJobs.size < (this.options.aiMaxConcurrent ?? 8) &&
+                  firstWaiting === code
+                ) {
                   this.queuedSince.delete(code);
                   // The two-minute cap counts the time spent queueing.
                   this.startBotJob(r, seat, choices, action, decision?.reason, since);
@@ -932,40 +984,85 @@ export class GameService {
                 // Every model slot is busy: wait a little instead of handing over at once.
                 this.queuedSince.set(code, { key, since });
                 if (this.now() - since < AI_QUEUE_MAX_MS) {
-                  this.aiActivity.set(code, {
-                    playerId: seat.id,
-                    state: 'queued',
-                    message: '排队等待模型',
-                    at: this.now(),
-                  });
+                  const previous = this.aiActivity.get(code);
+                  const newQueue = previous?.state !== 'queued' || previous.playerId !== seat.id;
+                  if (newQueue)
+                    this.aiActivity.set(code, {
+                      playerId: seat.id,
+                      state: 'queued',
+                      message: '排队等待模型',
+                      at: since,
+                      trace: [
+                        {
+                          kind: 'context',
+                          title: '等待模型名额',
+                          text: '已进入先到先服务队列，最多等待 20 秒',
+                          ms: 0,
+                        },
+                      ],
+                    });
                   if (changed) this.save(r);
-                  return true;
+                  return changed || feedback || newQueue;
                 }
                 this.queuedSince.delete(code);
                 this.aiActivity.set(code, {
                   playerId: seat.id,
                   state: 'fallback',
                   message: '模型排队超过 20 秒，规则机器人继续',
+                  trace: [
+                    {
+                      kind: 'fallback',
+                      title: '模型排队超时',
+                      text: '等待并发名额超过 20 秒，本次使用规则策略',
+                      ms: this.now() - since,
+                    },
+                  ],
                   at: this.now(),
                 });
-                detail = '规则兜底';
+                detail = '规则兜底 · 排队超过 20 秒';
                 feedback = true;
               } else detail = '只有一个可选动作';
             }
             try {
               r.game = applyAction(r.game, seat.id, action, this.env());
               changed = true;
-              if (decision?.reason && EXPLAINED.has(action.type))
+              if (
+                (decision?.reason && EXPLAINED.has(action.type)) ||
+                (seat.botMode === 'llm' && detail)
+              )
                 log(
                   r.game,
                   this.env(),
                   'ai',
-                  `${seat.name}：${decision.reason}`,
+                  `${seat.name}：${decision?.reason ?? '执行唯一可选动作'}`,
                   seat.id,
                   undefined,
                   undefined,
-                  detail ? { detail } : undefined,
+                  detail
+                    ? {
+                        detail,
+                        aiTrace: detail.startsWith('规则兜底')
+                          ? this.aiActivity.get(code)?.trace
+                          : [
+                              {
+                                kind: 'execution',
+                                title: '自动执行',
+                                text: '当前只有一个可选动作，由服务器直接执行',
+                                ms: 0,
+                                facts: [`动作：${action.type}`],
+                              },
+                            ],
+                      }
+                    : undefined,
                 );
+              if (seat.botMode === 'llm' && detail === '只有一个可选动作')
+                this.aiActivity.set(code, {
+                  playerId: seat.id,
+                  state: 'ready',
+                  message: '自动执行唯一可选动作',
+                  trace: r.game.events.at(-1)?.aiTrace,
+                  at: this.now(),
+                });
             } catch (error) {
               console.error(
                 JSON.stringify({
@@ -1028,6 +1125,7 @@ export class GameService {
       epoch: seat.controlEpoch,
       startedAt: this.now(),
       capped: false,
+      wallStartedAt: Date.now(),
     };
     this.botJobs.set(code, job);
     // Hard cap: an AI seat never holds the table longer than two minutes.
@@ -1073,6 +1171,15 @@ export class GameService {
           message: '交易估值不划算，规则机器人否决',
           ...(fallbackReason ? { reason: fallbackReason } : {}),
           steps: decision.steps ?? [],
+          trace: [
+            ...(decision.trace ?? []),
+            {
+              kind: 'fallback',
+              title: '交易价值保护',
+              text: '服务器否决了不利交易，采用规则策略',
+              ms: Date.now() - job.wallStartedAt,
+            },
+          ],
         };
       try {
         try {
@@ -1086,6 +1193,15 @@ export class GameService {
               message: '模型操作无效，规则机器人继续',
               ...(fallbackReason ? { reason: fallbackReason } : {}),
               steps: decision.steps ?? [],
+              trace: [
+                ...(decision.trace ?? []),
+                {
+                  kind: 'fallback',
+                  title: '最终校验未通过',
+                  text: '重新按当前局面执行安全动作',
+                  ms: Date.now() - job.wallStartedAt,
+                },
+              ],
             };
           } catch {
             // The state moved under the rule move too: fall back to the plain timeout move.
@@ -1096,16 +1212,28 @@ export class GameService {
           }
         }
         const steps = decision.steps ?? [];
-        // Remember the rest of the turn the model planned; each move is re-checked when used.
-        if (decision.source === 'llm' && decision.plan?.length)
-          this.plans.set(code, {
-            gameId: latest.game!.id,
-            seatId: seat.id,
-            round: latest.game!.round,
-            turn: latest.game!.turn,
-            phase: latest.game!.phase,
-            actions: [...decision.plan],
-          });
+        const actor = latest.game.players.find((p) => p.id === seat.id)!;
+        const executed = decision.action;
+        const executedLabel =
+          executed.type === 'playCard'
+            ? `使用：${CARDS.find((c) => c.id === executed.cardId)?.name ?? '一张卡牌'}`
+            : executed.type === 'bank'
+              ? `${executed.direction === 'deposit' ? '存入' : '取出'} ${executed.amount}`
+              : `执行：${labelActions(game, seat.id, [executed])[0]}`;
+        const trace: AiTraceStep[] = [
+          ...(decision.trace ?? this.aiActivity.get(code)?.trace ?? []),
+          {
+            kind: 'execution',
+            title: '操作已确认',
+            text: decision.message,
+            ms: Date.now() - job.wallStartedAt,
+            facts: [
+              executedLabel,
+              `执行后现金 ${actor.cash} / 存款 ${actor.deposit}`,
+              `状态版本 ${latest.game.revision}`,
+            ],
+          },
+        ].slice(-33) as AiTraceStep[];
         log(
           latest.game,
           this.env(),
@@ -1121,14 +1249,35 @@ export class GameService {
             detail: [
               decision.source === 'llm' ? 'LLM' : '规则兜底',
               ...(steps.length ? [steps.join(' → ')] : []),
+              ...(decision.source === 'rule' ? [decision.message] : []),
             ].join(' · '),
+            aiTrace: trace,
           },
         );
         this.save(latest);
+        // Remember the rest of the turn the model planned; each move is re-checked when used.
+        if (
+          decision.source === 'llm' &&
+          decision.plan?.length &&
+          latest.game.round === game.round &&
+          latest.game.turn === game.turn &&
+          latest.game.phase === 'manage' &&
+          !latest.game.trade
+        )
+          this.plans.set(code, {
+            gameId: latest.game!.id,
+            seatId: seat.id,
+            round: latest.game!.round,
+            turn: latest.game!.turn,
+            phase: latest.game!.phase,
+            actions: [...decision.plan],
+          });
+
         this.aiActivity.set(code, {
           playerId: seat.id,
           state: decision.source === 'llm' ? 'ready' : 'fallback',
           message: decision.message,
+          trace,
           at: this.now(),
         });
       } catch {
@@ -1149,16 +1298,38 @@ export class GameService {
         level: seat.botLevel ?? 'normal',
         observation: observe(game, seat.id),
         labels: labelActions(game, seat.id, choices),
-        validate: validator(game, seat.id, () => this.now()),
+        validate: (action, custom) => {
+          const problem = validator(game, seat.id, () => this.now())(action, custom);
+          if (problem) return problem;
+          if (
+            (action.type === 'tradeAccept' && fallback.type === 'tradeReject') ||
+            ((action.type === 'tradeOffer' || action.type === 'tradeCounter') &&
+              this.givesAway(game, seat.id, action))
+          )
+            return '交易估值不划算，请调整价格或选择其他动作';
+          return null;
+        },
         ...(advice >= 0 ? { advice } : {}),
         deadline: Date.now() + capMs - 5000,
         ...(fallbackReason ? { fallbackReason } : {}),
+        onTrace: (trace) => {
+          if (this.botJobs.get(code) !== job) return;
+          this.aiActivity.set(code, {
+            playerId: seat.id,
+            state: 'thinking',
+            message: trace.at(-1)?.title ?? '正在决策',
+            trace,
+            at: this.now(),
+          });
+          this.dirtyRooms.add(code);
+        },
         onStep: (label, steps) => {
           if (this.botJobs.get(code) !== job) return;
           this.aiActivity.set(code, {
             playerId: seat.id,
             state: 'thinking',
             message: `正在${label}`,
+            trace: this.aiActivity.get(code)?.trace,
             steps,
             at: this.now(),
           });

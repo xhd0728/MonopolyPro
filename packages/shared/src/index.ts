@@ -259,6 +259,38 @@ export interface GameEvent {
   card?: string;
   /** Secondary line, e.g. the tools an AI seat used before deciding. */
   detail?: string;
+  /** Curated public decision trace. Never contains raw model output or private tool payloads. */
+  aiTrace?: AiTraceStep[];
+}
+export interface AiTraceStep {
+  kind:
+    'context' | 'summary' | 'tool' | 'validation' | 'retry' | 'decision' | 'fallback' | 'execution';
+  title: string;
+  text: string;
+  /** Elapsed milliseconds since this decision started. */
+  ms: number;
+  tool?: string;
+  /** Public, server-selected fields only. */
+  facts?: string[];
+}
+export interface RoundPlayerStats {
+  id: string;
+  assets: number;
+  cash: number;
+  deposit: number;
+  propertyValue: number;
+  debt: number;
+  properties: number;
+  buildings: number;
+  bankrupt: boolean;
+  stats: PlayerStats;
+}
+export interface RoundSnapshot {
+  /** 0 is the opening balance; other samples are round ends or the final partial round. */
+  round: number;
+  at: number;
+  complete: boolean;
+  players: RoundPlayerStats[];
 }
 export interface DebtDecision {
   playerId: string;
@@ -333,6 +365,9 @@ export interface GameState {
   lastDice: number[];
   winners: string[];
   finishReason: string;
+  finishedAt?: number;
+  /** Public financial samples, independent of the rolling event log. Absent in old saves. */
+  history?: RoundSnapshot[];
 }
 export type PlayerView = Omit<PlayerState, 'cards' | 'newCards' | 'nextDice'> & {
   cards?: string[];
@@ -436,6 +471,7 @@ export interface RoomView {
     message: string;
     /** Public labels of the tools an AI seat has used so far this decision. */
     steps?: string[];
+    trace?: AiTraceStep[];
     at: number;
   } | null;
   /** Set once the room has ended (it is deleted a few minutes later). */

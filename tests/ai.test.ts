@@ -11,7 +11,8 @@ import { Store } from '../apps/server/src/store.ts';
 import { botChoices } from '../apps/server/src/bot-choices.ts';
 import { aiTools } from '../apps/server/src/ai-tools.ts';
 import { labelActions, observe, validator } from '../apps/server/src/ai-observe.ts';
-import { viewFor, applyAction } from '../packages/engine/src/index.ts';
+import { mapById } from '../packages/content/src/index.ts';
+import { viewFor, applyAction, createGame, exitsFor, log } from '../packages/engine/src/index.ts';
 const config = {
   baseUrl: 'http://provider.invalid/v1',
   key: 'test-secret',
@@ -565,6 +566,282 @@ test('review fixes: one self-written offer per round, lopsided AI offers are vet
   const latest = service.record(c.code).game!;
   assert.equal(latest.trade, null, 'the lopsided offer was not sent');
   assert.ok(latest.events.some((e) => e.kind === 'ai' && e.detail?.startsWith('规则')));
+  service.dispose();
+  store.close();
+});
+
+test('truncated thinking gets a larger final-call budget; public trace never contains raw reasoning', async () => {
+  const { store, service, c, bot } = fixture();
+  const game = service.record(c.code).game!,
+    choices = botChoices(game, bot.id);
+  const wires: any[] = [],
+    streamed: any[] = [];
+  const brain = createBotBrain(config, async (_url, init) => {
+    wires.push(JSON.parse(init!.body as string));
+    if (wires.length === 1)
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: 'length',
+              message: {
+                content: 'a1 PRIVATE_REASONING is still being considered',
+                reasoning_content: 'SECRET_REASONING',
+              },
+            },
+          ],
+        }),
+      );
+    return toolReply('act', { choice: 'a1', reason: '出发探索' });
+  });
+  const result = await brain.choose(
+    viewFor(game, bot.id),
+    choices,
+    choices[0],
+    new AbortController().signal,
+    { ...hooksFor(game, bot.id, choices), onTrace: (trace) => streamed.push(trace) },
+  );
+  assert.equal(result.source, 'llm');
+  assert.equal(wires.length, 2);
+  assert.ok(wires[1].max_tokens > wires[0].max_tokens);
+  assert.deepEqual(
+    wires[1].tools.map((t: any) => t.function.name),
+    ['act'],
+  );
+  assert.ok(result.trace?.some((s) => s.kind === 'retry'));
+  assert.equal(result.trace?.at(-1)?.kind, 'decision');
+  assert.ok(streamed.length >= 2);
+  assert.ok(
+    streamed.every((trace) => trace.every((step: any) => step.kind !== 'decision')),
+    'uncommitted final choices are not broadcast',
+  );
+  assert.doesNotMatch(JSON.stringify(result.trace), /PRIVATE_REASONING|SECRET_REASONING|a99/);
+  store.close();
+});
+
+test('multiple native reads and act in one reply do not discard the valid decision', async () => {
+  const { store, service, c, bot } = fixture();
+  const game = service.record(c.code).game!,
+    choices = botChoices(game, bot.id);
+  const brain = createBotBrain(
+    config,
+    async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: 'PRIVATE_BODY',
+                tool_calls: [
+                  { id: 's', function: { name: 'state', arguments: '{}' } },
+                  {
+                    id: 'a',
+                    function: { name: 'act', arguments: '{"choice":"a1","reason":"出发"}' },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      ),
+  );
+  const result = await brain.choose(
+    viewFor(game, bot.id),
+    choices,
+    choices[0],
+    new AbortController().signal,
+    hooksFor(game, bot.id, choices),
+  );
+  assert.equal(result.source, 'llm');
+  assert.equal(result.trace?.filter((s) => s.kind === 'tool').length, 1);
+  assert.doesNotMatch(JSON.stringify(result.trace), /PRIVATE_BODY|hand|nextDice|lockedCards/);
+  store.close();
+});
+
+test('Responses preserves encrypted reasoning between tool calls without publishing it', async () => {
+  const { store, service, c, bot } = fixture();
+  const game = service.record(c.code).game!,
+    choices = botChoices(game, bot.id);
+  let count = 0,
+    second: any;
+  const reasoning = {
+    type: 'reasoning',
+    id: 'rs_1',
+    summary: [],
+    encrypted_content: 'ENCRYPTED_PRIVATE_STATE',
+  };
+  const brain = createBotBrain({ ...config, mode: 'responses' }, async (_url, init) => {
+    const wire = JSON.parse(init!.body as string);
+    assert.deepEqual(wire.include, ['reasoning.encrypted_content']);
+    if (++count === 1)
+      return new Response(
+        JSON.stringify({
+          output: [
+            reasoning,
+            { type: 'function_call', call_id: 'c1', name: 'square', arguments: '{"index":1}' },
+          ],
+        }),
+      );
+    second = wire;
+    return new Response(
+      JSON.stringify({
+        output: [
+          {
+            type: 'function_call',
+            call_id: 'c2',
+            name: 'act',
+            arguments: '{"choice":"a1","reason":"出发"}',
+          },
+        ],
+      }),
+    );
+  });
+  const result = await brain.choose(
+    viewFor(game, bot.id),
+    choices,
+    choices[0],
+    new AbortController().signal,
+    hooksFor(game, bot.id, choices),
+  );
+  assert.equal(result.source, 'llm');
+  assert.ok(
+    second.input.some((item: any) => item.encrypted_content === reasoning.encrypted_content),
+  );
+  assert.doesNotMatch(JSON.stringify(result.trace), /ENCRYPTED_PRIVATE_STATE/);
+  store.close();
+});
+
+test('tools agree on candidate ids, enumerate forks, and hide private preview details', () => {
+  const { store, service, c, bot } = fixture();
+  const game = service.record(c.code).game!;
+  game.settings.mapId = 'neon';
+  const map = mapById('neon');
+  // Recreate for this board rather than reusing another map's property list.
+  const g = createGame(game.settings, service.record(c.code).seats, 'forks', {
+    now: 1000,
+    randomInt: () => 0,
+  });
+  const fork = map.tiles.find((t) => exitsFor(g, t.index).length > 1)!;
+  assert.ok(fork);
+  g.turn = 1;
+  const me = g.players.find((p) => p.id === bot.id)!;
+  me.position = fork.index;
+  me.characterId = 'builder';
+  const choices = botChoices(g, bot.id),
+    tools = aiTools(g, bot.id, choices);
+  const risk = tools.look_ahead.run({}) as any[];
+  assert.deepEqual(
+    risk[0].outcomes.map((x: any) => x.index).sort(),
+    [...exitsFor(g, fork.index)].sort(),
+  );
+  const advice = tools.advice.run({}) as any;
+  assert.match(advice.choice, /^a\d+$/);
+  assert.deepEqual(choices[Number(advice.choice.slice(1)) - 1], advice.action);
+  assert.doesNotMatch(JSON.stringify(tools.preview.publicFacts!({}, {})), /cardId|遥控骰子/);
+  assert.equal(observe(g, bot.id).activeId, bot.id);
+  store.close();
+});
+
+test('queue admission is fair when a previous room immediately requests again', async () => {
+  const store = new Store(':memory:');
+  const pending: { resolve: (d: AiDecision) => void; choices: any[] }[] = [];
+  const service = new GameService(store, {
+    now: () => 1000,
+    aiMaxConcurrent: 1,
+    brain: {
+      model: 'fixture',
+      choose: (_v, choices) => new Promise((resolve) => pending.push({ resolve, choices })),
+    },
+  });
+  const make = () => {
+    const c = service.create({ name: '玩家' });
+    service.connected(c.code, c.seatId);
+    service.lobby(c.code, c.seatId, { type: 'addBot', botMode: 'llm' });
+    service.lobby(c.code, c.seatId, { type: 'start' });
+    const r = service.record(c.code);
+    r.game!.turn = 1;
+    store.save(r);
+    return c;
+  };
+  const a = make(),
+    b = make();
+  service.tick(a.code);
+  service.tick(b.code);
+  pending[0].resolve({
+    source: 'llm',
+    action: pending[0].choices.find((x) => x.type === 'ability')!,
+    message: 'ok',
+  });
+  await new Promise((r) => setTimeout(r, 0));
+  service.tick(a.code);
+  assert.equal(service.view(a.code, a.seatId).aiActivity?.state, 'queued');
+  service.tick(b.code);
+  assert.equal(service.view(b.code, b.seatId).aiActivity?.state, 'thinking');
+  assert.equal(pending.length, 2);
+  service.dispose();
+  store.close();
+});
+
+test('durable trajectory pagination requires room credentials and survives rolling event removal', () => {
+  const { store, service, c, bot } = fixture();
+  const record = service.record(c.code),
+    game = record.game!;
+  const env = service.env();
+  for (let i = 0; i < 38; i++)
+    log(game, env, 'ai', '公开决定', bot.id, undefined, undefined, {
+      aiTrace: [{ kind: 'decision', title: '测试决定', text: '公开摘要', ms: i }],
+    });
+  store.save(record);
+  for (let i = 0; i < 160; i++) log(game, env, 'test', '其他事件');
+  store.save(record);
+  assert.equal(game.events.filter((e) => e.aiTrace).length, 0);
+  assert.throws(
+    () => service.aiTraces(c.code, { token: 'x'.repeat(40), gameId: game.id }),
+    /无法恢复/,
+  );
+  assert.throws(() => service.aiTraces(c.code, { token: c.token, gameId: 'other' }), /对局已更新/);
+  const first = service.aiTraces(c.code, { token: c.token, gameId: game.id });
+  assert.equal(first.events.length, 24);
+  assert.ok(first.before);
+  const next = service.aiTraces(c.code, { token: c.token, gameId: game.id, before: first.before });
+  assert.equal(next.events.length, 14);
+  assert.equal(next.before, null);
+  assert.equal(new Set([...first.events, ...next.events].map((e) => e.id)).size, 38);
+  assert.doesNotMatch(JSON.stringify(first), /tokenHash|newCards|nextDice|test-secret/);
+  service.dispose();
+  store.close();
+});
+
+test('failed persistence cannot activate an uncommitted model turn plan', async () => {
+  let asked = 0;
+  const { store, service, c } = fixture(async (_view, choices) => {
+    asked++;
+    return {
+      source: 'llm',
+      action: choices.find((a) => a.type === 'ability')!,
+      plan: [{ type: 'end' }],
+      message: 'ok',
+    };
+  });
+  const record = service.record(c.code);
+  record.game!.phase = 'manage';
+  store.save(record);
+  const save = store.save.bind(store);
+  let fail = true;
+  store.save = (...args) => {
+    if (fail) {
+      fail = false;
+      throw Error('disk unavailable');
+    }
+    save(...args);
+  };
+  service.tick(c.code);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(service.record(c.code).game!.revision, 0);
+  service.tick(c.code);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(asked, 2, 'a failed first action must be decided again before any follow-up runs');
+  assert.equal(service.record(c.code).game!.revision, 1);
   service.dispose();
   store.close();
 });

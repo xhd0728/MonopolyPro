@@ -22,6 +22,7 @@ export function useShortcuts(options: Shortcuts) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const o = current.current;
+      if (document.querySelector('dialog[open]')) return;
       if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === '?') {
         o.help();

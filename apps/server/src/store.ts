@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomInt } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { CommandResult, RoomRecord } from '../../../packages/shared/src/index.ts';
+import type { CommandResult, GameEvent, RoomRecord } from '../../../packages/shared/src/index.ts';
 import { migrateGame } from '../../../packages/engine/src/index.ts';
 
 export class Store {
@@ -121,6 +121,16 @@ export class Store {
       this.db.exec('ROLLBACK');
       throw error;
     }
+  }
+  /** Load public AI traces from the durable event journal, newest first, in bounded pages. */
+  aiTraces(code: string, gameId: string, before: number | null, limit = 24) {
+    const rows = this.db
+      .prepare(
+        `SELECT payload FROM events WHERE code=? AND game_id=? AND event_id<? AND json_type(payload,'$.aiTrace')='array' ORDER BY event_id DESC LIMIT ?`,
+      )
+      .all(code, gameId, before ?? Number.MAX_SAFE_INTEGER, limit + 1) as { payload: string }[];
+    const events = rows.slice(0, limit).map((row) => JSON.parse(row.payload) as GameEvent);
+    return { events, before: rows.length > limit ? events.at(-1)!.id : null };
   }
   remove(code: string) {
     this.db.prepare('DELETE FROM rooms WHERE code=?').run(code);

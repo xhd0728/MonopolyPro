@@ -1,0 +1,990 @@
+.report-dialog {
+  border: 1px solid #d4dfe9;
+  border-radius: 22px;
+  padding: 0;
+  width: min(1180px, 94vw);
+  max-width: 94vw;
+  height: min(900px, 92dvh);
+  max-height: 92dvh;
+  color: #193a57;
+  background: #f1f5f8;
+  box-shadow: 0 32px 100px #071c3b55;
+  overflow: hidden;
+  font: inherit;
+}
+.report-dialog::backdrop {
+  background: #102d49aa;
+  backdrop-filter: blur(7px);
+}
+.report-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.report-top {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 26px;
+  background: white;
+  border-bottom: 1px solid #dde5ed;
+}
+.report-top > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.report-top .eyebrow {
+  font-size: 10px;
+  color: #6d8598;
+  letter-spacing: 2px;
+}
+.report-top b {
+  font-size: 17px;
+}
+.report-top h2 {
+  margin: 0;
+  font-size: 22px;
+}
+.report-top .icon-button {
+  font-size: 26px;
+  width: 38px;
+  height: 38px;
+  background: #eef3f7;
+  border-radius: 50%;
+  padding: 0;
+  color: #527087;
+}
+.report-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 22px 26px 26px;
+  overscroll-behavior: contain;
+}
+.victory-hero {
+  display: flex;
+  gap: 22px;
+  align-items: center;
+  padding: 30px;
+  border-radius: 16px;
+  background:
+    radial-gradient(ellipse at 0% 0%, #32678e, transparent 65%),
+    linear-gradient(120deg, #123451, #112b45);
+  color: white;
+  position: relative;
+  overflow: hidden;
+}
+.victory-hero::after {
+  content: '✧  ✦   ✧';
+  position: absolute;
+  top: 0;
+  right: 25%;
+  font-size: 65px;
+  color: #f4c46620;
+  letter-spacing: 30px;
+  pointer-events: none;
+  transform: rotate(-15deg);
+}
+.victory-trophy {
+  flex-shrink: 0;
+  font-size: 66px;
+  line-height: 1;
+  filter: drop-shadow(0 7px 10px #0004);
+}
+.victory-kicker {
+  font-size: 12px;
+  letter-spacing: 4px;
+  color: #f8cc74;
+}
+.victory-hero h2 {
+  font-size: clamp(24px, 3vw, 34px);
+  line-height: 1.25;
+  margin: 10px 0;
+  color: #fff;
+  overflow-wrap: anywhere;
+}
+.victory-hero p {
+  margin: 0;
+  color: #b8cddd;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.victory-worth {
+  margin-left: auto;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+  z-index: 1;
+}
+.victory-worth span {
+  color: #bdd0df;
+  font-size: 11px;
+}
+.victory-worth strong {
+  font-size: 38px;
+  color: #ffd682;
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+}
+.report-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin: 18px 0;
+  background: white;
+  border: 1px solid #e0e7ee;
+  border-radius: 12px;
+  padding: 17px 0;
+}
+.report-kpis > div {
+  display: flex;
+  gap: 6px;
+  flex-direction: column;
+  padding: 0 24px;
+  border-right: 1px solid #e4ebf1;
+}
+.report-kpis > div:last-child {
+  border: 0;
+}
+.report-kpis small {
+  color: #74899b;
+  font-size: 11px;
+}
+.report-kpis b {
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+}
+.report-kpis em {
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 400;
+  color: #74899b;
+}
+.report-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0 18px;
+  border-bottom: 1px solid #d9e3ec;
+}
+.report-tabs button {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 12px 24px;
+  color: #6b8296;
+  font-size: 14px;
+  border-bottom: 3px solid transparent;
+}
+.report-tabs button.on {
+  color: #173d5e;
+  border-color: #edae30;
+  font-weight: 700;
+}
+.report-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.report-card {
+  min-width: 0;
+  background: white;
+  border: 1px solid #e0e7ee;
+  border-radius: 14px;
+  padding: 20px;
+  margin-bottom: 18px;
+}
+.report-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.report-card h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #193b58;
+}
+.report-card-heading > span {
+  font-size: 10px;
+  color: #7d8f9e;
+}
+.report-ranking article {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 10px;
+  border-bottom: 1px solid #edf1f5;
+}
+.report-ranking article:last-child {
+  border-bottom: 0;
+}
+.report-ranking article.winner {
+  border-radius: 10px;
+  background: linear-gradient(100deg, #fff4d7, #fffdf7);
+  border: 1px solid #f5dfa8;
+}
+.rank-number {
+  width: 30px;
+  flex-shrink: 0;
+  font-size: 23px;
+  text-align: center;
+  color: #9caab5;
+}
+.report-ranking article > div {
+  flex: 1;
+  min-width: 0;
+}
+.report-ranking b {
+  display: block;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.report-ranking b em {
+  color: #9c6b07;
+  background: #f9e5b1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-style: normal;
+  margin-left: 4px;
+}
+.report-ranking b small {
+  font-size: 10px;
+  font-weight: 400;
+  color: #8193a2;
+}
+.report-ranking article > div > span {
+  display: block;
+  font-size: 10px;
+  color: #758a9b;
+  margin: 8px 0;
+  line-height: 1.5;
+}
+.report-ranking article > strong {
+  display: flex;
+  flex-direction: column;
+  text-align: right;
+  gap: 4px;
+  font-size: 21px;
+  font-variant-numeric: tabular-nums;
+}
+.report-ranking strong small {
+  font-size: 9px;
+  font-weight: 400;
+  color: #8b9cab;
+}
+.rank-track,
+.rank-track i {
+  display: block;
+  height: 4px;
+  border-radius: 8px;
+  background: #edf2f6;
+  overflow: hidden;
+}
+.rank-track i {
+  background: var(--who);
+}
+.report-awards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.report-awards article {
+  padding: 14px 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.report-awards article > span {
+  font-size: 23px;
+}
+.report-awards article > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.report-awards b {
+  font-size: 11px;
+  color: #6c8294;
+}
+.report-awards strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.report-awards small {
+  font-size: 10px;
+  color: #9a7b3d;
+}
+.report-footer {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  background: white;
+  padding: 16px 26px;
+  border-top: 1px solid #dce5ec;
+}
+.report-footer > span {
+  margin-right: auto;
+  font-size: 11px;
+  color: #93a3af;
+}
+.report-footer button {
+  min-height: 42px;
+  padding: 10px 18px;
+  font-size: 13px;
+}
+.report-footer .primary {
+  box-shadow: 0 3px 0 #c98a10;
+}
+.report-analysis-controls {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 16px;
+}
+.round-control {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+  min-width: 0;
+  background: #e7eef5;
+  border-radius: 9px;
+  padding: 12px 16px;
+}
+.round-control label {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.round-control input {
+  flex: 1;
+  min-width: 50px;
+  width: auto;
+  padding: 0;
+  accent-color: #1b557d;
+}
+.round-control span {
+  font-size: 10px;
+  color: #7890a2;
+  white-space: nowrap;
+}
+.report-select {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+}
+.report-dialog select {
+  background: #f5f8fb;
+  color: #24445e;
+  border: 1px solid #d9e3eb;
+  border-radius: 7px;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 12px;
+  width: auto;
+}
+.trend-chart svg {
+  display: block;
+  width: 100%;
+  max-height: 300px;
+  touch-action: pan-y;
+}
+.report-dialog svg text {
+  font-size: 11px;
+  fill: #7a8fa0;
+  font-family: inherit;
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px 18px;
+  align-items: center;
+  margin-top: 12px;
+}
+.chart-legend button,
+.chart-legend > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: #577187;
+  border: 0;
+  padding: 4px;
+  background: transparent;
+}
+.chart-legend b {
+  color: #193e5d;
+  font-size: 12px;
+}
+.chart-legend button[aria-pressed='false'] {
+  opacity: 0.35;
+}
+.chart-legend i,
+.donut-chart p i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.report-table-wrap {
+  overflow-x: auto;
+}
+.report-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.report-table th,
+.report-table td {
+  padding: 13px 10px;
+  text-align: right;
+  border-bottom: 1px solid #e8edf2;
+}
+.report-table th:first-child {
+  text-align: left;
+}
+.report-table thead th {
+  color: #8a9eae;
+  font-size: 10px;
+  font-weight: 500;
+  background: #f7f9fb;
+}
+.report-table tbody th {
+  font-weight: 600;
+}
+.report-note {
+  display: block;
+  color: #8397a7;
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 14px 0 0;
+}
+.report-empty {
+  padding: 15px;
+  background: #fff2d8;
+  font-size: 12px;
+  color: #94702d;
+  border-radius: 9px;
+}
+.report-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.donut-chart svg {
+  max-width: 210px;
+  width: 100%;
+  display: block;
+  margin: auto;
+}
+.report-dialog .donut-value {
+  font-size: 24px;
+  fill: #1a3e5d;
+  font-weight: 700;
+}
+.donut-chart > div {
+  max-width: 330px;
+  margin: auto;
+}
+.donut-chart p {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin: 13px 0;
+}
+.donut-chart p b {
+  margin-left: auto;
+}
+.donut-chart p small {
+  color: #8da0af;
+  width: 33px;
+  text-align: right;
+}
+.radar-chart svg {
+  display: block;
+  width: 100%;
+  max-height: 270px;
+}
+.radar-chart .chart-legend {
+  justify-content: center;
+}
+.player-highlights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+.player-highlights h3 {
+  width: 100%;
+}
+.player-highlights > div {
+  flex: 1;
+  min-width: 95px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.player-highlights small {
+  color: #8a9cab;
+  font-size: 11px;
+}
+.player-highlights b {
+  font-size: 21px;
+}
+/* The decision trace uses curated public fields; raw request/response bodies never render. */
+.activity-feed header .trace-open {
+  font-size: 10px;
+  margin-left: auto;
+  margin-right: 8px;
+  color: #2d718f;
+  background: #ecf5f9;
+  border: 0;
+  padding: 5px 7px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.feed-trace {
+  margin-top: 8px;
+  font-size: 11px;
+}
+.feed-trace summary {
+  cursor: pointer;
+  color: #367896;
+  padding: 5px 0;
+}
+.trace-timeline {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+}
+.trace-timeline > li {
+  display: flex;
+  gap: 13px;
+  padding: 0 0 22px;
+  position: relative;
+}
+.trace-timeline > li::before {
+  content: '';
+  position: absolute;
+  left: 19px;
+  top: 24px;
+  bottom: 0;
+  width: 1px;
+  background: #dce6ee;
+}
+.trace-timeline > li:last-child::before {
+  display: none;
+}
+.trace-node {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 4px 6px;
+  height: 25px;
+  box-sizing: border-box;
+  color: #36758b;
+  border: 1px solid #cfe1e9;
+  background: #eaf4f8;
+  border-radius: 7px;
+  z-index: 1;
+}
+.trace-tool .trace-node {
+  color: #7b60a6;
+  background: #f2eefa;
+  border-color: #e1d6f1;
+}
+.trace-fallback .trace-node,
+.trace-retry .trace-node,
+.trace-validation .trace-node {
+  color: #a27323;
+  background: #fff4dd;
+  border-color: #f0dfba;
+}
+.trace-execution .trace-node,
+.trace-decision .trace-node {
+  color: #2a8368;
+  background: #e9f6ef;
+  border-color: #cce8dc;
+}
+.trace-timeline > li > div {
+  flex: 1;
+  min-width: 0;
+}
+.trace-timeline header,
+.activity-feed .trace-timeline header {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 3px 0;
+  border: 0;
+  background: none;
+}
+.trace-timeline header b {
+  font-size: 13px;
+  color: #294e68;
+}
+.trace-timeline time {
+  font-size: 10px;
+  color: #96a6b3;
+  white-space: nowrap;
+}
+.trace-timeline code {
+  display: inline-block;
+  font-size: 10px;
+  background: #eaf0f5;
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin: 5px 0;
+  color: #647c91;
+}
+.trace-timeline p {
+  font-size: 12px;
+  color: #7a8fa0;
+  line-height: 1.7;
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+.trace-timeline ul {
+  padding: 10px 12px 10px 25px;
+  border-radius: 8px;
+  background: #f1f5f8;
+  color: #46677e;
+  font-size: 11px;
+  line-height: 1.9;
+  margin-top: 8px;
+}
+.feed-trace .trace-timeline {
+  max-height: 330px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.feed-trace .trace-timeline header b {
+  font-size: 11px;
+}
+.inspector-body {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+.inspector-state {
+  padding: 22px;
+  background: #eaf0f5;
+  overflow-y: auto;
+}
+.inspector-state h3 {
+  margin: 0 0 14px;
+  font-size: 15px;
+}
+.inspector-state h3 small {
+  float: right;
+  font-size: 11px;
+  color: #7b91a3;
+}
+.inspector-objective {
+  font-size: 11px;
+  line-height: 1.7;
+  color: #6a859a;
+  margin-bottom: 16px;
+}
+.inspector-state article {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 13px;
+  border-left: 3px solid;
+  border-radius: 7px;
+  background: white;
+  margin-bottom: 10px;
+}
+.inspector-state article b {
+  font-size: 12px;
+}
+.inspector-state article strong {
+  font-size: 21px;
+}
+.inspector-state article small {
+  font-size: 10px;
+  font-weight: 400;
+  color: #8da0ae;
+}
+.inspector-state article span {
+  font-size: 10px;
+  color: #7a91a4;
+}
+.inspector-trace {
+  padding: 22px 28px;
+  overflow-y: auto;
+  background: white;
+}
+.inspector-trace > label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #7e94a5;
+  font-size: 12px;
+}
+.inspector-trace select {
+  flex: 1;
+  min-width: 0;
+}
+.inspector-trace h3 {
+  margin: 26px 0 20px;
+  font-size: 16px;
+}
+.live-badge {
+  font-size: 10px;
+  background: #e6f7ee;
+  color: #2d9674;
+  padding: 4px 8px;
+  border-radius: 12px;
+  margin-left: 8px;
+}
+@media (max-width: 800px) {
+  .report-dialog {
+    width: 96vw;
+    max-width: 96vw;
+    height: 94dvh;
+    max-height: 94dvh;
+    border-radius: 15px;
+  }
+  .report-top {
+    padding: 13px 16px;
+  }
+  .report-scroll {
+    padding: 14px;
+  }
+  .victory-hero {
+    padding: 22px 18px;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .victory-trophy {
+    font-size: 45px;
+  }
+  .victory-hero h2 {
+    font-size: 24px;
+  }
+  .victory-worth {
+    margin: 12px 0 0;
+    width: 100%;
+    text-align: left;
+    padding-top: 15px;
+    border-top: 1px solid #ffffff24;
+  }
+  .victory-worth strong {
+    font-size: 32px;
+  }
+  .report-kpis {
+    grid-template-columns: 1fr 1fr;
+    gap: 18px 0;
+    padding: 18px 0;
+  }
+  .report-kpis > div {
+    padding: 0 18px;
+  }
+  .report-kpis > div:nth-child(2) {
+    border: 0;
+  }
+  .report-kpis b {
+    font-size: 22px;
+  }
+  .report-tabs {
+    position: sticky;
+    top: -14px;
+    background: #f1f5f8;
+    z-index: 2;
+  }
+  .report-tabs button {
+    flex: 1;
+    padding: 12px 6px;
+    font-size: 13px;
+  }
+  .report-overview,
+  .report-comparison {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .report-card {
+    padding: 15px;
+    border-radius: 11px;
+  }
+  .report-card-heading {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .report-card-heading > span {
+    font-size: 9px;
+  }
+  .report-ranking article {
+    padding: 14px 5px;
+    gap: 7px;
+  }
+  .rank-number {
+    width: 26px;
+    font-size: 20px;
+  }
+  .report-ranking article > strong {
+    font-size: 18px;
+  }
+  .report-ranking article > div > span {
+    font-size: 9px;
+  }
+  .report-footer {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 14px max(12px, env(safe-area-inset-bottom));
+  }
+  .report-footer > span {
+    display: none;
+  }
+  .report-footer button {
+    flex: 1;
+    padding: 10px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .report-analysis-controls {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .round-control {
+    flex-basis: 100%;
+    padding: 10px;
+    gap: 8px;
+  }
+  .round-control label {
+    font-size: 10px;
+  }
+  .chart-legend {
+    gap: 6px 10px;
+  }
+  .chart-legend button {
+    font-size: 9px;
+  }
+  .chart-legend b {
+    font-size: 10px;
+  }
+  .inspector-body {
+    display: block;
+    overflow-y: auto;
+  }
+  .inspector-state {
+    overflow: visible;
+    padding: 15px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .inspector-state h3,
+  .inspector-state .report-note,
+  .inspector-objective {
+    grid-column: 1 / -1;
+  }
+  .inspector-state article {
+    margin: 0;
+    padding: 10px;
+  }
+  .inspector-trace {
+    overflow: visible;
+    padding: 20px 15px;
+  }
+  .activity-feed header .trace-open {
+    font-size: 9px;
+    padding: 4px;
+    margin-right: 4px;
+  }
+}
+/* Keep the financial content in view when switching away from the celebration. */
+.report-top .eyebrow {
+  margin: 0;
+  line-height: 1.5;
+}
+.report-analysis .victory-hero {
+  padding: 14px 22px;
+  gap: 15px;
+}
+.report-analysis .victory-trophy {
+  font-size: 34px;
+}
+.report-analysis .victory-kicker,
+.report-analysis .victory-hero p,
+.report-analysis .victory-worth span:last-child,
+.report-analysis .report-kpis {
+  display: none;
+}
+.report-analysis .victory-hero h2 {
+  font-size: 22px;
+  margin: 0;
+}
+.report-analysis .victory-worth strong {
+  font-size: 25px;
+}
+.report-analysis .report-tabs {
+  margin-top: 14px;
+}
+@media (max-width: 800px) {
+  .report-analysis .victory-hero {
+    padding: 13px;
+    flex-wrap: nowrap;
+    gap: 10px;
+  }
+  .report-analysis .victory-trophy {
+    font-size: 28px;
+  }
+  .report-analysis .victory-hero h2 {
+    font-size: 17px;
+  }
+  .report-analysis .victory-worth {
+    width: auto;
+    border: 0;
+    padding: 0;
+    margin: 0 0 0 auto;
+    gap: 4px;
+    text-align: right;
+  }
+  .report-analysis .victory-worth strong {
+    font-size: 23px;
+  }
+  .report-analysis .victory-worth span {
+    font-size: 8px;
+  }
+}
+.trace-archive-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+  color: #8b9dab;
+  font-size: 10px;
+}
+.trace-archive-controls button {
+  font-size: 10px;
+  padding: 6px 10px;
+  min-height: 0;
+}
+.inspector-trace > label {
+  flex-direction: row;
+  justify-content: flex-start;
+  text-align: left;
+}
+@media (max-width: 800px) {
+  .trend-chart svg text {
+    font-size: 13px;
+  }
+}

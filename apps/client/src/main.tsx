@@ -1229,6 +1229,7 @@ function App() {
                           />
                         ) : (
                           <ActivityFeed
+                            roomCode={room.code}
                             game={g}
                             map={map}
                             ai={room.aiActivity}
@@ -1237,7 +1238,13 @@ function App() {
                         )}
                       </section>
                       {wide && (
-                        <ActivityFeed game={g} map={map} ai={room.aiActivity} className="docked" />
+                        <ActivityFeed
+                          roomCode={room.code}
+                          game={g}
+                          map={map}
+                          ai={room.aiActivity}
+                          className="docked"
+                        />
                       )}
                     </aside>
                   </div>
