@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type {
   GameView,
   RoundPlayerStats,
@@ -43,8 +43,12 @@ export function TrendChart({
     R = 20,
     T = 22,
     B = 34;
-  const values = history.flatMap((s) =>
-    s.players.filter((p) => !hidden.includes(p.id)).map((p) => valueOf(p, metric)),
+  const values = useMemo(
+    () =>
+      history.flatMap((s) =>
+        s.players.filter((p) => !hidden.includes(p.id)).map((p) => valueOf(p, metric)),
+      ),
+    [history, hidden, metric],
   );
   const min = Math.min(0, ...values),
     max = Math.max(1, ...values);
@@ -58,6 +62,32 @@ export function TrendChart({
       (W - L - R);
   const y = (v: number) => H - B - ((v - lo) / (hi - lo)) * (H - T - B);
   const snapshot = history[selected] ?? history.at(-1)!;
+  const paths = useMemo(
+    () =>
+      game.players
+        .map((p, index) => ({
+          id: p.id,
+          color: playerColor(index),
+          points: history
+            .map((s, i) => {
+              const data = s.players.find((x) => x.id === p.id);
+              return data ? `${x(i)},${y(valueOf(data, metric))}` : '';
+            })
+            .filter(Boolean)
+            .join(' '),
+        }))
+        .filter((p) => !hidden.includes(p.id)),
+    [history, metric, hidden, game.players, W],
+  );
+  const selectAt = (clientX: number, svg: SVGSVGElement) => {
+    const box = svg.getBoundingClientRect();
+    const position = ((clientX - box.left) / box.width) * W;
+    const nearest = history.reduce(
+      (best, _, i) => (Math.abs(x(i) - position) < Math.abs(x(best) - position) ? i : best),
+      0,
+    );
+    select(nearest);
+  };
   return (
     <div className="trend-chart">
       <svg
@@ -65,14 +95,9 @@ export function TrendChart({
         role="img"
         aria-label="每轮财务趋势图"
         onPointerMove={(e) => {
-          const box = e.currentTarget.getBoundingClientRect();
-          const position = ((e.clientX - box.left) / box.width) * W;
-          const nearest = history.reduce(
-            (best, _, i) => (Math.abs(x(i) - position) < Math.abs(x(best) - position) ? i : best),
-            0,
-          );
-          select(nearest);
+          if (e.pointerType === 'mouse') selectAt(e.clientX, e.currentTarget);
         }}
+        onClick={(e) => selectAt(e.clientX, e.currentTarget)}
       >
         {Array.from({ length: 5 }, (_, i) => {
           const v = lo + ((hi - lo) * i) / 4;
@@ -85,27 +110,17 @@ export function TrendChart({
             </g>
           );
         })}
-        {shown.map((p) => {
-          const index = game.players.findIndex((x) => x.id === p.id);
-          const pts = history
-            .map((s, i) => {
-              const data = s.players.find((x) => x.id === p.id);
-              return data ? `${x(i)},${y(valueOf(data, metric))}` : '';
-            })
-            .filter(Boolean)
-            .join(' ');
-          return (
-            <polyline
-              key={p.id}
-              points={pts}
-              fill="none"
-              stroke={playerColor(index)}
-              strokeWidth="3"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-            />
-          );
-        })}
+        {paths.map((p) => (
+          <polyline
+            key={p.id}
+            points={p.points}
+            fill="none"
+            stroke={p.color}
+            strokeWidth="3"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        ))}
         <line
           x1={x(selected)}
           x2={x(selected)}

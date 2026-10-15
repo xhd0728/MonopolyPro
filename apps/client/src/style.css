@@ -1363,7 +1363,7 @@ small {
     margin-left: -15px;
     margin-right: -15px;
   }
-  .section-heading > span {
+  .home .section-heading > span {
     display: none;
   }
   .section-heading h2 {

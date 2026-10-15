@@ -380,9 +380,16 @@
 }
 .report-select {
   display: flex;
+  flex-direction: row;
+  white-space: nowrap;
+  margin: 0;
   gap: 10px;
   align-items: center;
   font-size: 12px;
+}
+.report-select select {
+  min-width: 90px;
+  max-width: 180px;
 }
 .report-dialog select {
   background: #f5f8fb;
@@ -545,18 +552,6 @@
 .player-highlights b {
   font-size: 21px;
 }
-/* The decision trace uses curated public fields; raw request/response bodies never render. */
-.activity-feed header .trace-open {
-  font-size: 10px;
-  margin-left: auto;
-  margin-right: 8px;
-  color: #2d718f;
-  background: #ecf5f9;
-  border: 0;
-  padding: 5px 7px;
-  border-radius: 6px;
-  white-space: nowrap;
-}
 .feed-trace {
   margin-top: 8px;
   font-size: 11px;
@@ -674,85 +669,6 @@
 }
 .feed-trace .trace-timeline header b {
   font-size: 11px;
-}
-.inspector-body {
-  display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  flex: 1;
-  min-height: 0;
-}
-.inspector-state {
-  padding: 22px;
-  background: #eaf0f5;
-  overflow-y: auto;
-}
-.inspector-state h3 {
-  margin: 0 0 14px;
-  font-size: 15px;
-}
-.inspector-state h3 small {
-  float: right;
-  font-size: 11px;
-  color: #7b91a3;
-}
-.inspector-objective {
-  font-size: 11px;
-  line-height: 1.7;
-  color: #6a859a;
-  margin-bottom: 16px;
-}
-.inspector-state article {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 13px;
-  border-left: 3px solid;
-  border-radius: 7px;
-  background: white;
-  margin-bottom: 10px;
-}
-.inspector-state article b {
-  font-size: 12px;
-}
-.inspector-state article strong {
-  font-size: 21px;
-}
-.inspector-state article small {
-  font-size: 10px;
-  font-weight: 400;
-  color: #8da0ae;
-}
-.inspector-state article span {
-  font-size: 10px;
-  color: #7a91a4;
-}
-.inspector-trace {
-  padding: 22px 28px;
-  overflow-y: auto;
-  background: white;
-}
-.inspector-trace > label {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: #7e94a5;
-  font-size: 12px;
-}
-.inspector-trace select {
-  flex: 1;
-  min-width: 0;
-}
-.inspector-trace h3 {
-  margin: 26px 0 20px;
-  font-size: 16px;
-}
-.live-badge {
-  font-size: 10px;
-  background: #e6f7ee;
-  color: #2d9674;
-  padding: 4px 8px;
-  border-radius: 12px;
-  margin-left: 8px;
 }
 @media (max-width: 800px) {
   .report-dialog {
@@ -879,35 +795,6 @@
   .chart-legend b {
     font-size: 10px;
   }
-  .inspector-body {
-    display: block;
-    overflow-y: auto;
-  }
-  .inspector-state {
-    overflow: visible;
-    padding: 15px;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-  }
-  .inspector-state h3,
-  .inspector-state .report-note,
-  .inspector-objective {
-    grid-column: 1 / -1;
-  }
-  .inspector-state article {
-    margin: 0;
-    padding: 10px;
-  }
-  .inspector-trace {
-    overflow: visible;
-    padding: 20px 15px;
-  }
-  .activity-feed header .trace-open {
-    font-size: 9px;
-    padding: 4px;
-    margin-right: 4px;
-  }
 }
 /* Keep the financial content in view when switching away from the celebration. */
 .report-top .eyebrow {
@@ -963,25 +850,6 @@
   .report-analysis .victory-worth span {
     font-size: 8px;
   }
-}
-.trace-archive-controls {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 12px;
-  color: #8b9dab;
-  font-size: 10px;
-}
-.trace-archive-controls button {
-  font-size: 10px;
-  padding: 6px 10px;
-  min-height: 0;
-}
-.inspector-trace > label {
-  flex-direction: row;
-  justify-content: flex-start;
-  text-align: left;
 }
 @media (max-width: 800px) {
   .trend-chart svg text {

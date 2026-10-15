@@ -50,6 +50,7 @@ export function TradeDialog({
   me,
   draft,
   disabled,
+  blockedReason = '',
   send,
 }: {
   game: GameView;
@@ -57,11 +58,12 @@ export function TradeDialog({
   me: PlayerView;
   draft: TradeDraft;
   disabled: boolean;
+  blockedReason?: string;
   send: (action: GameAction) => void;
 }) {
   const [d, setD] = useState(draft);
   const partners = game.players.filter((p) => p.id !== me.id && !p.bankrupt);
-  const partner = game.players.find((p) => p.id === d.to);
+  const partner = partners.find((p) => p.id === d.to);
   const toggle = (side: 'giveTiles' | 'wantTiles', tile: number) =>
     setD({
       ...d,
@@ -76,26 +78,41 @@ export function TradeDialog({
   const active = game.players[game.turn]?.id;
   const sideOffer = !d.counter && !!partner && active !== me.id && active !== partner.id;
   const theirGroups = partner ? completesGroup(game, map, partner.id, d.giveTiles) : [];
-  const reason = !partner
-    ? '请选择交易对象'
-    : !validMoney(d.giveCash) || !validMoney(d.wantCash)
-      ? '现金必须是非负整数'
-      : d.giveCash > me.cash
-        ? '给出的现金超过你的余额'
-        : d.wantCash > partner.cash
-          ? `${partner.name}只有 ${money(partner.cash)} 现金`
-          : !d.giveCash && !d.wantCash && !d.giveTiles.length && !d.wantTiles.length
-            ? '至少放入一项现金或地产'
-            : rival && !(d.giveCash || d.giveTiles.length) !== !(d.wantCash || d.wantTiles.length)
-              ? '对手之间的交易需要双方都付出现金或地产，不能单方面赠送'
-              : rival &&
-                  (d.giveCash > listed(d.wantTiles) * 2 || d.wantCash > listed(d.giveTiles) * 2)
-                ? '现金不能超过所换地产标价的 2 倍'
-                : rival && (gives * 2 < gets || gets * 2 < gives)
-                  ? '双方给出的价值（现金 + 地价）差距不能超过一倍'
-                  : sideOffer && game.tradeMemo[me.id]?.side === game.round
-                    ? '不在自己回合时，每轮只能发起一次交易'
-                    : '';
+  const availableGive = tradable(game, me.id).map((p) => p.tile);
+  const availableWant = partner ? tradable(game, partner.id).map((p) => p.tile) : [];
+  const staleTiles =
+    d.giveTiles.some((tile) => !availableGive.includes(tile)) ||
+    d.wantTiles.some((tile) => !availableWant.includes(tile));
+  const staleCounter =
+    d.counter && (!game.trade || game.trade.to !== me.id || game.trade.from !== d.to);
+  const reason =
+    blockedReason ||
+    (staleCounter
+      ? '原交易已失效，请关闭后重新发起'
+      : !partner
+        ? '请选择交易对象'
+        : staleTiles
+          ? '选中的地产状态已变化，请重新选择'
+          : !validMoney(d.giveCash) || !validMoney(d.wantCash)
+            ? '现金必须是非负整数'
+            : d.giveCash > me.cash
+              ? '给出的现金超过你的余额'
+              : d.wantCash > partner.cash
+                ? `${partner.name}只有 ${money(partner.cash)} 现金`
+                : !d.giveCash && !d.wantCash && !d.giveTiles.length && !d.wantTiles.length
+                  ? '至少放入一项现金或地产'
+                  : rival &&
+                      !(d.giveCash || d.giveTiles.length) !== !(d.wantCash || d.wantTiles.length)
+                    ? '对手之间的交易需要双方都付出现金或地产，不能单方面赠送'
+                    : rival &&
+                        (d.giveCash > listed(d.wantTiles) * 2 ||
+                          d.wantCash > listed(d.giveTiles) * 2)
+                      ? '现金不能超过所换地产标价的 2 倍'
+                      : rival && (gives * 2 < gets || gets * 2 < gives)
+                        ? '双方给出的价值（现金 + 地价）差距不能超过一倍'
+                        : sideOffer && game.tradeMemo[me.id]?.side === game.round
+                          ? '不在自己回合时，每轮只能发起一次交易'
+                          : '');
   // Plain render helpers (not components) so inputs keep focus while typing.
   const squares = (owner: string, side: 'giveTiles' | 'wantTiles') => {
     const list = tradable(game, owner);
@@ -165,7 +182,13 @@ export function TradeDialog({
       {!d.counter && (
         <label>
           交易对象
-          <select value={d.to} onChange={(e) => setD({ ...d, to: e.target.value, wantTiles: [] })}>
+          <select
+            value={partner ? d.to : ''}
+            onChange={(e) => setD({ ...d, to: e.target.value, wantTiles: [] })}
+          >
+            <option value="" disabled>
+              请选择交易对象
+            </option>
             {partners.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name} · 现金 {money(p.cash)}
@@ -198,33 +221,53 @@ export function TradeDialog({
           <em>{gets >= gives ? '这笔交易对你划算' : '你付出的更多，对方更可能接受'}</em>
         )}
       </div>
-      {reason && <p className="field-error">{reason}</p>}
-      <button
-        className="primary full"
-        disabled={disabled || !!reason}
-        onClick={() =>
-          send(
-            d.counter
-              ? {
-                  type: 'tradeCounter',
-                  giveCash: d.giveCash,
-                  wantCash: d.wantCash,
-                  giveTiles: d.giveTiles,
-                  wantTiles: d.wantTiles,
+      <div className="trade-submit">
+        {reason && (
+          <p className="field-error" role="status">
+            {reason}
+            {staleTiles && (
+              <button
+                type="button"
+                onClick={() =>
+                  setD({
+                    ...d,
+                    giveTiles: d.giveTiles.filter((tile) => availableGive.includes(tile)),
+                    wantTiles: d.wantTiles.filter((tile) => availableWant.includes(tile)),
+                  })
                 }
-              : {
-                  type: 'tradeOffer',
-                  to: d.to,
-                  giveCash: d.giveCash,
-                  wantCash: d.wantCash,
-                  giveTiles: d.giveTiles,
-                  wantTiles: d.wantTiles,
-                },
-          )
-        }
-      >
-        {d.counter ? '发出还价' : '发出提案'}
-      </button>
+              >
+                清除失效地产
+              </button>
+            )}
+          </p>
+        )}
+        <button
+          className="primary full"
+          disabled={disabled || !!reason}
+          onClick={() =>
+            send(
+              d.counter
+                ? {
+                    type: 'tradeCounter',
+                    giveCash: d.giveCash,
+                    wantCash: d.wantCash,
+                    giveTiles: d.giveTiles,
+                    wantTiles: d.wantTiles,
+                  }
+                : {
+                    type: 'tradeOffer',
+                    to: d.to,
+                    giveCash: d.giveCash,
+                    wantCash: d.wantCash,
+                    giveTiles: d.giveTiles,
+                    wantTiles: d.wantTiles,
+                  },
+            )
+          }
+        >
+          {d.counter ? '发出还价' : '发出提案'}
+        </button>
+      </div>
     </div>
   );
 }

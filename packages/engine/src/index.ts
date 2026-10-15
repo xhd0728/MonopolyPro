@@ -2133,6 +2133,7 @@ export function viewFor(g: GameState, viewerId: string | null): GameView {
   }
   return {
     ...publicState,
+    bankInterestRate: interestRate(g),
     ...(history ? { history: g.phase === 'finished' ? history : history.slice(-2) } : {}),
     events: events.slice(-VIEW_EVENTS),
     viewerId,

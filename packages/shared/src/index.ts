@@ -399,6 +399,8 @@ export interface ActionOption {
   primary?: boolean;
 }
 export interface GameView extends Omit<GameState, 'players' | 'traps' | 'properties' | 'decks'> {
+  /** Current round's server-calculated bank interest, including world news. */
+  bankInterestRate?: number;
   players: PlayerView[];
   properties: PropertyView[];
   actions: ActionOption[];

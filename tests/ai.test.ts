@@ -760,6 +760,10 @@ test('queue admission is fair when a previous room immediately requests again', 
     service.lobby(c.code, c.seatId, { type: 'start' });
     const r = service.record(c.code);
     r.game!.turn = 1;
+    // The next decision must still have alternatives after the ability. Random starting
+    // hands can leave only "roll", which correctly bypasses the model queue entirely.
+    r.game!.players[1].cards = ['shield'];
+    r.game!.players[1].newCards = [];
     store.save(r);
     return c;
   };

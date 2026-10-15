@@ -11,7 +11,7 @@ import type {
   MapDefinition,
   TileDefinition,
 } from '../../../packages/shared/src/index.ts';
-import { groupColor, playerColor } from './game-ui.ts';
+import { groupColor, money, playerColor } from './game-ui.ts';
 import './board.css';
 import { play } from './sound.ts';
 
@@ -62,7 +62,7 @@ function tileCaption(t: TileDefinition, game: GameView | null | undefined, salar
     case 'gotojail':
       return '前往拘留所';
     case 'bank':
-      return `利息 ${BOARD.interest * 100}%`;
+      return `利息 ${money((game?.bankInterestRate ?? BOARD.interest) * 100)}%`;
     case 'shop':
       return '随机抽卡';
     case 'tax':

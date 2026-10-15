@@ -66,7 +66,7 @@ const phaseNames = {
 const kindNames = {
   start: '起点 · 经过领取薪水',
   property: '可购买的地产',
-  bank: `银行 · 每轮利息 ${BOARD.interest * 100}%`,
+  bank: '银行 · 存取现金与存款',
   shop: `卡牌市场 · 抽一张 ${BOARD.cardDraw}`,
   chance: '机会 · 抽一张机会卡（多为移动与惊喜）',
   fate: '命运 · 抽一张命运卡（多为现金与全场事件）',
@@ -1229,7 +1229,6 @@ function App() {
                           />
                         ) : (
                           <ActivityFeed
-                            roomCode={room.code}
                             game={g}
                             map={map}
                             ai={room.aiActivity}
@@ -1238,13 +1237,7 @@ function App() {
                         )}
                       </section>
                       {wide && (
-                        <ActivityFeed
-                          roomCode={room.code}
-                          game={g}
-                          map={map}
-                          ai={room.aiActivity}
-                          className="docked"
-                        />
+                        <ActivityFeed game={g} map={map} ai={room.aiActivity} className="docked" />
                       )}
                     </aside>
                   </div>
@@ -1404,10 +1397,12 @@ function App() {
           </div>
           {selected.kind === 'property' ? (
             <>
-              <div className="finance-summary">
+              <div className="finance-summary country-finances">
                 <div>
-                  <span>购买价格</span>
-                  <strong>{money(selected.price)}</strong>
+                  <span>{owner ? '原始地价' : '当前购地价'}</span>
+                  <strong>
+                    {money(owner ? selected.price : (property?.price ?? selected.price))}
+                  </strong>
                 </div>
                 <div>
                   <span>{owner ? '当前租金' : '基础租金'}</span>
@@ -1495,7 +1490,11 @@ function App() {
               )}
             </>
           ) : (
-            <p>{kindNames[selected.kind]}</p>
+            <p>
+              {selected.kind === 'bank'
+                ? `银行 · 本轮存款利息 ${money((g?.bankInterestRate ?? BOARD.interest) * 100)}%`
+                : kindNames[selected.kind]}
+            </p>
           )}
           {map.mechanic === 'gates' && map.shortcuts.some(([from]) => from === selected.index) && (
             <p className="tip-box">
@@ -1679,10 +1678,10 @@ function App() {
             map={map}
             me={me}
             draft={tradeDraft}
-            disabled={disabled || (!tradeDraft.counter && !!tradeWhy)}
+            disabled={disabled}
+            blockedReason={tradeDraft.counter ? '' : tradeWhy}
             send={command}
           />
-          {!tradeDraft.counter && tradeWhy && <p className="field-error">{tradeWhy}</p>}
         </Modal>
       )}
       {dialog === 'shop' && (
@@ -1774,9 +1773,9 @@ function App() {
                 手牌最多 {BOARD.handLimit} 张，每回合只能使用一张。卡牌市场花 {BOARD.cardDraw}{' '}
                 随机抽一张（卡牌魔术师只需 {BOARD.dealerDraw}
                 ），只能在停到市场的那个回合抽一次，稀有卡更难抽到；新得到的卡下回合才能用。租金护盾只能靠随机卡获得，最多持有
-                1 次。每个角色有被动与每 3 轮一次的天赋。银行可存取现金，存款每轮带来{' '}
+                1 次。每个角色有被动与每 3 轮一次的天赋。银行可存取现金，存款的基础每轮利息为{' '}
                 {BOARD.interest * 100}%
-                现金利息。没钱付租金或税费时，先取款、卖建筑或抵押；无法筹齐可破产，将资产清算给债权人或银行。交易随时可以发起（购买、拍卖、选路和筹款时除外）：点「⇄
+                现金利息，世界新闻可能调整本轮利率。没钱付租金或税费时，先取款、卖建筑或抵押；无法筹齐可破产，将资产清算给债权人或银行。交易随时可以发起（购买、拍卖、选路和筹款时除外）：点「⇄
                 发起交易」、玩家资料或国家详情里的「求购 /
                 出售」，勾选双方的现金和任意多处无建筑、未抵押的地产。对方限时回应（涉及当前玩家 60
                 秒，旁人之间 30 秒），可以接受、拒绝或还价，最多来回还价两次；被拒绝后需等 15

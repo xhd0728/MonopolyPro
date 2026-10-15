@@ -35,6 +35,13 @@ for (const viewport of [
     await expect(report.locator('.round-control')).toContainText('开局资产');
     await report.getByLabel('选择复盘轮次').press('ArrowRight');
     await expect(report.locator('.round-control')).toContainText('第 1 轮结束');
+    const selected = await report.getByLabel('选择复盘轮次').inputValue();
+    // A touch used to scroll the report must not change the selected round.
+    await report.getByRole('img', { name: '每轮财务趋势图' }).dispatchEvent('pointermove', {
+      pointerType: 'touch',
+      clientX: 0,
+    });
+    await expect(report.getByLabel('选择复盘轮次')).toHaveValue(selected);
     await report.getByLabel('趋势指标').selectOption('netRent');
     await expect(report.locator('.trend-chart')).toBeVisible();
     await page.screenshot({ path: `artifacts/ui/${device}-report-rounds.png` });
@@ -58,7 +65,7 @@ for (const viewport of [
     await expect(report).toHaveCount(0);
     expect(errors).toEqual([]);
   });
-  test(`${device}: decision inspector shows public global state and an ordered tool trajectory`, async ({
+  test(`${device}: inline trajectories expand on demand without a separate console`, async ({
     page,
   }) => {
     await page.setViewportSize(viewport);
@@ -66,22 +73,16 @@ for (const viewport of [
     await page.getByRole('button', { name: '收起结算面板' }).click();
     if (viewport.width < 801)
       await page.getByRole('button', { name: '打开动态', exact: true }).click();
-    await page
-      .getByRole('button', { name: 'AI 轨迹 ↗', exact: true })
-      .filter({ visible: true })
-      .click();
-    const inspector = page.getByRole('dialog', { name: 'Agent 决策台' });
-    await expect(inspector).toBeVisible();
-    await expect(inspector.locator('.inspector-state article')).toHaveCount(6);
-    await expect(inspector.locator('.trace-timeline')).toContainText('读取全局局面');
-    await expect(inspector.locator('.trace-timeline')).toContainText('查询目的');
-    await expect(inspector.locator('.trace-timeline')).toContainText('查看全局状态');
-    await expect(inspector.locator('.trace-timeline')).toContainText('提交决定');
-    const revision = await page.locator('.board-meta').getAttribute('data-revision');
-    await page.keyboard.press('e');
-    await expect(page.locator('.board-meta')).toHaveAttribute('data-revision', revision!);
-    await page.screenshot({ path: `artifacts/ui/${device}-agent-inspector.png` });
-    await page.keyboard.press('Escape');
-    await expect(inspector).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'AI 轨迹 ↗', exact: true })).toHaveCount(0);
+    const feed = page.locator(`.activity-feed.${device === 'mobile' ? 'in-panel' : 'docked'}`);
+    await expect(feed.locator('.trace-timeline')).toHaveCount(0);
+    const detail = feed.locator('.feed-trace').first();
+    await detail.locator('summary').click();
+    await expect(detail.locator('.trace-timeline')).toContainText('读取全局局面');
+    await expect(detail.locator('.trace-timeline')).toContainText('查询目的');
+    await expect(detail.locator('.trace-timeline')).toContainText('提交决定');
+    await detail.locator('summary').click();
+    await expect(feed.locator('.trace-timeline')).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Agent 决策台' })).toHaveCount(0);
   });
 }

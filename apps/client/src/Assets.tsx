@@ -25,7 +25,10 @@ export function Assets({
   const [amount, setAmount] = useState(300);
   const owned = g.properties.filter((p) => p.owner === me?.id);
   const manage =
-    !!me && g.activeId === me.id && ['roll', 'manage', 'debt'].includes(g.phase) && !g.trade;
+    !!me &&
+    g.activeId === me.id &&
+    ['roll', 'jail', 'manage', 'debt'].includes(g.phase) &&
+    !g.trade;
   const bank = !!me && (map.tiles[me.position].kind === 'bank' || g.phase === 'debt');
   const validAmount = Number.isSafeInteger(amount) && amount > 0;
   const bankReason = !manage
@@ -56,7 +59,7 @@ export function Assets({
           <section className="bank-panel" aria-label="银行存取款">
             <div className="section-heading">
               <h3>国际银行</h3>
-              <span>每轮利息 {BOARD.interest * 100}%</span>
+              <span>本轮利息 {money((g.bankInterestRate ?? BOARD.interest) * 100)}%</span>
             </div>
             <div className="bank-balances">
               <span>
