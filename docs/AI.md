@@ -4,7 +4,7 @@
 
 ## 本地配置
 
-Node.js 24 启动时自动读取根目录 `.env`（测试服务不读取）；已有进程环境变量优先。此次只将本地 KatanPro 的 `CATAN_AI_*` API 配置映射为 `MONOPOLY_AI_*`，保存在权限 600 的忽略文件 `.env`。没有复制卡坦岛的服务器端口或其他设置。
+服务端启动时自动读取根目录 `.env`（测试服务不读取）；支持 Node.js `^22.16.0 || >=23.8.0`，已有进程环境变量优先。此次只将本地 KatanPro 的 `CATAN_AI_*` API 配置映射为 `MONOPOLY_AI_*`，保存在权限 600 的忽略文件 `.env`。没有复制卡坦岛的服务器端口或其他设置。
 
 ```dotenv
 MONOPOLY_AI_ENABLED=true

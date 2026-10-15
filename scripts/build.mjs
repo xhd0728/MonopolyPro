@@ -9,6 +9,6 @@ await build({
   format: 'esm',
   packages: 'external',
   sourcemap: true,
-  target: 'node24',
+  target: 'node22.16',
 });
 await viteBuild({ configFile: resolve('apps/client/vite.config.ts') });

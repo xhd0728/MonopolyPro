@@ -1,6 +1,6 @@
 # 公网服务器交付与运维
 
-面向单台 Linux、Node.js 24、pnpm 11.25.0、systemd、Caddy。服务端提供前端、HTTP 和 WebSocket；SQLite 位于持久化目录。没有运行公网部署；部署者完成下方外网验收后才能宣布上线。
+面向单台 Linux、Node.js `^22.16.0 || >=23.8.0`（含 24）、pnpm 11.25.0、systemd、Caddy。服务端提供前端、HTTP 和 WebSocket；SQLite 位于持久化目录。没有运行公网部署；部署者完成下方外网验收后才能宣布上线。
 
 ## 构建与发布包
 
@@ -20,7 +20,7 @@ pnpm release
 
 ## 首次安装
 
-准备已绑定域名的 Linux 服务器，安装 Node.js 24（确认 `/usr/bin/node --version`；路径不同需修改 service）、pnpm 11.25.0 和 Caddy。防火墙开放 80/443 与必要的 SSH 端口；Node 8788 只监听本机。
+准备已绑定域名的 Linux 服务器，安装满足上述范围的 Node.js（确认 `/usr/bin/node --version`；路径不同需修改 service）、pnpm 11.25.0 和 Caddy。防火墙开放 80/443 与必要的 SSH 端口；Node 8788 只监听本机。
 
 以下使用包名中的 `<sha>` 替换为实际提交号：
 

@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@11.25.0",
   "engines": {
-    "node": ">=24 <25"
+    "node": "^22.16.0 || >=23.8.0"
   },
   "scripts": {
     "dev": "tsx watch apps/server/src/index.ts",

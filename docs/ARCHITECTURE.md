@@ -2,7 +2,7 @@
 
 - TypeScript pnpm workspace: `apps/client`, `apps/server`, `packages/shared`, `packages/engine`, `packages/content`.
 - React/Vite UI with HTML country tiles and SVG road connections. The desktop perimeter and mobile serpentine route preserve the same node identities and rules. Rules never wait for animation completion.
-- Node.js 24 and Colyseus authoritative rooms. HTTP serves the production client and room endpoints from the same origin.
+- Node.js (`^22.16.0 || >=23.8.0`) and Colyseus authoritative rooms. The minimum follows the built-in SQLite online-backup API; the server bundle targets Node 22.16 syntax. HTTP serves the production client and room endpoints from the same origin.
 - Pure, serializable engine: explicit decision phases, injected randomness and clock, integer money, controlled card effects and graph-based maps.
 - Each player receives a filtered view and private legal actions; spectators see public information only.
 - Application-level player recovery credentials survive server restarts. Colyseus session tokens alone do not.
