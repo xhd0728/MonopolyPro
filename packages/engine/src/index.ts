@@ -288,6 +288,7 @@ export function migrateGame(state: GameState, randomInt?: (max: number) => numbe
     p.shopped ??= false;
     // Older saves allowed eight cards and stacked shields; trim to the current limits.
     if (p.cards.length > BOARD.handLimit) p.cards.length = BOARD.handLimit;
+    p.newCards.length = Math.min(p.newCards.length, BOARD.handLimit - p.cards.length);
     p.shield = Math.min(p.shield, BOARD.shieldCap);
     p.stats = { ...emptyStats(), ...p.stats };
   }
@@ -684,13 +685,13 @@ function advanceTurn(g: GameState, env: EngineEnvironment) {
     if (g.turn === 0) {
       // Interest uses the news of the round that just ended.
       const rate = interestRate(g);
+      for (const p of g.players.filter((p) => !p.bankrupt && p.deposit > 0))
+        if (Math.floor(p.deposit * rate) > 0)
+          reward(g, p, Math.floor(p.deposit * rate), env, '银行利息');
       recordRound(g, g.round, env);
       g.round++;
       if (checkWinner(g, env)) return;
       updateFinale(g, env);
-      for (const p of g.players.filter((p) => !p.bankrupt && p.deposit > 0))
-        if (Math.floor(p.deposit * rate) > 0)
-          reward(g, p, Math.floor(p.deposit * rate), env, '银行利息');
       const map = mapOf(g);
       if (map.mechanic === 'gates')
         log(
@@ -2092,7 +2093,7 @@ export function actionsFor(g: GameState, id: string): ActionOption[] {
       add(
         { type: 'bank', direction: 'deposit', amount: 300 },
         '存入 300',
-        `每轮银行利息 ${BOARD.interest * 100}%`,
+        `本轮银行利息 ${interestRate(g) * 100}%`,
       );
   }
   if (g.phase === 'debt') {

@@ -23,6 +23,7 @@ import {
   bailOf,
   landPrice,
   buildCost,
+  migrateGame,
 } from '../packages/engine/src/index.ts';
 import { botAction } from '../packages/engine/src/bot.ts';
 import {
@@ -64,6 +65,52 @@ const game = (mapId = 'town', n = 2) => {
   return g;
 };
 const act = (g: GameState, a: GameAction, id = 'p0') => applyAction(g, id, a, env);
+test('legacy hand migration caps ready and locked cards together and remains idempotent', () => {
+  const g = game();
+  g.players[0].cards = Array(4).fill(CARDS[0].id);
+  g.players[0].newCards = Array(4).fill(CARDS[1].id);
+  g.players[1].cards = Array(8).fill(CARDS[0].id);
+  g.players[1].newCards = [CARDS[1].id];
+  const migrated = migrateGame(g);
+  assert.deepEqual(
+    migrated.players.map((p) => [p.cards.length, p.newCards.length]),
+    [
+      [4, 1],
+      [5, 0],
+    ],
+  );
+  assertInvariants(migrated);
+  const once = structuredClone(migrated);
+  assert.deepEqual(migrateGame(migrated), once);
+});
+test('the last completed round pays its bank interest before rankings and the final snapshot', () => {
+  for (const effect of ['calm', 'rateCut', 'rateHike'] as const) {
+    const g = game();
+    g.settings.rounds = 4;
+    g.round = 4;
+    g.phase = 'manage';
+    g.turn = 1;
+    const news = NEWS.find((n) => n.effect === effect)!;
+    g.news = { id: news.id, round: g.round };
+    g.players[0].deposit = 1000;
+    g.players[1].deposit = 2000;
+    const rate =
+      effect === 'rateCut' ? 0 : effect === 'rateHike' ? news.amount / 100 : BOARD.interest;
+    const expected = g.players.map((p) => p.cash + Math.floor(p.deposit * rate));
+    const final = act(g, { type: 'end' }, 'p1');
+    assert.equal(final.phase, 'finished');
+    assert.deepEqual(
+      final.players.map((p) => p.cash),
+      expected,
+    );
+    assert.deepEqual(
+      final.history!.at(-1)!.players.map((p) => p.assets),
+      final.players.map((p) => assetsOf(final, p)),
+    );
+    assert.equal(final.history!.at(-1)!.complete, true);
+    assert.deepEqual(final.winners, ['p1']);
+  }
+});
 test('ownership, exact purchase/build costs, mortgage and redemption', () => {
   let g = game();
   g.players[0].position = 1;

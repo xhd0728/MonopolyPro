@@ -86,7 +86,7 @@ export function readAiConfig(env: NodeJS.ProcessEnv): AiConfig | null {
   const mode = env.MONOPOLY_AI_API_MODE ?? 'chat';
   if (!['chat', 'responses', 'anthropic'].includes(mode)) throw Error('Invalid LLM API mode');
   const timeoutMs = Number(env.MONOPOLY_AI_TIMEOUT_MS ?? 20000);
-  if (!Number.isFinite(timeoutMs) || timeoutMs < 100) throw Error('Invalid LLM timeout');
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100) throw Error('Invalid LLM timeout');
   if (
     env.MONOPOLY_AI_REASONING_EFFORT &&
     !['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(

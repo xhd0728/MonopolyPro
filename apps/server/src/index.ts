@@ -298,25 +298,43 @@ if (existsSync(clientDir)) {
   );
   app.get('/', (_req, res) => res.sendFile(resolve(clientDir, 'index.html')));
 }
+// Body-parser errors can contain the raw body in their message. Keep both the response and
+// logs limited to a fixed classification, including malformed recovery/password requests.
+const bodyErrors = new Map([
+  ['entity.parse.failed', { status: 400, message: 'JSON 格式无效' }],
+  ['entity.too.large', { status: 413, message: '请求体过大' }],
+  ['charset.unsupported', { status: 415, message: '不支持的字符编码' }],
+  ['encoding.unsupported', { status: 415, message: '不支持的内容编码' }],
+  ['request.aborted', { status: 400, message: '请求已中断' }],
+  ['request.size.invalid', { status: 400, message: '请求长度无效' }],
+]);
 app.use(
   (error: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    const bodyError = bodyErrors.get((error as Error & { type?: string }).type ?? '');
     const status =
-      error instanceof RequestError ? error.status : error instanceof ZodError ? 400 : 500;
+      bodyError?.status ??
+      (error instanceof RequestError ? error.status : error instanceof ZodError ? 400 : 500);
+    const publicMessage =
+      bodyError?.message ??
+      (error instanceof ZodError
+        ? '请求格式无效'
+        : status === 500
+          ? '服务暂时不可用'
+          : error.message);
     console.error(
       JSON.stringify({
         level: status < 500 ? 'warn' : 'error',
         event: 'http_error',
         path: req.path,
-        message: error.message,
+        message: bodyError
+          ? bodyError.message
+          : error instanceof ZodError
+            ? '请求格式无效'
+            : error.message,
       }),
     );
     res.status(status).json({
-      error:
-        error instanceof ZodError
-          ? '请求格式无效'
-          : status === 500
-            ? '服务暂时不可用'
-            : error.message,
+      error: publicMessage,
     });
   },
 );

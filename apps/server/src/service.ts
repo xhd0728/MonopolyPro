@@ -362,13 +362,16 @@ export class GameService {
       403,
     );
     // A seat handed to a bot (or removed) can no longer be taken back with an old grant.
-    const seat = this.peek(code).seats.find((s) => s.id === grant.seatId);
+    const record = this.peek(code);
+    this.ensureOpen(record);
+    const seat = record.seats.find((s) => s.id === grant.seatId);
     ensure(seat && !seat.bot, '席位已交给机器人或已移出', 403);
     return grant.seatId;
   }
   connected(code: string, id: string) {
     const record = this.record(code),
       seat = record.seats.find((s) => s.id === id);
+    this.ensureOpen(record);
     ensure(seat, '席位不存在');
     seat.connected = true;
     seat.disconnectedAt = null;
@@ -708,6 +711,7 @@ export class GameService {
     const cmd = commandSchema.parse(input),
       r = this.record(code),
       seat = r.seats.find((s) => s.id === id);
+    this.ensureOpen(r);
     ensure(seat && !seat.spectator && !seat.bot, '观众或机器人席位不能执行游戏动作', 403);
     // A player who acts is back at the table.
     if (seat.afk && cmd.action.type !== 'guess') seat.afk = false;
@@ -755,6 +759,7 @@ export class GameService {
     const emote = z.enum(EMOTES).parse(input);
     const r = this.peek(code),
       seat = r.seats.find((s) => s.id === id);
+    this.ensureOpen(r);
     ensure(seat, '席位不存在');
     const key = `${r.code}:${id}`,
       now = this.now();
@@ -769,6 +774,7 @@ export class GameService {
     const text = z.string().trim().min(1).max(200).parse(input),
       r = this.record(code),
       seat = r.seats.find((s) => s.id === id);
+    this.ensureOpen(r);
     ensure(seat, '席位不存在');
     r.chat.push({ id: randomUUID(), name: seat.name, text, at: this.now() });
     this.touch(r);

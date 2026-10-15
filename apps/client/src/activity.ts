@@ -41,11 +41,14 @@ export interface Row {
   detail?: string;
   trace?: GameEvent['aiTrace'];
 }
+/** Resolve the event's news, including when a later round has already changed game.news. */
+export function newsForEvent(e: GameEvent) {
+  return e.kind === 'news' ? NEWS.find((n) => e.text.includes(`世界新闻「${n.name}」`)) : undefined;
+}
 export function describeActivity(e: GameEvent, game: GameView, map: MapDefinition): Row {
   const drawn = e.card ? deckCardById(e.card) : undefined;
   const hand = e.card ? CARDS.find((c) => c.id === e.card) : undefined;
-  const news =
-    e.kind === 'news' ? NEWS.find((n) => e.text.includes(`世界新闻「${n.name}」`)) : undefined;
+  const news = newsForEvent(e);
   const tile = e.tile === undefined ? undefined : map.tiles[e.tile];
   const icon =
     news?.icon ||

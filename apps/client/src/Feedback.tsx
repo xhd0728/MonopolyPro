@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { CARDS, countryFlag, deckCardById, newsById } from '../../../packages/content/src/index.ts';
+import { CARDS, countryFlag, deckCardById } from '../../../packages/content/src/index.ts';
 import {
   EMOTES,
   type Emote,
@@ -11,6 +11,7 @@ import {
   type SpotKind,
 } from '../../../packages/shared/src/index.ts';
 import { serverTime } from './clock.tsx';
+import { newsForEvent } from './activity.ts';
 import { play, type Cue } from './sound.ts';
 /**
  * Sound for an event: everything that involves the viewer, plus a few table-wide moments
@@ -136,7 +137,7 @@ export function Headlines({
       const tile = e.tile === undefined ? undefined : map.tiles[e.tile];
       const card = e.card ? CARDS.find((c) => c.id === e.card) : undefined;
       const drawn = e.card ? deckCardById(e.card) : undefined;
-      const news = e.spot === 'news' && game.news ? newsById(game.news.id) : undefined;
+      const news = newsForEvent(e);
       const who = game.players.find((p) => p.id === e.actor);
       next.push({
         key: `e${e.id}`,

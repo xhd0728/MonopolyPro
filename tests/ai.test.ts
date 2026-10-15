@@ -167,6 +167,21 @@ test('malformed, oversized, rejected or timed-out model output safely falls back
   assert.throws(() => readAiConfig({ MONOPOLY_AI_ENABLED: 'true' }));
   store.close();
 });
+test('AI timeout configuration accepts integer milliseconds and rejects values that break AbortSignal.timeout', () => {
+  const env = {
+    MONOPOLY_AI_ENABLED: 'true',
+    MONOPOLY_AI_BASE_URL: config.baseUrl,
+    MONOPOLY_AI_KEY: config.key,
+    MONOPOLY_AI_MODEL: config.model,
+  };
+  assert.equal(readAiConfig({ ...env, MONOPOLY_AI_TIMEOUT_MS: '20000' })?.timeoutMs, 20000);
+  assert.equal(readAiConfig({ ...env, MONOPOLY_AI_TIMEOUT_MS: '200000' })?.timeoutMs, 120000);
+  for (const value of ['20000.5', 'NaN', 'Infinity', '99', '-1'])
+    assert.throws(
+      () => readAiConfig({ ...env, MONOPOLY_AI_TIMEOUT_MS: value }),
+      /Invalid LLM timeout/,
+    );
+});
 test('async AI cannot commit a stale decision after another action or shutdown', async () => {
   let resolve!: (decision: AiDecision) => void,
     proposals: any[] = [];

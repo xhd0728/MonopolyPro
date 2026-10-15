@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { createGame, viewFor } from '../packages/engine/src/index.ts';
 import { DEFAULT_SETTINGS, type Seat } from '../packages/shared/src/index.ts';
 import { BOARD, NEWS, mapById } from '../packages/content/src/index.ts';
-import { activityRows, describeActivity } from '../apps/client/src/activity.ts';
+import { activityRows, describeActivity, newsForEvent } from '../apps/client/src/activity.ts';
 import { TradeDialog } from '../apps/client/src/Trade.tsx';
 function game() {
   const seats: Seat[] = ['p0', 'p1'].map((id, i) => ({
@@ -37,9 +37,11 @@ test('historical news preserves its actual news and country-specific effect afte
     text: `第 2 轮世界新闻「${old.name}」：中国、日本本轮租金 +50%`,
   };
   const described = describeActivity(e, view, mapById(g.settings.mapId));
+  assert.equal(newsForEvent(e), old);
   assert.match(described.title!, new RegExp(old.name));
   assert.equal(described.body, '中国、日本本轮租金 +50%');
   const finale = { ...e, kind: 'finale', text: '终局冲刺：租金提高 50%' };
+  assert.equal(newsForEvent(finale), undefined);
   assert.equal(describeActivity(finale, view, mapById(g.settings.mapId)).body, finale.text);
 });
 test('important activity keeps AI explanations even when the original dice row is routine', () => {

@@ -110,6 +110,31 @@ async function until(fn: () => boolean, timeout = 5000) {
     await sleep(20);
   }
 }
+test('invalid HTTP bodies get client errors without publishing raw request data to logs', async () => {
+  const f = await fixture();
+  try {
+    const secret = 'PRIVATE_PARSER_INPUT';
+    const malformed = await fetch(f.base + '/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: secret,
+    });
+    assert.equal(malformed.status, 400);
+    assert.deepEqual(await malformed.json(), { error: 'JSON 格式无效' });
+    const large = await fetch(f.base + '/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'x'.repeat(9000) }),
+    });
+    assert.equal(large.status, 413);
+    assert.deepEqual(await large.json(), { error: '请求体过大' });
+    await sleep(30);
+    assert.doesNotMatch(f.output, new RegExp(secret));
+    assert.equal((await fetch(f.base + '/healthz')).status, 200);
+  } finally {
+    await f.cleanup();
+  }
+});
 test('real sockets: 2/4/6 seats, spectator privacy, concurrency, duplicate, stale commands and crash restore', async () => {
   const f = await fixture();
   try {

@@ -17,6 +17,31 @@ const fixture = () => {
   service.lobby(c.code, c.seatId, { type: 'start' });
   return { store, service, c, time: (t: number) => (now = t) };
 };
+test('closing a room revokes unused grants and rejects late mutations', () => {
+  const { store, service, c } = fixture();
+  try {
+    const grant = service.grant(c.code, c.token);
+    service.lobby(c.code, c.seatId, { type: 'close' });
+    const closed = store.get(c.code);
+    assert.throws(() => service.consumeGrant(c.code, grant.key), /房间已结束/);
+    assert.throws(() => service.connected(c.code, c.seatId), /房间已结束/);
+    assert.throws(() => service.chat(c.code, c.seatId, '迟到消息'), /房间已结束/);
+    assert.throws(() => service.emote(c.code, c.seatId, '👍'), /房间已结束/);
+    assert.throws(
+      () =>
+        service.command(c.code, c.seatId, {
+          id: 'late-command',
+          revision: 0,
+          action: { type: 'roll' },
+        }),
+      /房间已结束/,
+    );
+    assert.deepEqual(store.get(c.code), closed);
+  } finally {
+    service.dispose();
+    store.close();
+  }
+});
 test('authenticated lobby, locked room, private views and durable idempotent commands', () => {
   const { store, service, c } = fixture();
   assert.throws(() => service.join(c.code, { name: '乙', password: 'wrong' }));
