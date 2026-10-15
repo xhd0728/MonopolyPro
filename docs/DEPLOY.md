@@ -48,13 +48,12 @@ PUBLIC_ORIGIN=https://your-domain.example
 MAX_ROOMS=200
 DISCONNECT_TAKEOVER_MS=15000
 BOT_STEP_MS=1200
-DECISION_TIMEOUT_MS=45000
 ROOM_IDLE_MS=1800000
 ROOM_EMPTY_CLOSE_MS=180000
 ROOM_CLOSED_TTL_MS=600000
 ```
 
-systemd 读取 EnvironmentFile，应用本身不自动读取 `.env`。本地可用 Node 的 `--env-file=.env` 参数。密码与恢复凭证不要写入日志、工单、链接或提交记录。
+systemd 读取 EnvironmentFile。应用在非测试环境也会自动读取工作目录的 `.env`（如果存在），已设置的环境变量优先；本地直接运行 `pnpm start` 即可。玩家操作时限由房间设置控制，旧的 `DECISION_TIMEOUT_MS` 环境变量不再生效。密码与恢复凭证不要写入日志、工单、链接或提交记录。
 
 ```sh
 sudo install -m 644 deploy/monopolypro.service /etc/systemd/system/monopolypro.service

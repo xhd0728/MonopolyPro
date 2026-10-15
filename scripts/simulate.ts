@@ -14,6 +14,8 @@ import {
 import { botDecision } from '../packages/engine/src/bot.ts';
 
 const games = Number(process.argv[2] ?? 100);
+if (!Number.isSafeInteger(games) || games < 1 || games > 10000)
+  throw Error('Simulation count must be an integer from 1 to 10000');
 let seed = 7;
 const randomInt = (max: number) => {
   seed = (seed * 16807) % 2147483647;
@@ -104,3 +106,4 @@ console.log({
   explainedDecisions: `${Math.round((totals.reasons / totals.steps) * 100)}%`,
   ends,
 });
+if (totals.illegal || totals.finished !== games) process.exitCode = 1;

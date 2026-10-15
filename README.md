@@ -29,6 +29,8 @@ pnpm start
 
 `pnpm test` 验证规则、真实 WebSocket、恢复和模型回退。先构建服务端，再运行测试。`pnpm test:ui` 验证浏览器流程；`pnpm test:load` 启动隔离服务并进行 20 房间 / 120 席位 / 30 分钟测试。产物保存在忽略的 `artifacts/`。
 
+仓库的 [自动检查与依赖更新](docs/CI.md) 覆盖格式、类型、构建、规则模拟、浏览器流程、依赖漏洞和 CodeQL；Dependabot 定期提交依赖与 Action 更新 PR。[Monopoly 求解器调研](docs/SOLVERS.md) 说明公开研究的适用范围与本项目的策略评估方向。
+
 ## 工程结构
 
 - `packages/shared`：共享契约与输入校验。

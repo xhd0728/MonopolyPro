@@ -17,8 +17,8 @@
     "test:ui": "playwright test",
     "test:load": "tsx scripts/load.ts",
     "release": "node scripts/release.mjs",
-    "format": "prettier --write apps packages tests scripts *.ts *.json *.yaml",
-    "format:check": "prettier --check apps packages tests scripts *.ts *.json *.yaml"
+    "format": "prettier --write apps packages tests scripts .github *.ts *.json *.yaml",
+    "format:check": "prettier --check apps packages tests scripts .github *.ts *.json *.yaml"
   },
   "dependencies": {
     "@colyseus/core": "0.18.18",
