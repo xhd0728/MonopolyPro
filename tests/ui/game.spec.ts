@@ -305,11 +305,6 @@ test('six player finances remain readable on desktop and mobile; a second window
   await page.getByRole('button', { name: '保存昵称' }).click();
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   await expect(page.locator('.player-card[data-self="true"]')).toContainText('新名字');
-  // Auto-play on and off.
-  await page.locator('.meta-afk').click();
-  await expect(page.locator('.player-card[data-self="true"]')).toContainText('挂机托管中');
-  await page.locator('.meta-afk').click();
-  await expect(page.locator('.player-card[data-self="true"]')).not.toContainText('挂机托管中');
   await page.screenshot({ path: 'artifacts/ui/desktop-six-players.png', fullPage: true });
   const clipped = await page
     .locator('.country-tile')
@@ -349,8 +344,20 @@ test('six player finances remain readable on desktop and mobile; a second window
   await expect(page.locator('.connection')).toContainText('席位已在其他窗口恢复');
   await expect(page.getByRole('button', { name: '快捷掷骰出发' })).toBeDisabled();
   await openPanel(replacement);
+  const beforeRoll = await replacement.locator('.board-meta').getAttribute('data-revision');
   await replacement.getByRole('button', { name: '掷骰出发', exact: true }).click();
-  await expect(replacement.locator('.board-meta')).not.toHaveAttribute('data-revision', '0');
+  await expect(replacement.locator('.board-meta')).not.toHaveAttribute(
+    'data-revision',
+    beforeRoll!,
+  );
+  // Auto-play can immediately use cards or advance the turn, so exercise it only after
+  // checking starting finances and the replacement window's acknowledged roll.
+  await replacement.locator('.meta-afk').click();
+  await expect(replacement.locator('.player-card[data-self="true"]')).toContainText('挂机托管中');
+  await replacement.locator('.meta-afk').click();
+  await expect(replacement.locator('.player-card[data-self="true"]')).not.toContainText(
+    '挂机托管中',
+  );
   await expect(page.locator('.connection')).toContainText('席位已在其他窗口恢复');
   expect(errors).toEqual([]);
   await replacement.close();

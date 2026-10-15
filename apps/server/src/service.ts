@@ -512,6 +512,9 @@ export class GameService {
         botMode: z.enum(['rule', 'llm']).optional(),
         botLevel: z.enum(['easy', 'normal', 'hard']).optional(),
         settings: settingsSchema.optional(),
+        // Validate provided keys here and values after merging with the committed settings.
+        // Applying defaults to a partial schema would reset choices omitted from the patch.
+        settingsPatch: z.partialRecord(settingsSchema.keyof(), z.unknown()).optional(),
         seatId: z.string().optional(),
       })
       .parse(input);
@@ -624,12 +627,16 @@ export class GameService {
       seat.ready = false;
     }
     if (data.type === 'settings') {
-      ensure(host && data.settings, '仅房主可修改设置');
+      ensure(host && (data.settings || data.settingsPatch), '仅房主可修改设置');
+      ensure(!(data.settings && data.settingsPatch), '请只提交一种设置更新');
+      const settings = settingsSchema.parse(
+        data.settingsPatch ? { ...r.settings, ...data.settingsPatch } : data.settings,
+      );
       ensure(
-        r.seats.filter((s) => !s.spectator).length <= data.settings.maxPlayers,
+        r.seats.filter((s) => !s.spectator).length <= settings.maxPlayers,
         '当前席位超过人数设置',
       );
-      r.settings = data.settings;
+      r.settings = settings;
       for (const s of r.seats) s.ready = s.bot;
     }
     if (data.type === 'addBot') {

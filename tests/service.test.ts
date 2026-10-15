@@ -42,6 +42,43 @@ test('closing a room revokes unused grants and rejects late mutations', () => {
     store.close();
   }
 });
+test('lobby setting patches merge with committed settings without resetting other choices', () => {
+  const store = new Store(':memory:');
+  const service = new GameService(store);
+  try {
+    const chosen = {
+      ...DEFAULT_SETTINGS,
+      maxPlayers: 4,
+      rounds: 20,
+      turnSeconds: 120,
+      auction: true,
+    };
+    const c = service.create({ name: '房主', settings: chosen });
+    service.lobby(c.code, c.seatId, { type: 'settings', settingsPatch: { maxPlayers: 6 } });
+    service.lobby(c.code, c.seatId, { type: 'settings', settingsPatch: { size: 44 } });
+    assert.deepEqual(store.get(c.code)!.settings, { ...chosen, maxPlayers: 6, size: 44 });
+    const guest = service.join(c.code, { name: '访客' });
+    const before = store.get(c.code);
+    for (const [id, settingsPatch] of [
+      [guest.seatId, { initialCash: 10000 }],
+      [c.seatId, { size: 50 }],
+      [c.seatId, { maxPlayers: 7 }],
+      [c.seatId, { unknownOption: true }],
+    ] as const) {
+      assert.throws(() => service.lobby(c.code, id, { type: 'settings', settingsPatch }));
+      assert.deepEqual(store.get(c.code), before);
+    }
+    for (let i = 0; i < 4; i++) service.lobby(c.code, c.seatId, { type: 'addBot' });
+    const full = store.get(c.code);
+    assert.throws(() =>
+      service.lobby(c.code, c.seatId, { type: 'settings', settingsPatch: { maxPlayers: 4 } }),
+    );
+    assert.deepEqual(store.get(c.code), full);
+  } finally {
+    service.dispose();
+    store.close();
+  }
+});
 test('authenticated lobby, locked room, private views and durable idempotent commands', () => {
   const { store, service, c } = fixture();
   assert.throws(() => service.join(c.code, { name: '乙', password: 'wrong' }));

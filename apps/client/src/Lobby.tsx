@@ -58,8 +58,7 @@ export function Lobby({
   const [name, setName] = useState(me?.name ?? '');
   useEffect(() => setName(me?.name ?? ''), [me?.name]);
   const [password, setPassword] = useState<string | null>(null);
-  const set = (patch: Partial<RoomSettings>) =>
-    lobby('settings', { settings: { ...room.settings, ...patch } });
+  const set = (patch: Partial<RoomSettings>) => lobby('settings', { settingsPatch: patch });
   // The host's "start" counts as ready, so only the others need to confirm.
   const isReady = (s: (typeof players)[number]) => s.ready || s.id === room.hostId;
   const ready = players.filter(isReady).length;
