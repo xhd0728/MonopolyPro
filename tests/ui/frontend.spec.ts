@@ -17,8 +17,19 @@ for (const viewport of [
     await page.getByLabel('我的昵称').fill('界'.repeat(16));
     await page.getByLabel('我的昵称').press('Enter');
     await expect(page.locator('.seat-rename button')).toHaveCount(0);
-    await page.getByLabel('席位上限').selectOption('6');
-    await page.getByLabel('地图大小').selectOption('44');
+    // Dispatch in one browser task so no server reply can refresh the view between edits.
+    await page.evaluate(() => {
+      for (const [label, value] of [
+        ['席位上限', '6'],
+        ['地图大小', '44'],
+      ]) {
+        const select = document.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!;
+        select.value = value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    await expect(page.getByLabel('席位上限')).toHaveValue('6');
+    await expect(page.getByLabel('地图大小')).toHaveValue('44');
     for (let i = 0; i < 5; i++) {
       await page.getByRole('button', { name: '添加规则机器人', exact: true }).first().click();
       await expect(page.locator('.seat-row:not(.empty)')).toHaveCount(i + 2);
