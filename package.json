@@ -21,7 +21,7 @@
     "format:check": "prettier --check apps packages tests scripts .github *.ts *.json *.yaml"
   },
   "dependencies": {
-    "@colyseus/core": "0.18.18",
+    "@colyseus/core": "0.18.19",
     "@colyseus/sdk": "0.18.5",
     "@colyseus/ws-transport": "0.18.4",
     "country-flag-emoji-polyfill": "0.1.10",
